@@ -469,7 +469,7 @@ export function parseBacklog(text: string, source: string = BACKLOG_RELATIVE_PAT
     }
     const content = parseSection(section, source);
     if (content.priority === undefined || content.dependsOn === undefined) {
-      throw new BacklogError(source, section.line, row.id, 'missing "优先级：N　依赖：…" line');
+      throw new BacklogError(source, section.line, row.id, 'missing "优先级：N\u3000依赖：…" line');
     }
     if (content.priority !== row.priority) {
       throw new BacklogError(

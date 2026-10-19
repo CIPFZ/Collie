@@ -257,3 +257,26 @@ export const GitHubWorkflowRunsSchema = z.object({
   total_count: z.number().int().nonnegative(),
   workflow_runs: z.array(GitHubWorkflowRunSchema),
 });
+
+// ---------------------------------------------------------------------------
+// External: npm manifests, read at base_sha and head_sha for deps_diff
+// ---------------------------------------------------------------------------
+
+const DependencyMap = z.record(z.string(), z.string());
+
+export const PackageJsonSchema = z.object({
+  dependencies: DependencyMap.optional(),
+  devDependencies: DependencyMap.optional(),
+});
+export type PackageJson = z.infer<typeof PackageJsonSchema>;
+
+/** package-lock.json v2/v3: only what the licence scan needs. */
+export const PackageLockSchema = z.object({
+  packages: z
+    .record(
+      z.string(),
+      z.object({ version: z.string().optional(), license: z.string().optional() }),
+    )
+    .optional(),
+});
+export type PackageLock = z.infer<typeof PackageLockSchema>;
