@@ -193,3 +193,27 @@ export const ReportSchema = z.strictObject({
   open_questions: z.array(z.string()),
 });
 export type Report = z.infer<typeof ReportSchema>;
+
+// ---------------------------------------------------------------------------
+// External: GitHub Actions REST API (GET /repos/{owner}/{repo}/actions/runs)
+// ---------------------------------------------------------------------------
+
+/** Only the fields Collie reads; GitHub adds fields freely, so unknown keys are stripped. */
+export const GitHubWorkflowRunSchema = z.object({
+  id: z.number().int(),
+  workflow_id: z.number().int(),
+  name: z.string().nullable(),
+  event: z.string(),
+  head_branch: z.string().nullable(),
+  head_sha: z.string(),
+  status: z.string().nullable(),
+  conclusion: z.string().nullable(),
+  html_url: z.string(),
+  created_at: z.string(),
+});
+export type GitHubWorkflowRun = z.infer<typeof GitHubWorkflowRunSchema>;
+
+export const GitHubWorkflowRunsSchema = z.object({
+  total_count: z.number().int().nonnegative(),
+  workflow_runs: z.array(GitHubWorkflowRunSchema),
+});
