@@ -1,0 +1,37 @@
+# Collie 配置文件（由 `collie init` 从 templates/collie.toml 生成）
+# 所有阈值在此，代码中禁止裸写（CONSTRAINTS 铁律 11）；默认值与 SPEC 3.1 一致。
+
+schema_version = 1
+
+[project]
+name = "{{name}}"
+repo = "{{repo}}"
+
+[agent.worker]
+# SPEC 3.1
+model = "claude-opus-4-6"
+allowed_tools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
+max_turns = 120
+
+[agent.reviewer]
+# SPEC 3.1：无 Write/Edit，物理上无法改代码（ROLES 2 R4、铁律 6）
+model = "claude-opus-4-6"
+allowed_tools = ["Read", "Glob", "Grep", "Bash"]
+max_turns = 60
+
+[limits]
+stall_secs = 90          # SPEC 3.1；事件流静默判定卡死（v0.2 生效）
+progress_secs = 900      # SPEC 3.1；有事件但无产出判定空转（v0.2 生效）
+wallclock_secs = 2700    # SPEC 3.1；单批次墙钟硬顶
+resume_max = 2           # SPEC 3.1；resume 上限（v0.2 生效）
+fix_max = 2              # SPEC 3.1；同批次 FIX 上限（v0.3 生效）
+dry_k = 2                # SPEC 3.1；连续 dry 轮数（v0.5 生效）
+
+[verify]
+# SPEC 3.1；reviewer 必跑的全局命令，批次级命令在 task 中追加
+commands = ["npm run lint", "npm run typecheck", "npm test"]
+
+[ci]
+# SPEC 3.1；用于核对 CI 实际监听分支，防止「假全绿」（铁律 5）
+provider = "github-actions"
+expected_branch = "main"
