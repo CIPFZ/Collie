@@ -5,13 +5,13 @@
 
 更新时间：2026-10-16
 当前版本：v0.1 取证
-当前批次：v01-b01 已 PASS（附条件）；v01-b02 待签发
-CI 实际状态：worker 声称 4 次 `push / main / success`；R4 因 API 限流未能独立核实，待项目所有者目视确认
+当前批次：v01-b02（已签发，待实现）
+CI 实际状态：绿。v01-b01 四次运行由项目所有者目视确认均为 `main / success`
 
 ## v0.1 批次（对应 docs/backlog.md）
 
-- [x] v01-b01 工程骨架与基础设施　← PASS（附条件），verdict 见 `.collie/batches/v01-b01/verdict.md`
-- [ ] v01-b02 批次解析与 worker 角色
+- [x] v01-b01 工程骨架与基础设施　← PASS，verdict 见 `.collie/batches/v01-b01/verdict.md`
+- [ ] v01-b02 批次解析与 worker 角色　← 已签发 task.md（base_sha 0a0ea43）
 - [ ] v01-b03 审核角色与仲裁
 
 ## 已验证完成（经审核 Agent 实测取证）
@@ -25,7 +25,7 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 
 ## 进行中
 
-无。等待项目所有者对三项裁决与 CI 目视确认后签发 v01-b02。
+v01-b02。task 信封见 `.collie/batches/v01-b02/task.md`。
 
 ## 已知问题
 
@@ -35,8 +35,7 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 
 ## 开放问题（需项目所有者决策）
 
-- **ADR-003 许可证白名单作用范围**：A 只管运行时 / B 全树列例外 / C 全树无例外。R1 建议 A
-- CI 实际结论目视确认：`134ea31` `3f4992d` `e5c7d3f` `e99fde3` 四次均为 `main / success`？
+无。
 
 ## 本轮裁决记录（v01-b01 汇报，2026-10-16）
 
@@ -51,9 +50,8 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 
 - ADR-001 TypeScript 选型（已批准）
 - ADR-002 开发工具链依赖批准与 SPEC 2.2 勘误（已批准，§4 于本轮修订）
-- ADR-003 许可证白名单作用范围（**待批准**）
+- ADR-003 许可证白名单作用范围（已批准，方案 A：白名单只管运行时树）
 
 ## 下次会话从这里继续
 
-项目所有者裁决 ADR-003 与 CI 目视确认后，R1 签发 v01-b02。
-worker 下轮开工前须先 `git pull` 并提交推送其本地的 `.collie/batches/v01-b01/report.md`。
+v01-b02 已签发。worker 开工前先 `git pull` 到 task 提交之后，并先推送其本地的 v01-b01 report.md。
