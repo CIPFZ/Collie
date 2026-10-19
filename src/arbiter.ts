@@ -30,7 +30,10 @@ export interface ArbiterDecision {
   /** 1-8, the rule that decided. */
   rule: number;
   reason: string;
-  /** Mismatches recorded by rules 5-7 (to be journaled as claim.mismatch). */
+  /**
+   * Claims contradicted by evidence, journaled as claim.mismatch: rules 5-7 per
+   * SPEC 4.3, plus the denied claim behind a rule 2 or 3 BLOCK.
+   */
   mismatches: ClaimMismatch[];
   downgraded: boolean;
 }
@@ -117,13 +120,25 @@ export function arbitrate(input: ArbiterInput): ArbiterDecision {
   const original = verdict.verdict;
   const { claims } = input;
 
-  // Rule 2: protected files changed.
+  // Rule 2: protected files changed. The BLOCK does not depend on what was claimed,
+  // but a denial is recorded so the evidence chain shows the false claim.
   if (evidence.spec_diff_lines > 0) {
+    const denied: ClaimMismatch[] = claims.spec_touched
+      ? []
+      : [
+          {
+            rule: RULE_SPEC_TOUCHED,
+            field: 'spec_touched',
+            claimed: false,
+            actual: { spec_diff_lines: evidence.spec_diff_lines },
+          },
+        ];
     return decide(
       original,
       'BLOCK',
       RULE_SPEC_TOUCHED,
-      `SPEC changed by ${String(evidence.spec_diff_lines)} lines`,
+      `protected files changed by ${String(evidence.spec_diff_lines)} lines`,
+      denied,
     );
   }
 
@@ -135,7 +150,19 @@ export function arbitrate(input: ArbiterInput): ArbiterDecision {
       ...(unapproved.length > 0 ? [`unapproved dependencies: ${unapproved.join(', ')}`] : []),
       ...(copyleft.length > 0 ? [`strong copyleft: ${copyleft.join(', ')}`] : []),
     ];
-    return decide(original, 'BLOCK', RULE_DEPENDENCIES, parts.join('; '));
+    const undeclared = evidence.deps_diff.filter((d) => !claims.new_deps.includes(packageName(d)));
+    const denied: ClaimMismatch[] =
+      undeclared.length === 0
+        ? []
+        : [
+            {
+              rule: RULE_DEPENDENCIES,
+              field: 'new_deps',
+              claimed: claims.new_deps,
+              actual: evidence.deps_diff,
+            },
+          ];
+    return decide(original, 'BLOCK', RULE_DEPENDENCIES, parts.join('; '), denied);
   }
 
   // Rule 4: the reviewer itself found claims that do not hold.

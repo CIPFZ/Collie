@@ -94,12 +94,25 @@ describe('arbiter: rule 1, unparseable verdict', () => {
 });
 
 describe('arbiter: rule 2, SPEC touched', () => {
-  it('blocks a PASS when spec_diff_lines > 0, regardless of the verdict', () => {
+  it('blocks a PASS when spec_diff_lines > 0, recording the false spec_touched claim', () => {
     expect(arbitrate(input({ evidence: { spec_diff_lines: 3 } }))).toMatchObject({
       final: 'BLOCK',
       original: 'PASS',
       rule: 2,
       downgraded: true,
+      mismatches: [
+        { rule: 2, field: 'spec_touched', claimed: false, actual: { spec_diff_lines: 3 } },
+      ],
+    });
+  });
+
+  it('still blocks an admitted SPEC change, without a mismatch', () => {
+    expect(
+      arbitrate(input({ claims: { spec_touched: true }, evidence: { spec_diff_lines: 3 } })),
+    ).toMatchObject({
+      final: 'BLOCK',
+      rule: 2,
+      mismatches: [],
     });
   });
 });
@@ -117,6 +130,18 @@ describe('arbiter: rule 3, dependencies', () => {
     const decision = arbitrate(input({ evidence: { deps_diff: ['yaml', 'left-pad@1.3.0'] } }));
     expect(decision).toMatchObject({ final: 'BLOCK', rule: 3 });
     expect(decision.reason).toBe('unapproved dependencies: left-pad@1.3.0');
+  });
+
+  it('records undeclared dependencies as a denied new_deps claim', () => {
+    const decision = arbitrate(
+      input({
+        claims: { new_deps: ['yaml'] },
+        evidence: { deps_diff: ['yaml', 'left-pad@1.3.0'] },
+      }),
+    );
+    expect(decision.mismatches).toEqual([
+      { rule: 3, field: 'new_deps', claimed: ['yaml'], actual: ['yaml', 'left-pad@1.3.0'] },
+    ]);
   });
 
   it('handles scoped package names', () => {
@@ -261,7 +286,8 @@ describe('arbiter: order matters, first hit wins', () => {
     const decision = arbitrate(
       input({ evidence: { spec_diff_lines: 1, remote_has_head: false, ci_branch_matched: false } }),
     );
-    expect(decision).toMatchObject({ final: 'BLOCK', rule: 2, mismatches: [] });
+    expect(decision).toMatchObject({ final: 'BLOCK', rule: 2 });
+    expect(decision.mismatches.map((m) => m.rule)).toEqual([2]);
   });
 
   it('rule 3 beats rule 4', () => {
