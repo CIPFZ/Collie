@@ -16,7 +16,8 @@
 | 1 | v01-b01 | 工程骨架与基础设施 | — | passed |
 | 2 | v01-b02 | 批次解析与 worker 角色 | v01-b01 | passed |
 | 3 | v01-b03 | 取证工具与审核角色 | v01-b02 | passed |
-| 4 | v01-b04 | 仲裁、CLI 与三场景验证 | v01-b03 | running |
+| 4 | v01-b04 | 仲裁、CLI 与三场景验证 | v01-b03 | passed |
+| 5 | v01-b05 | 真实 runner | v01-b04 | running |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -159,3 +160,32 @@ R4 读代码核验项：八条规则各有独立用例且顺序敏感；三个�
 额外禁止：
 - 用约束解码强制 verdict 三值（必须由 arbiter 解析校验）
 - 实现 `runner/claude.ts`（真实 runner 为 v0.1 收尾单独批次，视 b04 结果决定）
+
+## v01-b05 真实 runner
+
+优先级：5　依赖：v01-b04
+
+条目：
+1. `src/runner/claude.ts`：基于 `@anthropic-ai/claude-agent-sdk` 实现 `AgentRunner`；
+   构造时接收 `CollieConfig`，按 role 取 model / allowedTools / maxTurns；
+   透传 `signal`；收集最终回复为 `finalText`；NDJSON 事件经 `onEvent` 回调；
+   SDK 特有概念不泄漏到 `runner/` 之外（ROADMAP 0.4）
+2. `collie run` 接入真实 runner：默认用 `claude.ts`，`--runner fake` 保留测试路径；
+   `collie init` 生成的配置模板可直接用
+3. 在本仓库用真实 runner 跑一次 `collie run v01-b05-smoke`（一个只改 README 一行的烟雾批次），
+   把完整 task / report / verdict / progress 落盘作为第一个真实样本
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
+| claude runner 单元测试（SDK 用替身） | `npm test -- test/runner-claude.test.ts` | exit 0 |
+| 烟雾批次样本存在 | `test -f .collie/batches/v01-b05-smoke/verdict.md` | exit 0 |
+
+额外禁止：
+- 测试中调用真实 SDK 或联网
+- 在 `runner/` 之外 import SDK

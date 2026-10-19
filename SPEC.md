@@ -407,7 +407,7 @@ reviewer 的 prompt 由 `roles/reviewer.ts` 从零组装，只允许包含：
 ### 4.3 arbiter 的强制降级
 
 ```
-输入：report.claims + verdict.evidence + verdict.verdict
+输入：report.claims + R2 自测的 evidence + verdict.verdict
 规则（按顺序，命中即停）：
 1. verdict 尾部 JSON 解析或校验失败            → BLOCK
 2. evidence.spec_diff_lines > 0                → BLOCK
@@ -425,7 +425,13 @@ reviewer 的 prompt 由 `roles/reviewer.ts` 从零组装，只允许包含：
 导致 M0 到 M6 全程「CI 全绿」其实从未触发过。此类失败在自动循环中会被放大，
 因为中间再没有人亲自核验远端。
 规则 7 是「声称 vs 实测」的比对而非仅检查 CI 状态：`claims.ci_passed` 为 worker 的声称，
-`ci_conclusion` 与 `ci_branch_matched` 为 R4 的实测（v01-b02 计划反馈后修订）。
+`ci_conclusion` 与 `ci_branch_matched` 为实测值。
+
+**证据来源（v01-b04 裁定）：arbiter 只依据 R2 自己用 `verify.ts` / `git.ts` / `ci.ts` 测出的 evidence，
+不使用 reviewer 报上来的 evidence。** 理由：reviewer 也是 LLM，可能被 worker 的产物误导；
+若仲裁采信它的 evidence，被骗的 reviewer 照抄 worker 说法即可让三个场景全部漏过（变异测试已证实）。
+reviewer 的 evidence 原样保存在 `verdict.md` 供人对照，但不参与仲裁。
+reviewer 的价值是「判断」（`verdict` 三值与 `gaps`），事实由 R2 自己测。
 
 ## 5. CLI 接口
 
