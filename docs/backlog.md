@@ -71,11 +71,17 @@ CI 是否实际触发且监听分支正确（GitHub API）。
 
 | 说明 | 命令 | 期望 |
 |---|---|---|
-| 代码规范与类型 | `npm run lint && npm run typecheck` | exit 0 |
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
 | backlog 解析正确 | `npm test -- test/backlog.test.ts` | exit 0 |
 | 拒绝不可判定验收 | `npm test -- test/backlog-reject.test.ts` | exit 0 |
 | fake runner 闭环 | `npm test -- test/worker.test.ts` | exit 0 |
 | task.md 格式正确 | `npm test -- test/task-envelope.test.ts` | exit 0 |
+| roles 不直接依赖 SDK 或 fake | `test -d src/roles && ! grep -rE "from ['\"](@anthropic-ai\|\.\./runner/fake\|\./fake)" src/roles/` | exit 0 |
+
+R4 读代码核验项（非命令判定）：测试内容是否覆盖 task.md「测试内容要求」；
+`src/roles/` 是否经 ESLint `no-restricted-imports` 物理隔离 SDK 与 fake。
 
 额外禁止：
 - 在 `roles/` 中直接调用 Agent SDK（必须经 runner 接口）

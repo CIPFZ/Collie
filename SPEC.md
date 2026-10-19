@@ -190,10 +190,12 @@ R2 写，R3 读。Markdown 正文 + YAML frontmatter。
 schema_version: 1
 run_id: r-0007
 batch_id: v01-b03
-base_sha: a1b2c3d
+base_sha: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
 created_at: 2026-10-16T12:00:00Z
 attempt: 1
 interrupted_at: null        # v0.2：上一轮中断位置，仅 R2 知道
+issued_by: collie           # 可选：签发者标识；人工占位期为 human-placeholder-r2
+revised_at: null            # 可选：重签时间，未重签为 null 或省略
 ---
 
 # 批次 v01-b03：事件日志写入
@@ -232,12 +234,13 @@ R3 写，R2 读，**R4 不读**。Markdown 四段正文 + 尾部围栏 JSON。
 {
   "schema_version": 1,
   "batch_id": "v01-b03",
-  "head_sha": "e4f5g6h",
+  "head_sha": "e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3",
   "claims": {
-    "commits": ["e4f5g6h"],
+    "commits": ["e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3"],
     "tests_passed": 47,
     "tests_failed": 0,
     "pushed": true,
+    "ci_passed": true,
     "new_deps": [],
     "spec_touched": false
   },
@@ -246,6 +249,14 @@ R3 写，R2 读，**R4 不读**。Markdown 四段正文 + 尾部围栏 JSON。
 ```
 
 `claims` 下所有字段的语义是「worker 的声称」，**默认不可信**，须经 R4 取证核对。
+
+字段说明（v01-b02 计划反馈后补充）：
+- `head_sha`：**最后一个代码提交**的 sha，不含随后的 `report(collie):` 信封提交。
+  R4 取证范围为 `base_sha..head_sha`，信封提交不在其中
+- `ci_passed`：worker 声称 CI 已对 `head_sha` 实际触发且通过。
+  此字段使场景 A 成为真正的「声称 vs 实测」比对（arbiter 规则 7 据此与 `ci_branch_matched` /
+  `ci_conclusion` 对照），而非只检查 CI 本身是否通过
+- sha 字段均须匹配 `/^[0-9a-f]{7,40}$/`
 
 ### 3.5 裁决信封（verdict.md）
 
@@ -376,17 +387,21 @@ reviewer 的 prompt 由 `roles/reviewer.ts` 从零组装，只允许包含：
 规则（按顺序，命中即停）：
 1. verdict 尾部 JSON 解析或校验失败            → BLOCK
 2. evidence.spec_diff_lines > 0                → BLOCK
-3. evidence.deps_diff 非空                     → BLOCK
+3. evidence.deps_diff 含未经 ADR 批准的运行时依赖，
+   或任何树出现强 copyleft（ADR-003）         → BLOCK
 4. claim_mismatches 非空                       → 若 verdict=PASS 则降为 FIX
 5. claims.pushed=true 但 remote_has_head=false → FIX + 记 claim.mismatch
 6. claims.tests_* 与 verify_results 不一致     → FIX + 记 claim.mismatch
-7. ci_branch_matched=false                     → FIX + 记 claim.mismatch
+7. claims.ci_passed=true 但 ci_conclusion≠success
+   或 ci_branch_matched=false                  → FIX + 记 claim.mismatch
 8. 否则采用 verdict 原值
 ```
 
 规则 7 的来源是一次真实教训：某仓库 CI 配置监听 `main` 而实际用 `master`，
 导致 M0 到 M6 全程「CI 全绿」其实从未触发过。此类失败在自动循环中会被放大，
 因为中间再没有人亲自核验远端。
+规则 7 是「声称 vs 实测」的比对而非仅检查 CI 状态：`claims.ci_passed` 为 worker 的声称，
+`ci_conclusion` 与 `ci_branch_matched` 为 R4 的实测（v01-b02 计划反馈后修订）。
 
 ## 5. CLI 接口
 
@@ -454,9 +469,10 @@ v0.1 分三个批次，优先级已排定（见 `docs/backlog.md`）。
 
 这三个场景是 v0.1 的唯一通过标准，用 `fake.ts` 构造，必须自动化可重跑。
 
-**场景 A 假 CI 全绿。** fake worker 产出 `claims.pushed=true` 且声称 CI 通过，
+**场景 A 假 CI 全绿。** fake worker 产出 `claims.pushed=true` 且 `claims.ci_passed=true`，
 但 `ci.ts` 查到的实际 run 监听分支与 `expected_branch` 不符（或根本无 run）。
-期望：`ci_branch_matched=false` → 裁定为 FIX，事件日志有 `claim.mismatch`。
+期望：`claims.ci_passed=true` 与实测 `ci_branch_matched=false`（或 `ci_conclusion≠success`）不符
+→ 裁定为 FIX，事件日志有 `claim.mismatch`。本场景验证的是声称与事实的比对，不只是 CI 状态。
 
 **场景 B 假测试数。** fake worker 声称 `tests_passed=47, tests_failed=0`，
 而 `verify.ts` 实跑结果为 3 个失败。
