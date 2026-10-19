@@ -14,6 +14,7 @@ import { createJournal, type Journal } from './journal.js';
 import { writeProgress } from './progress.js';
 import { readVerdict, runReviewer, verdictPath } from './roles/reviewer.js';
 import { buildTask, readReport, runWorker, taskPath, writeTask } from './roles/worker.js';
+import { CLAUDE_SDK_PACKAGE } from './runner/claude.js';
 import type { AgentRunner } from './runner/index.js';
 import type {
   Acceptance,
@@ -39,11 +40,11 @@ export const EXIT_CODES: Readonly<Record<VerdictValue | 'ERROR', number>> = {
 const MS_PER_SECOND = 1000;
 
 /**
- * Dependencies approved by SPEC 2.2 and ADR-002; rule 3 blocks anything else.
- * The agent SDK is listed in SPEC 2.2 but its licence is outside CONSTRAINTS
- * 铁律 13, so it stays off this list until ADR-004 rules (v01-b05 report).
+ * Dependencies approved by SPEC 2.2 and ADR-002, plus the platform SDK of the
+ * Claude runner (ADR-004, named by the runner itself); rule 3 blocks anything else.
  */
 export const APPROVED_DEPENDENCIES: readonly string[] = [
+  CLAUDE_SDK_PACKAGE,
   'commander',
   'zod',
   'smol-toml',
