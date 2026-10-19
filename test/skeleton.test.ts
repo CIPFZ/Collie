@@ -127,6 +127,22 @@ describe('skeleton: import isolation (CONSTRAINTS 铁律 15)', () => {
     expect(await restrictedImports('src/runner/fake.ts', SDK)).toBe(0);
   });
 
+  it.each([
+    "import { FakeRunner } from '../runner/fake.js';\nexport const f = FakeRunner;\n",
+    "import { FakeRunner } from '../runner/fake';\nexport const f = FakeRunner;\n",
+    "export { FakeRunner } from '../runner/fake.js';\n",
+    "import type { FakeScene } from '../runner/fake.js';\nexport type S = FakeScene;\n",
+    SDK,
+  ])('forbids the fake runner and the SDK in src/roles/: %j', async (code) => {
+    expect(await restrictedImports('src/roles/worker.ts', code)).toBe(1);
+  });
+
+  it('allows the runner interface in src/roles/', async () => {
+    const code =
+      "import type { AgentRunner } from '../runner/index.js';\nexport type R = AgentRunner;\n";
+    expect(await restrictedImports('src/roles/worker.ts', code)).toBe(0);
+  });
+
   it('configures src/roles/ to forbid both the SDK and the fake runner', async () => {
     const config: unknown = await eslint.calculateConfigForFile(join(root, 'src/roles/worker.ts'));
     const entry =
