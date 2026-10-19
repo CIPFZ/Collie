@@ -1,8 +1,29 @@
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { commit, diffStat, git, GitError, log, lsRemote, revParse, status } from '../src/git.js';
+import {
+  addWorktree,
+  commit,
+  diffStat,
+  git,
+  GitError,
+  isAncestor,
+  log,
+  lsRemote,
+  remoteContains,
+  removeWorktree,
+  revParse,
+  status,
+} from '../src/git.js';
 
 // Isolate from the developer's git configuration (insteadOf rules, hooks, signing).
 const savedEnv = { ...process.env };
@@ -188,5 +209,74 @@ describe('git: commit', () => {
 
   it('refuses an empty path list', async () => {
     await expect(commit(repo, 'nothing', [])).rejects.toThrow('no paths to commit');
+  });
+});
+
+describe('git: pushed means contained in the remote branch (SPEC 3.4)', () => {
+  async function withRemote(): Promise<string> {
+    const remote = join(root, 'remote.git');
+    await git(root, ['init', '-q', '--bare', remote]);
+    await git(repo, ['remote', 'add', 'origin', remote]);
+    return remote;
+  }
+
+  it('is true for head_sha even when a report envelope commit sits on top', async () => {
+    await withRemote();
+    write('a.txt', 'a\n');
+    const head = await commitAll('code');
+    mkdirSync(join(repo, '.collie'));
+    write('.collie/report.md', 'r\n');
+    const envelope = await commitAll('report(collie): v99-b01');
+    await git(repo, ['push', '-q', 'origin', 'main']);
+    // The remote tip is the envelope, so ref equality would wrongly say "not pushed".
+    expect((await lsRemote(repo, 'origin', ['refs/heads/main']))[0]?.sha).toBe(envelope);
+    expect(await remoteContains(repo, 'origin', 'main', head)).toBe(true);
+  });
+
+  it('is false for a local commit that was never pushed', async () => {
+    await withRemote();
+    write('a.txt', 'a\n');
+    await commitAll('pushed');
+    await git(repo, ['push', '-q', 'origin', 'main']);
+    write('b.txt', 'b\n');
+    const local = await commitAll('local only');
+    expect(await remoteContains(repo, 'origin', 'main', local)).toBe(false);
+  });
+
+  it('is false for a commit pushed only to another branch', async () => {
+    await withRemote();
+    write('a.txt', 'a\n');
+    await commitAll('base');
+    await git(repo, ['push', '-q', 'origin', 'main']);
+    await git(repo, ['checkout', '-q', '-b', 'master']);
+    write('b.txt', 'b\n');
+    const other = await commitAll('on master');
+    await git(repo, ['push', '-q', 'origin', 'master']);
+    expect(await remoteContains(repo, 'origin', 'main', other)).toBe(false);
+  });
+
+  it('rejects for an unknown commit instead of answering false', async () => {
+    write('a.txt', 'a\n');
+    await commitAll('base');
+    await expect(isAncestor(repo, 'f'.repeat(40), 'HEAD')).rejects.toBeInstanceOf(GitError);
+  });
+});
+
+describe('git: worktrees', () => {
+  it('checks out head_sha without later commits, and removes cleanly', async () => {
+    write('a.txt', 'code\n');
+    const head = await commitAll('code');
+    mkdirSync(join(repo, '.collie'));
+    write('.collie/report.md', 'secret\n');
+    await commitAll('report(collie): v99-b01');
+    const tree = join(root, 'review');
+    await addWorktree(repo, tree, head);
+    expect(readFileSync(join(tree, 'a.txt'), 'utf8')).toBe('code\n');
+    expect(existsSync(join(tree, '.collie', 'report.md'))).toBe(false);
+    expect(await revParse(tree, 'HEAD')).toBe(head);
+    writeFileSync(join(tree, 'scratch.txt'), 'dirty');
+    await removeWorktree(repo, tree);
+    expect(existsSync(tree)).toBe(false);
+    expect((await git(repo, ['worktree', 'list', '--porcelain'])).includes(tree)).toBe(false);
   });
 });

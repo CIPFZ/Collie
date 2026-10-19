@@ -192,3 +192,67 @@ export async function commit(
   await git(cwd, ['commit', '-m', message, '--', ...paths]);
   return revParse(cwd, 'HEAD');
 }
+
+/** Updates the remote-tracking ref for `branch` from `remote`. */
+export async function fetchBranch(cwd: string, remote: string, branch: string): Promise<void> {
+  await git(cwd, [
+    'fetch',
+    '--quiet',
+    '--end-of-options',
+    remote,
+    `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
+  ]);
+}
+
+/**
+ * True when `commit` is reachable from `ref` (git merge-base --is-ancestor).
+ * This, not ref equality, decides "pushed": the report(collie) envelope commit
+ * sits on top of head_sha, so the remote tip is never head_sha itself (SPEC 3.4).
+ */
+export async function isAncestor(cwd: string, commit: string, ref: string): Promise<boolean> {
+  try {
+    await git(cwd, ['merge-base', '--is-ancestor', commit, ref]);
+    return true;
+  } catch (error) {
+    // Exit 1 means "not an ancestor"; anything else (unknown object, bad ref) is an error.
+    if (error instanceof GitError && error.exitCode === 1) return false;
+    throw error;
+  }
+}
+
+/** Fetches `branch` and reports whether `sha` is contained in the remote branch. */
+export async function remoteContains(
+  cwd: string,
+  remote: string,
+  branch: string,
+  sha: string,
+): Promise<boolean> {
+  await fetchBranch(cwd, remote, branch);
+  return isAncestor(cwd, sha, `refs/remotes/${remote}/${branch}`);
+}
+
+/** Creates a detached worktree at `path` checked out at `rev`. */
+export async function addWorktree(cwd: string, path: string, rev: string): Promise<void> {
+  await git(cwd, ['worktree', 'add', '--detach', '--quiet', path, rev]);
+}
+
+/** Removes a worktree created by addWorktree, discarding anything written inside it. */
+export async function removeWorktree(cwd: string, path: string): Promise<void> {
+  await git(cwd, ['worktree', 'remove', '--force', path]);
+}
+
+/** Contents of `path` at `rev`, or undefined when the file does not exist there. */
+export async function showFile(
+  cwd: string,
+  rev: string,
+  path: string,
+): Promise<string | undefined> {
+  const spec = `${rev}:${path}`;
+  try {
+    await git(cwd, ['cat-file', '-e', spec]);
+  } catch (error) {
+    if (error instanceof GitError && error.exitCode !== null) return undefined;
+    throw error;
+  }
+  return git(cwd, ['show', spec]);
+}
