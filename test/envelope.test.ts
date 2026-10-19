@@ -101,11 +101,6 @@ describe('envelope: ReportSchema (SPEC 3.4)', () => {
 
   it.each([
     [
-      'missing ci_passed',
-      { ...report, claims: { ...report.claims, ci_passed: undefined } },
-      'claims.ci_passed',
-    ],
-    [
       'string test count',
       { ...report, claims: { ...report.claims, tests_passed: '47' } },
       'claims.tests_passed',
@@ -127,13 +122,25 @@ describe('envelope: ReportSchema (SPEC 3.4)', () => {
     expect(issuePaths(ReportSchema.safeParse(value))).toEqual([path]);
   });
 
-  it('documents that the v01-b01 report predates claims.ci_passed', () => {
-    // SPEC 3.4 added ci_passed after v01-b01 without bumping SCHEMA_VERSION.
-    const markdown = readFileSync(join(repoRoot, '.collie/batches/v01-b01/report.md'), 'utf8');
-    const block = lastJsonBlock(markdown);
-    expect(block).toBeDefined();
-    const raw: unknown = JSON.parse(block?.content ?? '');
-    expect(issuePaths(ReportSchema.safeParse(raw))).toEqual(['claims.ci_passed']);
+  it('defaults a missing ci_passed to false ("not claimed")', () => {
+    const claims: Partial<Report['claims']> = { ...report.claims };
+    delete claims.ci_passed;
+    expect(ReportSchema.parse({ ...report, claims }).claims.ci_passed).toBe(false);
+  });
+
+  it('keeps an explicit ci_passed and rejects a non-boolean one', () => {
+    expect(ReportSchema.parse(report).claims.ci_passed).toBe(true);
+    const bad = { ...report, claims: { ...report.claims, ci_passed: 'yes' } };
+    expect(issuePaths(ReportSchema.safeParse(bad))).toEqual(['claims.ci_passed']);
+  });
+
+  it.each([
+    ['v01-b01', false],
+    ['v01-b02', true],
+  ])('accepts the real %s report (ci_passed -> %s)', (batchId, ciPassed) => {
+    const markdown = readFileSync(join(repoRoot, `.collie/batches/${batchId}/report.md`), 'utf8');
+    const raw: unknown = JSON.parse(lastJsonBlock(markdown)?.content ?? 'null');
+    expect(ReportSchema.parse(raw).claims.ci_passed).toBe(ciPassed);
   });
 });
 

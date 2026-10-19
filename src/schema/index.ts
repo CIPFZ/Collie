@@ -175,7 +175,9 @@ export const ClaimsSchema = z.strictObject({
   tests_passed: z.number().int().nonnegative(),
   tests_failed: z.number().int().nonnegative(),
   pushed: z.boolean(),
-  ci_passed: z.boolean(),
+  // Optional (SPEC 3.4): an absent claim means "not claimed", which is the
+  // conservative reading for arbiter rule 7.
+  ci_passed: z.boolean().optional().default(false),
   new_deps: z.array(NonEmptyString),
   spec_touched: z.boolean(),
 });

@@ -212,13 +212,17 @@ describe('worker: readReport boundaries', () => {
   });
 
   it('fails when the last block violates the schema, even if an earlier one is valid', () => {
-    const claims: Partial<Report['claims']> = { ...claimedReport.claims };
-    delete claims.ci_passed;
-    placeReport(
-      reportMarkdown(JSON.stringify(claimedReport), JSON.stringify({ ...claimedReport, claims })),
-    );
+    const bad = { ...claimedReport, claims: { ...claimedReport.claims, tests_passed: '47' } };
+    placeReport(reportMarkdown(JSON.stringify(claimedReport), JSON.stringify(bad)));
     const err = reportError();
-    expect(err.message).toMatch(/fails the report schema: claims\.ci_passed: /);
+    expect(err.message).toMatch(/fails the report schema: claims\.tests_passed: /);
+  });
+
+  it.each(['v01-b01', 'v01-b02'])('accepts the real %s report from the repository', (batchId) => {
+    // v01-b01 predates claims.ci_passed; it must still be readable (SPEC 3.4).
+    const report = readReport(repoRoot, batchId);
+    expect(report.batch_id).toBe(batchId);
+    expect(typeof report.claims.ci_passed).toBe('boolean');
   });
 
   it('fails when the last block is not valid JSON, naming its line', () => {
