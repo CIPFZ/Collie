@@ -79,7 +79,9 @@ session fork、NDJSON 流解析。用 TS 可直接复用，用其他语言等于
 `typescript`（锁 `~6.0.x`，Apache-2.0）、`@types/node`、`eslint`、`@eslint/js`、
 `typescript-eslint`、`prettier`、`eslint-config-prettier`（均 MIT）。
 
-许可证红线：仅接受 MIT / Apache-2.0 / BSD / ISC。新增任何依赖必须先写 ADR。
+许可证红线（ADR-003）：运行时依赖仅接受 MIT / Apache-2.0 / BSD / ISC / 0BSD；
+开发依赖及其传递层不受白名单约束但禁止强 copyleft（GPL / AGPL / SSPL）。
+新增任何依赖必须先写 ADR。
 明确不引入：任何编排框架（LangGraph、Temporal 等）、任何可观测框架、任何 ORM。
 
 ### 2.3 工程约定

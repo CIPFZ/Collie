@@ -44,8 +44,11 @@
 
 ## 未取证项
 
-CI 实际结论（4 个提交的 `conclusion` 与 `head_branch`）因 API 限流未能独立查询。
-worker 声称四次均为 `push / main / success` 并附运行地址，但按铁律 4 此项在取证前不构成事实。
+CI 实际结论（4 个提交的 `conclusion` 与 `head_branch`）因 API 限流未能由 R4 独立查询。
+
+**条件已解除（2026-10-16）：** 项目所有者在 GitHub Actions 页面目视确认
+`134ea31` `3f4992d` `e5c7d3f` `e99fde3` 四次运行均为 `main / success`。
+此确认由人完成，作为本批次 CI 证据的来源记录在案。
 
 ## 本轮发现的流程缺口（非 worker 过失）
 
@@ -55,9 +58,8 @@ worker 声称四次均为 `push / main / success` 并附运行地址，但按铁
 
 ## 结论与理由
 
-**PASS，附条件**：CI 实际结论须由项目所有者在 GitHub 页面目视确认四次运行均为
-`main / success`，或配置只读 token 后由 R4 补查。
-其余全部验收项均由实测证据支持，无声称不符，无范围蔓延，测试质量超出要求。
+**PASS**。附加条件已于 2026-10-16 由项目所有者目视确认解除。
+全部验收项均由实测证据或人工确认支持，无声称不符，无范围蔓延，测试质量超出要求。
 
 ```json
 {
@@ -76,15 +78,15 @@ worker 声称四次均为 `push / main / success` 并附运行地址，但按铁
       { "cmd": "grep -qE 'branches:\\s*\\[\\s*main\\s*\\]' .github/workflows/ci.yml", "exit_code": 0, "summary": "matched" }
     ],
     "remote_has_head": true,
-    "ci_conclusion": "UNVERIFIED (API rate limit 0/60)",
-    "ci_run_url": "",
-    "ci_branch_matched": null,
+    "ci_conclusion": "success (owner visual confirmation, 4/4 runs)",
+    "ci_run_url": "https://github.com/CIPFZ/Collie/actions",
+    "ci_branch_matched": true,
     "deps_diff": ["zod", "smol-toml", "typescript", "@types/node", "eslint", "@eslint/js", "typescript-eslint", "prettier", "eslint-config-prettier", "vitest", "tsx"],
     "spec_diff_lines": 0
   },
   "claim_mismatches": [],
   "gaps": [],
-  "conditions": ["CI conclusion for 4 commits to be confirmed by owner on GitHub UI or by R4 with a read-only token"],
-  "reason": "全部可实跑验收项通过且与声称一致；测试覆盖超出要求；受保护文件零触碰；唯一未取证项为 CI 实际结论，因外部限流而非 worker 问题，以附条件方式处理"
+  "conditions": [],
+  "reason": "全部可实跑验收项通过且与声称一致；测试覆盖超出要求；受保护文件零触碰；CI 结论由项目所有者目视确认 4/4 为 main/success"
 }
 ```

@@ -57,7 +57,10 @@ worker 对它只读。原因：worker 每轮全新上下文，其陈述是「声
 ESLint 与类型检查零错误。
 
 **铁律 13。** 新增任何第三方依赖必须先写 ADR 等批准。
-许可证仅接受 MIT / Apache-2.0 / BSD / ISC。
+**运行时依赖**（被 `src/**` 直接或间接 `import`，或进入 `dist/`）
+许可证仅接受 MIT / Apache-2.0 / BSD / ISC / 0BSD。
+**开发依赖**及其传递层不受白名单约束，但禁止 GPL / AGPL / SSPL 等强 copyleft。
+R4 每批次扫描全树并在 evidence 中列出白名单外项（ADR-003）。
 明确禁止引入：编排框架（LangGraph / Temporal 等）、可观测框架（OpenTelemetry 等）、ORM。
 
 **铁律 14。** 跨边界数据结构集中在 `src/schema/`，用 zod 声明。

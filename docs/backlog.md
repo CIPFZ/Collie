@@ -13,8 +13,8 @@
 
 | 优先级 | 批次 | 标题 | 依赖 | 状态 |
 |---|---|---|---|---|
-| 1 | v01-b01 | 工程骨架与基础设施 | — | passed（附条件：CI 结论待目视确认） |
-| 2 | v01-b02 | 批次解析与 worker 角色 | v01-b01 | pending（待签发） |
+| 1 | v01-b01 | 工程骨架与基础设施 | — | passed |
+| 2 | v01-b02 | 批次解析与 worker 角色 | v01-b01 | running |
 | 3 | v01-b03 | 审核角色与仲裁 | v01-b02 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。

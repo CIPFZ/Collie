@@ -1,7 +1,8 @@
 # ADR-003 许可证白名单的作用范围
 
-状态：**待批准**（R1 起草，等项目所有者裁决）
-日期：2026-10-16
+状态：**已批准（方案 A）**
+日期：2026-10-16（起草）/ 2026-10-16（批准）
+决策者：项目所有者
 触发：v01-b01 汇报裁决项 1
 相关：[CONSTRAINTS.md](../CONSTRAINTS.md) 铁律 13、[SPEC.md](../SPEC.md) 2.2
 
@@ -48,6 +49,13 @@ v01-b01 实测：运行时依赖（`zod` MIT、`smol-toml` BSD-3-Clause）干净
 > 许可证仅接受 MIT / Apache-2.0 / BSD / ISC / 0BSD。**开发依赖**及其传递层不受白名单约束，
 > 但禁止 GPL / AGPL / SSPL 等强 copyleft。R4 每批次扫描全树并在 evidence 中列出白名单外项。
 
-## 待裁决
+## 决策
 
-项目所有者选 A / B / C。选定后 R1 更新 CONSTRAINTS 铁律 13 与 SPEC 2.2，本 ADR 转为「已批准」。
+采纳方案 A。铁律 13 与 SPEC 2.2 已按上文修订。
+
+## 后果
+
+- `lightningcss`（MPL-2.0）与 `minimatch`（BlueOak-1.0.0）作为开发依赖传递层，不构成违规
+- R4 每批次全树扫描，在 evidence 的 `deps_diff` 中列出白名单外项，
+  仅当出现 GPL / AGPL / SSPL 等强 copyleft 或运行时树出现白名单外项时 BLOCK
+- 运行时依赖的判定标准：被 `src/**` 直接或间接 `import`，或进入 `dist/`
