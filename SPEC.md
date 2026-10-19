@@ -71,7 +71,6 @@ session fork、NDJSON 流解析。用 TS 可直接复用，用其他语言等于
 | `zod` | 尾部 JSON 块的 schema 校验 | MIT |
 | `smol-toml` | 解析 `collie.toml` | BSD-3-Clause |
 | `yaml` | 解析 task.md 的 frontmatter | ISC |
-| `execa` | 子进程与 git 命令 | MIT |
 | `vitest` | 测试 | MIT |
 | `tsx` | 开发期直接跑 TS | MIT |
 
@@ -305,6 +304,14 @@ R4 写，R2 读。Markdown 推理正文 + 尾部围栏 JSON。
 关键规则：`verdict` 三值不用约束解码强制（结构约束会损害推理质量），
 而是由 R2 解析尾部 JSON 并用 zod 校验；解析失败按 BLOCK 处理。
 
+字段约定（v01-b03 后）：`ci_conclusion` 取 `success | failure | cancelled | unknown`，
+`ci_branch_matched` 为 `boolean | null`（`null` = 未能取证），`ci_run_url` 可为空串；
+`conditions?: string[]` 可选，非空表示 PASS 附条件。arbiter 把 `ci_branch_matched=null`
+视为未取证：若 `claims.ci_passed=true` 则按规则 7 降 FIX。
+reviewer 交付方式：无写工具，verdict 正文作为**最终回复文本**返回，
+`RunResult.finalText` 承载，由 R2 写入 `verdict.md`。
+reviewer 在检出于 `head_sha` 的独立 worktree 中工作，该 worktree 不含 `report.md`。
+
 ### 3.6 事件日志
 
 `.collie/runs/<run_id>/events.ndjson`，append-only，每行一个事件。
@@ -382,7 +389,7 @@ interface AgentRunner {
     cwd: string;
     maxTurns: number;
     onEvent?: (e: unknown) => void;   // NDJSON 逐行回调
-  }): Promise<{ exitCode: number; sessionId?: string; usage?: Usage }>;
+  }): Promise<{ exitCode: number; sessionId?: string; usage?: Usage; finalText?: string }>;
 }
 ```
 

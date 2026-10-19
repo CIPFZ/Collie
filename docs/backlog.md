@@ -15,8 +15,8 @@
 |---|---|---|---|---|
 | 1 | v01-b01 | 工程骨架与基础设施 | — | passed |
 | 2 | v01-b02 | 批次解析与 worker 角色 | v01-b01 | passed |
-| 3 | v01-b03 | 取证工具与审核角色 | v01-b02 | running |
-| 4 | v01-b04 | 仲裁、CLI 与三场景验证 | v01-b03 | pending |
+| 3 | v01-b03 | 取证工具与审核角色 | v01-b02 | passed |
+| 4 | v01-b04 | 仲裁、CLI 与三场景验证 | v01-b03 | running |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -129,7 +129,11 @@ R4 读代码核验项：v01-b01 与 v01-b02 的真实 report（无 `ci_passed`�
 优先级：4　依赖：v01-b03
 
 条目：
-1. `src/arbiter.ts`：SPEC 4.3 的八条仲裁规则，按顺序命中即停，输出最终 verdict 与 `claim_mismatches`
+1. `src/arbiter.ts`：SPEC 4.3 的八条仲裁规则，按顺序命中即停，输出最终 verdict 与 `claim_mismatches`；
+   `VerdictSchema` 放宽为 SPEC 3.5 新约定（`ci_branch_matched` 可 null、`conditions` 可选）；
+   「已推送」改为 fetch 后 `merge-base --is-ancestor head_sha origin/main`；
+   `RunResult` 加 `finalText`，reviewer 的 verdict 由 R2 从 `finalText` 写入，
+   reviewer 在 `git worktree add <tmp> head_sha` 中运行
 2. `src/progress.ts` + `src/cli.ts`：依据 arbiter 输出与 evidence 写 `docs/progress.md`；
    `collie init` / `collie run <batch>` / `collie show <batch>` 三个命令；
    退出码 0 / 10 / 20 / 1（SPEC 5）；`run` 以 `AbortSignal.timeout(wallclock_secs)` 包裹 worker（SPEC 3.3）；
