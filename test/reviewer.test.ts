@@ -124,9 +124,9 @@ describe('reviewer: VerdictSchema (SPEC 3.5)', () => {
     ['lower-case verdict', { ...verdict, verdict: 'pass' }, 'verdict'],
     ['unknown verdict', { ...verdict, verdict: 'MAYBE' }, 'verdict'],
     [
-      'null branch match',
-      { ...verdict, evidence: { ...verdict.evidence, ci_branch_matched: null } },
-      'evidence.ci_branch_matched',
+      'free-text ci_conclusion',
+      { ...verdict, evidence: { ...verdict.evidence, ci_conclusion: 'success (owner check)' } },
+      'evidence.ci_conclusion',
     ],
     [
       'negative spec lines',
@@ -156,27 +156,40 @@ describe('reviewer: VerdictSchema (SPEC 3.5)', () => {
     expect(result.error?.issues.map((i) => i.path.join('.'))).toEqual([path]);
   });
 
-  it('rejects unknown top-level fields (strict)', () => {
-    const result = VerdictSchema.safeParse({ ...verdict, conditions: [] });
-    expect(result.success).toBe(false);
-    expect(JSON.stringify(result.error?.issues)).toContain('conditions');
+  it('accepts the SPEC 3.5 relaxations: null branch match, empty run url, conditions', () => {
+    const relaxed = {
+      ...verdict,
+      verdict: 'PASS',
+      evidence: {
+        ...verdict.evidence,
+        ci_conclusion: 'unknown',
+        ci_run_url: '',
+        ci_branch_matched: null,
+      },
+      conditions: ['CI to be confirmed by the owner'],
+    };
+    expect(VerdictSchema.parse(relaxed)).toEqual(relaxed);
   });
 
-  it.each([
-    ['v01-b01', ['conditions']],
-    ['v01-b02', ['conditions', 'evidence.ci_branch_matched']],
-  ])('documents how the real %s verdict deviates from SPEC 3.5', (batchId, deviations) => {
-    // R4 added `conditions` and wrote ci_branch_matched: null when CI was unverified.
-    // Under arbiter rule 1 this would be BLOCK; R1 must decide (see v01-b03 report).
-    const markdown = readFileSync(join(repoRoot, `.collie/batches/${batchId}/verdict.md`), 'utf8');
-    const raw: unknown = JSON.parse(lastJsonBlock(markdown)?.content ?? 'null');
-    const result = VerdictSchema.safeParse(raw);
+  it('still rejects unknown top-level fields (strict)', () => {
+    const result = VerdictSchema.safeParse({ ...verdict, notes: [] });
     expect(result.success).toBe(false);
-    const found = (result.error?.issues ?? []).map((i) =>
-      i.code === 'unrecognized_keys' ? i.keys.join(',') : i.path.join('.'),
-    );
-    expect(found.sort()).toEqual([...deviations].sort());
+    expect(JSON.stringify(result.error?.issues)).toContain('notes');
   });
+
+  it.each(['v01-b01', 'v01-b02'])(
+    'documents that the historical %s verdict still fails only on free-text ci_conclusion',
+    (batchId) => {
+      // Written before SPEC 3.5 fixed ci_conclusion to an enum; kept as history.
+      const markdown = readFileSync(
+        join(repoRoot, `.collie/batches/${batchId}/verdict.md`),
+        'utf8',
+      );
+      const raw: unknown = JSON.parse(lastJsonBlock(markdown)?.content ?? 'null');
+      const result = VerdictSchema.safeParse(raw);
+      expect(result.error?.issues.map((i) => i.path.join('.'))).toEqual(['evidence.ci_conclusion']);
+    },
+  );
 });
 
 describe('reviewer: readVerdict boundaries', () => {

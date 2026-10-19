@@ -197,6 +197,10 @@ export type Report = z.infer<typeof ReportSchema>;
 export const VerdictValueSchema = z.enum(['PASS', 'FIX', 'BLOCK']);
 export type VerdictValue = z.infer<typeof VerdictValueSchema>;
 
+/** SPEC 3.5: GitHub's many conclusions are folded into four. */
+export const CiConclusionSchema = z.enum(['success', 'failure', 'cancelled', 'unknown']);
+export type CiConclusion = z.infer<typeof CiConclusionSchema>;
+
 /** One acceptance command as actually run by R4 (SPEC 3.5). */
 export const VerifyEvidenceSchema = z.strictObject({
   cmd: NonEmptyString,
@@ -213,15 +217,19 @@ export const VerdictSchema = z.strictObject({
     commits_actual: z.array(ShaSchema),
     verify_results: z.array(VerifyEvidenceSchema),
     remote_has_head: z.boolean(),
-    ci_conclusion: z.string(),
+    ci_conclusion: CiConclusionSchema,
+    /** May be empty when no run was found. */
     ci_run_url: z.string(),
-    ci_branch_matched: z.boolean(),
+    /** null: R4 could not obtain the evidence (SPEC 3.5). */
+    ci_branch_matched: z.boolean().nullable(),
     deps_diff: z.array(z.string()),
     spec_diff_lines: z.number().int().nonnegative(),
   }),
   // SPEC 3.5 does not specify item shapes; arbiter rule 4 only needs emptiness.
   claim_mismatches: z.array(JsonValueSchema),
   gaps: z.array(z.string()),
+  /** Non-empty means PASS with conditions (SPEC 3.5). */
+  conditions: z.array(z.string()).optional(),
   reason: z.string(),
 });
 export type Verdict = z.infer<typeof VerdictSchema>;
