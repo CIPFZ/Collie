@@ -2,8 +2,9 @@
 schema_version: 1
 run_id: r-0001
 batch_id: v01-b01
-base_sha: f78b55a2c3e46efba91ecc344d8284a7aee130ad
+base_sha: 3aa90dd7ef6760b556d5c39b7cfdd5295933c66a
 created_at: 2026-10-16T18:00:00Z
+revised_at: 2026-10-16T20:00:00Z
 attempt: 1
 interrupted_at: null
 issued_by: human-placeholder-r2
@@ -31,8 +32,12 @@ issued_by: human-placeholder-r2
 - `.github/workflows/ci.yml`：**必须监听 `main` 分支**，跑 lint、typecheck、test
 
 依赖只允许安装 SPEC 2.2 清单内的项。本批次实际需要的是：
-`zod`、`smol-toml`、`vitest`、`tsx`、`typescript`、ESLint/Prettier 相关。
+运行时 `zod`、`smol-toml`；开发期 `vitest`、`tsx`、`typescript`（锁 `~6.0.x`）、
+`@types/node`、`eslint`、`@eslint/js`、`typescript-eslint`、`prettier`、`eslint-config-prettier`。
+开发依赖的批准见 **ADR-002**（修订 2026-10-16，解决执行计划 Q2）。
 `commander`、`execa`、`yaml`、Agent SDK 在后续批次再装。
+
+测试放在 `test/`，不放进 `src/`（SPEC 2.3）。
 
 关于 CI 监听分支：本项目仓库的默认分支是 `main`。
 此条有真实教训——某仓库 CI 配置监听 `main` 而实际使用 `master`，
@@ -46,13 +51,16 @@ issued_by: human-placeholder-r2
   每个 schema 导出推导类型（`z.infer`）。
 - `src/config.ts`：读取并解析 `.collie/collie.toml`，用 zod 校验，
   返回类型化配置对象。校验失败必须抛出带字段路径的清晰错误。
-- `.collie/collie.toml`：按 SPEC 3.1 创建，字段与默认值须与 SPEC 完全一致，
-  每个阈值注明对应的 SPEC 章节号
+- `.collie/collie.toml` **已由 R1 放置**（修订 2026-10-16，解决执行计划 Q1）。
+  你只读它，不创建、不修改。其字段与默认值已与 SPEC 3.1 对齐。
 
 `Acceptance.expect` 是联合类型 `'exit_zero' | { stdout_matches: string }`，
 用 `z.union` 表达。
 
-禁止在代码中裸写任何阈值数字（铁律 11）。
+`Batch.items` 的 1~3 上限是结构不变量，以具名常量写在 schema 内，不进 toml（ADR-002 第 4 节）。
+`Event` 的扩展字段限 JSON 值（SPEC 3.6 已更新），保证 `replay(append(e))` 深相等。
+
+禁止在代码中裸写任何阈值数字（铁律 11）。由 ESLint `no-magic-numbers` 在 `src/**` 执行。
 
 ### 条目 3：事件日志
 
@@ -71,26 +79,35 @@ issued_by: human-placeholder-r2
 ## 验收标准
 
 全部可机器判定。reviewer 会逐条实跑。
+（修订 2026-10-16：原「无裸写阈值」grep 已删除——其 `\|` 为表格转义导致恒不匹配、
+且 `expect` 无法表达 exit 1；改由 lint 规则覆盖。感谢执行计划中的指出。）
 
 | 说明 | 命令 | 期望 |
 |---|---|---|
-| 代码规范零错误 | `npm run lint` | exit 0 |
+| 代码规范零错误（含 `no-explicit-any` 与 `no-magic-numbers`） | `npm run lint` | exit 0 |
 | 类型检查零错误 | `npm run typecheck` | exit 0 |
 | 全部测试通过 | `npm test` | exit 0 |
-| schema round-trip | `npm test -- schema` | exit 0 |
-| journal 重放一致 | `npm test -- journal` | exit 0 |
-| config 解析正确 | `npm test -- config` | exit 0 |
-| CI 监听分支正确 | `grep -q 'branches:.*main' .github/workflows/ci.yml` | exit 0 |
-| 无裸写阈值 | `grep -rnE '\b(90\|900\|2700)\b' src/ --include='*.ts' \| grep -v schema` | exit 1（无匹配） |
+| schema 测试文件存在且通过 | `npm test -- schema` | exit 0 |
+| journal 测试文件存在且通过 | `npm test -- journal` | exit 0 |
+| config 测试文件存在且通过 | `npm test -- config` | exit 0 |
+| CI 配置结构检查（监听 main，单行 flow 风格） | `grep -qE 'branches:\s*\[\s*main\s*\]' .github/workflows/ci.yml` | exit 0 |
 
-测试内容要求：
+验收命令的能力边界（如实声明）：
+- 上述三条 `npm test -- xxx` 只能证明「有同名测试文件且通过」，
+  **不能证明测试内容覆盖了下方要求**。这部分由 R4 读测试代码核验（AGENT-reviewer.md 第 4 节）。
+- CI 那条 grep 只看字面，不能证明 CI 实际触发。
+  **CI 实际触发与监听分支由 R4 通过 GitHub API 核验**（evidence 字段 `ci_conclusion` / `ci_branch_matched`）。
+
+测试内容要求（R4 读代码核验，非命令判定）：
 - schema round-trip：每个 schema 构造合法对象 → 序列化 → 解析 → 断言相等；
-  并构造非法对象断言校验失败
+  并构造非法对象断言校验失败；v0.2 事件类型须被拒绝
 - journal：追加多条事件后重放，断言顺序与内容一致；
-  追加含换行的字段值，断言不破坏 NDJSON 格式；
-  构造损坏行，断言报错并含行号
-- config：解析 `.collie/collie.toml` 断言字段值；
-  构造缺字段与类型错误的 TOML，断言报错含字段路径
+  追加含 `\n` / `\r\n` / U+2028 的字段值，断言不破坏 NDJSON 且读回原样；
+  构造每一种坏行（空行、JSON 解析失败、zod 失败、run_id 不符、末行残缺），
+  断言报错并含正确行号；残行存在时 append 被拒绝；
+  每次追加后旧内容是新内容的前缀（append-only）
+- config：解析 `.collie/collie.toml` 断言字段值与 SPEC 3.1 一致；
+  构造缺字段、类型错误、未知字段（strict）的 TOML，断言报错含字段路径
 
 ## 本批次额外禁止
 
