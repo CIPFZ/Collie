@@ -64,8 +64,11 @@ function summarize(batch: Batch): Expected {
 describe('backlog: the live docs/backlog.md', () => {
   const batches = loadBacklog(repoRoot);
 
-  it('parses into exactly the three v0.1 batches with their fixed fields', () => {
-    expect(batches.map(summarize)).toEqual(EXPECTED);
+  // Later batches may still be re-split by R1, so only completed batches are pinned here;
+  // the full three-batch expectation is asserted against the frozen fixture below.
+  it.each(['v01-b01', 'v01-b02'])('keeps the fixed fields of %s', (id) => {
+    const batch = batches.find((b) => b.id === id);
+    expect(batch && summarize(batch)).toEqual(EXPECTED.find((e) => e.id === id));
   });
 
   it('has statuses inside the SPEC 3.2 enum (values change as batches progress)', () => {

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import YAML from 'yaml';
 import { describe, expect, it } from 'vitest';
@@ -8,6 +9,10 @@ import type { Batch } from '../src/schema/index.js';
 
 const repoRoot = join(import.meta.dirname, '..');
 const batches = loadBacklog(repoRoot);
+/** Frozen backlog snapshot, for assertions on the wording of a specific batch. */
+const frozen = parseBacklog(
+  readFileSync(join(import.meta.dirname, 'fixtures', 'backlog.md'), 'utf8'),
+);
 
 const ctx: TaskContext = {
   run_id: 'r-0002',
@@ -16,8 +21,8 @@ const ctx: TaskContext = {
   attempt: 1,
 };
 
-function batch(id: string): Batch {
-  const found = batches.find((b) => b.id === id);
+function batch(id: string, from: readonly Batch[] = batches): Batch {
+  const found = from.find((b) => b.id === id);
   if (found === undefined) throw new Error(`batch ${id} not in backlog`);
   return found;
 }
@@ -139,7 +144,7 @@ describe('task-envelope: body', () => {
   });
 
   it('lists the items, keeping multi-line items inside their list entry', () => {
-    const { body } = splitFrontmatter(buildTask(batch('v01-b03'), ctx).markdown);
+    const { body } = splitFrontmatter(buildTask(batch('v01-b03', frozen), ctx).markdown);
     expect(body).toContain('## 本批次条目（3 个）');
     expect(body).toContain(
       '1. `src/verify.ts` + `src/git.ts` + `src/ci.ts`：实跑验收命令并结构化输出；\n   git 封装',
@@ -148,10 +153,10 @@ describe('task-envelope: body', () => {
   });
 
   it('lists forbidden items, or 无 when there are none', () => {
-    const withForbidden = splitFrontmatter(buildTask(batch('v01-b03'), ctx).markdown).body;
+    const withForbidden = splitFrontmatter(buildTask(batch('v01-b03', frozen), ctx).markdown).body;
     expect(withForbidden).toContain('## 本批次额外禁止\n\n- 用约束解码强制 verdict 三值');
     const none = splitFrontmatter(
-      buildTask({ ...batch('v01-b03'), forbidden: [] }, ctx).markdown,
+      buildTask({ ...batch('v01-b03', frozen), forbidden: [] }, ctx).markdown,
     ).body;
     expect(none).toContain('## 本批次额外禁止\n\n- 无\n');
   });
