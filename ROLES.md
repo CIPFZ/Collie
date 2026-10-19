@@ -110,6 +110,7 @@
 | `docs/decisions/ADR-*.md` | 写 | 读 | 读 | 读 | 读 |
 | `docs/progress.md` | — | 写 | 读 | 读 | 读 |
 | `docs/reports/` | 读 | 写 | — | — | 写 audit |
+| `.collie/collie.toml` | 写 | 读 | 读 | 读 | 读 |
 | `.collie/batches/*/task.md` | — | 写 | 读 | 读 | — |
 | `.collie/batches/*/report.md` | 读 | 读 | 写 | **不读** | — |
 | `.collie/batches/*/verdict.md` | 读 | 读 | 读 | 写 | 读 |
@@ -182,7 +183,7 @@
   docs/progress.md             R2 写 · 依据实测证据 · 全员只读
   docs/reports/                R2 与 R5 写 · 验收与体检报告
   .collie/
-    collie.toml                配置 · 所有阈值在此 · 禁止裸写
+    collie.toml                R1 写 · 配置 · 所有阈值在此 · 禁止裸写 · worker 只读
     batches/<id>/task.md       R2 写 · R3 读
     batches/<id>/report.md     R3 写 · R2 读 · R4 不读
     batches/<id>/verdict.md    R4 写 · R2 读

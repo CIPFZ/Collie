@@ -25,8 +25,22 @@ kickoff prompt 见 `AGENT_KICKOFF.md`。
 
 ## 已知问题
 
-- 仓库 HTTPS 凭据不可用，远端已切换为 SSH（`git@github.com:CIPFZ/Collie.git`）
+- 远端访问协议因环境而异：R1/R2 所在环境 SSH 可用、HTTPS 不可用；
+  实现 Agent 环境相反。两者均指向 `CIPFZ/Collie`，不影响工作
 - 本地默认分支初始为 `master`，已改名 `main` 以与 SPEC 的 CI 配置一致
+- 环境未安装 `gh`，CI 结论改用 GitHub 公开 REST API 查询（未鉴权限速 60 次/小时）
+
+## 本轮决策记录（v01-b01 执行计划答复，2026-10-16）
+
+- Q1：`.collie/collie.toml` 由 R1 放置，worker 只读。ROLES / AGENT-worker / SPEC 2.3 已同步
+- Q2：开发依赖经 ADR-002 批准；`smol-toml` 许可证勘误为 BSD-3-Clause；TS 锁 `~6.0.x`
+- Q3 全部采纳：批次条目上限为 schema 内具名常量；`replay` 遇不存在文件返回 `[]`；
+  骨架提交 scope 用 `ci`
+- 验收标准修订：删除恒通过的「无裸写阈值」grep，改由 lint `no-magic-numbers` 覆盖；
+  `npm test -- xxx` 与 CI grep 的能力边界已如实写入 task 与 SPEC 3.2
+- `Event` 扩展字段收紧为 JSON 值（SPEC 3.6）；`run_id` 加路径安全正则
+- backlog.md 与 task.md 对齐，状态改用枚举值 `running`
+- `base_sha` 签发约定写入 SPEC 3.3
 
 ## 开放问题（需项目所有者决策）
 

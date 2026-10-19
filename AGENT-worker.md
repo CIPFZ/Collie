@@ -33,7 +33,8 @@
 - `AGENT-*.md`
 - `docs/backlog.md`、`docs/decisions/`
 - `docs/progress.md`
-- 任何 `.collie/` 下文件（除本批次的 `report.md`）
+- 任何 `.collie/` 下文件（除本批次的 `report.md`）。
+  其中 `.collie/collie.toml` 由 R1 放置，你只读；需要改阈值时提出，不要自己改
 
 为什么你不写 `progress.md`：你每轮都是全新上下文，你的陈述是「声称」而非事实。
 由调度器依据实测证据写入，避免半成品被固化成「已完成」。

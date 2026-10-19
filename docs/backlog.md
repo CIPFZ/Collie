@@ -13,9 +13,12 @@
 
 | 优先级 | 批次 | 标题 | 依赖 | 状态 |
 |---|---|---|---|---|
-| 1 | v01-b01 | 工程骨架与基础设施 | — | **已签发 task** |
+| 1 | v01-b01 | 工程骨架与基础设施 | — | running |
 | 2 | v01-b02 | 批次解析与 worker 角色 | v01-b01 | pending |
 | 3 | v01-b03 | 审核角色与仲裁 | v01-b02 | pending |
+
+状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
+本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
 
 ---
 
@@ -24,12 +27,14 @@
 优先级：1　依赖：无
 
 条目：
-1. 工程骨架：`package.json`、`tsconfig.json`（strict）、ESLint、Prettier、
-   vitest 配置、`.gitignore`（含 `.collie/runs/`、`.collie/heartbeat`）、
-   GitHub Actions CI（**监听 main**）
-2. `src/config.ts` + `src/schema/index.ts`：解析并校验 `.collie/collie.toml`，
-   `SCHEMA_VERSION = 1`，全部 zod schema 与导出类型
-3. `src/journal.ts`：`events.ndjson` 的追加与重放，支持 SPEC 3.6 的 v0.1 事件类型
+1. 工程骨架：`package.json`、`tsconfig.json`（strict）、ESLint（含 `no-explicit-any`、
+   `src/**` 上 `no-magic-numbers`）、Prettier、vitest 配置、
+   `.gitignore`（含 `node_modules/`、`dist/`、`.collie/runs/`、`.collie/heartbeat`）、
+   GitHub Actions CI（**监听 main**）。依赖见 SPEC 2.2 与 ADR-002
+2. `src/config.ts` + `src/schema/index.ts`：解析并校验 `.collie/collie.toml`（由 R1 放置，只读），
+   `SCHEMA_VERSION = 1`，全部 zod schema（strict）与导出类型
+3. `src/journal.ts`：`events.ndjson` 的 append-only 追加与校验重放，
+   支持 SPEC 3.6 的 v0.1 事件类型；坏行报错并指出行号，不静默跳过
 
 验收标准：
 
@@ -37,13 +42,19 @@
 |---|---|---|
 | 代码规范零错误 | `npm run lint` | exit 0 |
 | 类型检查零错误 | `npm run typecheck` | exit 0 |
-| 测试通过 | `npm test` | exit 0 |
-| schema round-trip | `npm test -- schema` | exit 0 |
-| journal 重放一致 | `npm test -- journal` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| schema 测试存在且通过 | `npm test -- schema` | exit 0 |
+| journal 测试存在且通过 | `npm test -- journal` | exit 0 |
+| config 测试存在且通过 | `npm test -- config` | exit 0 |
+| CI 配置监听 main（结构检查） | `grep -qE 'branches:\s*\[\s*main\s*\]' .github/workflows/ci.yml` | exit 0 |
+
+R4 读代码核验项（非命令判定）：测试内容是否覆盖 task.md 「测试内容要求」；
+CI 是否实际触发且监听分支正确（GitHub API）。
 
 额外禁止：
-- 引入任何 SPEC 2.2 清单之外的依赖
+- 引入 SPEC 2.2 与 ADR-002 清单之外的依赖
 - 在代码中裸写阈值数字
+- 创建或修改 `.collie/collie.toml`
 
 ## v01-b02 批次解析与 worker 角色
 

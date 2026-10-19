@@ -69,11 +69,15 @@ session fork、NDJSON 流解析。用 TS 可直接复用，用其他语言等于
 | `@anthropic-ai/claude-agent-sdk` | 拉起与控制 Agent | 官方 |
 | `commander` | CLI 参数解析 | MIT |
 | `zod` | 尾部 JSON 块的 schema 校验 | MIT |
-| `smol-toml` | 解析 `collie.toml` | MIT |
+| `smol-toml` | 解析 `collie.toml` | BSD-3-Clause |
 | `yaml` | 解析 task.md 的 frontmatter | ISC |
 | `execa` | 子进程与 git 命令 | MIT |
 | `vitest` | 测试 | MIT |
 | `tsx` | 开发期直接跑 TS | MIT |
+
+开发依赖（devDependencies，批准见 ADR-002）：
+`typescript`（锁 `~6.0.x`，Apache-2.0）、`@types/node`、`eslint`、`@eslint/js`、
+`typescript-eslint`、`prettier`、`eslint-config-prettier`（均 MIT）。
 
 许可证红线：仅接受 MIT / Apache-2.0 / BSD / ISC。新增任何依赖必须先写 ADR。
 明确不引入：任何编排框架（LangGraph、Temporal 等）、任何可观测框架、任何 ORM。
@@ -83,7 +87,12 @@ session fork、NDJSON 流解析。用 TS 可直接复用，用其他语言等于
 - 严格模式 TypeScript，`strict: true`，禁用 `any`（必要时用 `unknown` + 收窄）
 - ESLint + Prettier 零错误
 - 包前缀 `@collie/`，CLI 命令名 `collie`
-- 所有阈值集中在 `collie.toml`，代码中禁止裸写数字
+- 所有阈值集中在 `collie.toml`，代码中禁止裸写数字；
+  由 ESLint `no-magic-numbers` 在 `src/**` 强制执行（放行 0 / 1 / -1），见 ADR-002
+- 结构不变量（如批次条目 1~3）属 schema 定义，以具名常量写在 `src/schema/`，不进 toml
+- 测试放在 `test/`，不放进 `src/`（测试需断言 SPEC 默认值，不受 `no-magic-numbers` 约束）
+- `.collie/collie.toml` 由 R1 放置并维护（阈值须与本文件 3.1 一致），worker 只读；
+  `collie init` 实现后由其从模板生成
 - 测试不访问网络、不调用真实模型（用 fake Agent runner）
 
 ## 3. 数据模型
@@ -151,8 +160,17 @@ interface Acceptance {
 }
 ```
 
+`expect` 刻意不提供 `exit_nonzero`：负向检查必须写成正向命令
+（如 `! grep -q pattern file`），期望仍为 `exit_zero`。
+原因：统一为「命令成功即通过」，避免 verify.ts 与 reviewer 对退出码语义各自解释。
+
 硬约束：`acceptance[].cmd` 必须是可执行命令。无法写成命令的验收标准，
 R1 必须停下来与用户重新讨论，不得进入执行环节。
+
+验收命令的能力边界（v01-b01 bootstrap 实测得出）：
+命令只能证明「绿」，不能证明「测了该测的」。一个只写 `expect(true)` 的测试文件
+也能让 `npm test -- xxx` 通过。因此 task 中的「测试内容要求」由 R4 读测试代码核验，
+这是 AGENT-reviewer.md 第 4 节「该写的测试没写」盲区的既定处理方式。
 
 ### 3.3 任务信封（task.md）
 
@@ -187,6 +205,11 @@ interrupted_at: null        # v0.2：上一轮中断位置，仅 R2 知道
 ## 汇报要求
 完成后写 `.collie/batches/v01-b03/report.md`，固定四段 + 尾部 JSON 块。
 ```
+
+`base_sha` 约定：指向**签发本 task 前的最后一个提交**。task.md 自身的提交
+（只触及 `.collie/batches/`）位于 `base_sha..head_sha` 之内，但不属于 worker 产出；
+R4 取证与 arbiter 的受保护文件检查只针对 worker 的提交。
+R1/R2 若在签发后又修改了 SPEC 等文档，必须重新签发 task 并更新 `base_sha`。
 
 ### 3.4 汇报信封（report.md）
 
@@ -251,12 +274,14 @@ R4 写，R2 读。Markdown 推理正文 + 尾部围栏 JSON。
 这是 R2 的唯一状态源——R2 无状态可重启，崩溃恢复 = 重放此文件。
 
 ```ts
+type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
+
 interface Event {
   ts: string;              // ISO8601
-  run_id: string;
+  run_id: string;          // 用作路径段，须匹配 /^[A-Za-z0-9][A-Za-z0-9._-]*$/
   batch_id?: string;
   event: EventType;
-  [key: string]: unknown;  // 事件特有字段
+  [key: string]: JsonValue | undefined;  // 扩展字段限 JSON 值，保证 replay(append(e)) 深相等
 }
 
 type EventType =
