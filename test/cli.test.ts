@@ -107,4 +107,23 @@ describe('cli: init, show and the R2 commits', () => {
     expect(progress.startsWith('# 进度\n\n人工维护的内容，Collie 不得改动。\n')).toBe(true);
     expect(progress).toContain(`### ${BATCH} · r-20261019-120000 · PASS`);
   });
+
+  it('run --runner fake uses an unscripted fake that fails loudly (wiring check)', async () => {
+    expect(await box.cli(['run', BATCH, '--runner', 'fake'], undefined)).toBe(20);
+    expect(box.events().find((e) => e.event === 'worker.crashed')).toMatchObject({
+      error: expect.stringContaining('script exhausted') as unknown,
+    });
+  });
+
+  it('run --runner claude reports a missing SDK as a worker crash, not a silent success', async () => {
+    expect(await box.cli(['run', BATCH, '--runner', 'claude'], undefined)).toBe(20);
+    expect(box.events().find((e) => e.event === 'worker.crashed')).toMatchObject({
+      error: expect.stringMatching(/claude-agent-sdk could not be loaded/) as unknown,
+    });
+  });
+
+  it('run rejects an unknown --runner', async () => {
+    expect(await box.cli(['run', BATCH, '--runner', 'gpt'], undefined)).toBe(1);
+    expect(box.output.join('')).toContain('unknown runner "gpt"');
+  });
 });

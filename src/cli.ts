@@ -6,20 +6,27 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { FakeRunner } from './runner/fake.js';
 import { Command, CommanderError } from 'commander';
 import { loadBacklog } from './backlog.js';
+import { loadConfig } from './config.js';
 import type { FetchLike } from './ci.js';
 import { CONFIG_RELATIVE_PATH, parseConfig } from './config.js';
 import { git } from './git.js';
 import { createJournal, EVENTS_FILE_NAME, RUNS_RELATIVE_DIR } from './journal.js';
 import { EXIT_CODES, readEnvelope, runBatch } from './run.js';
+import { ClaudeRunner } from './runner/claude.js';
 import type { AgentRunner } from './runner/index.js';
 import { RunIdSchema, type Event } from './schema/index.js';
 
+/** How `collie run` obtains its runner (SPEC 5: default is the real one). */
+export type RunnerChoice =
+  { kind: 'injected'; runner: AgentRunner | undefined } | { kind: 'claude' } | { kind: 'fake' };
+
 export interface CliDeps {
   cwd: string;
-  /** Absent until a real runner exists (runner/claude.ts is a later batch). */
-  runner: AgentRunner | undefined;
+  /** 'injected' lets tests supply a runner; the CLI entry point chooses between claude and fake. */
+  runner: RunnerChoice | AgentRunner | undefined;
   fetch: FetchLike;
   now: () => Date;
   out: (text: string) => void;
@@ -93,9 +100,32 @@ async function init(
   return EXIT_CODES.PASS;
 }
 
-async function run(deps: CliDeps, batchId: string): Promise<number> {
-  if (deps.runner === undefined) {
-    deps.err('no agent runner is available yet (runner/claude.ts is not implemented in v0.1)\n');
+/** Resolves a runner choice; the real runner reads its configuration when constructed. */
+export function resolveRunner(
+  choice: RunnerChoice | AgentRunner | undefined,
+  root: string,
+): AgentRunner | undefined {
+  if (choice === undefined) return undefined;
+  if ('run' in choice) return choice;
+  switch (choice.kind) {
+    case 'injected':
+      return choice.runner;
+    case 'fake':
+      // No scripted scenes, so every run fails loudly: the FakeRunner contract.
+      return new FakeRunner([]);
+    case 'claude':
+      return new ClaudeRunner(loadConfig(root));
+  }
+}
+
+async function run(
+  deps: CliDeps,
+  batchId: string,
+  runnerChoice?: RunnerChoice | AgentRunner,
+): Promise<number> {
+  const runner = resolveRunner(runnerChoice ?? deps.runner, deps.cwd);
+  if (runner === undefined) {
+    deps.err('no agent runner is available\n');
     return EXIT_CODES.ERROR;
   }
   const runId = runIdAt(deps.now());
@@ -103,7 +133,7 @@ async function run(deps: CliDeps, batchId: string): Promise<number> {
     root: deps.cwd,
     batchId,
     runId,
-    runner: deps.runner,
+    runner,
     fetch: deps.fetch,
     remote: deps.remote ?? 'origin',
     now: deps.now,
@@ -201,8 +231,16 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
       'run one batch: worker -> reviewer -> arbiter (exit 0 PASS / 10 FIX / 20 BLOCK / 1 error)',
     )
     .argument('<batch_id>')
-    .action(async (batchId: string) => {
-      code = await run(deps, batchId);
+    .option('--runner <kind>', 'agent runner: claude (default) or fake')
+    .action(async (batchId: string, opts: { runner?: string }) => {
+      const kind = opts.runner;
+      if (kind !== undefined && kind !== 'claude' && kind !== 'fake') {
+        deps.err(`unknown runner ${JSON.stringify(kind)}; use claude or fake\n`);
+        code = EXIT_CODES.ERROR;
+        return;
+      }
+      // Without the flag, the runner the caller wired in (the real one from the entry point).
+      code = await run(deps, batchId, kind === undefined ? undefined : { kind });
     });
   program
     .command('show')
@@ -234,7 +272,7 @@ if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
   const [, , ...args] = process.argv;
   void main(args, {
     cwd: process.cwd(),
-    runner: undefined,
+    runner: { kind: 'claude' },
     fetch: (url, init) => fetch(url, init),
     now: () => new Date(),
     out: (t) => process.stdout.write(t),

@@ -38,9 +38,12 @@ export const EXIT_CODES: Readonly<Record<VerdictValue | 'ERROR', number>> = {
 // eslint-disable-next-line no-restricted-syntax -- unit conversion, not a threshold
 const MS_PER_SECOND = 1000;
 
-/** Dependencies approved by SPEC 2.2 and ADR-002; rule 3 blocks anything else. */
+/**
+ * Dependencies approved by SPEC 2.2 and ADR-002; rule 3 blocks anything else.
+ * The agent SDK is listed in SPEC 2.2 but its licence is outside CONSTRAINTS
+ * 铁律 13, so it stays off this list until ADR-004 rules (v01-b05 report).
+ */
 export const APPROVED_DEPENDENCIES: readonly string[] = [
-  '@anthropic-ai/claude-agent-sdk',
   'commander',
   'zod',
   'smol-toml',
