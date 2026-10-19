@@ -5,6 +5,16 @@ import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
 import tseslint from 'typescript-eslint';
 
+const SDK_IMPORTS = {
+  group: ['@anthropic-ai/*', '@anthropic-ai/**'],
+  message: 'Agent SDKs may only be imported inside src/runner/ (CONSTRAINTS 铁律 15).',
+};
+const FAKE_RUNNER_IMPORTS = {
+  regex: '(^|/)(runner/)?fake(\\.js)?$',
+  message:
+    'Roles must depend on runner/index.ts only, never the fake runner (CONSTRAINTS 铁律 15).',
+};
+
 export default tseslint.config(
   {
     ignores: ['dist/**', 'node_modules/**', 'coverage/**', '.collie/**'],
@@ -38,6 +48,22 @@ export default tseslint.config(
             'Numeric literal in src/: thresholds belong in .collie/collie.toml (CONSTRAINTS 铁律 11).',
         },
       ],
+    },
+  },
+  {
+    // CONSTRAINTS 铁律 15 / SPEC 4.1: agent SDKs are reachable only through src/runner/.
+    files: ['src/**/*.ts'],
+    ignores: ['src/runner/**'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [SDK_IMPORTS] }],
+    },
+  },
+  {
+    // Roles depend on the runner interface only: no SDK, no fake runner.
+    // This block overrides the one above for src/roles/, so it repeats SDK_IMPORTS.
+    files: ['src/roles/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [SDK_IMPORTS, FAKE_RUNNER_IMPORTS] }],
     },
   },
   {

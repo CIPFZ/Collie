@@ -1,0 +1,110 @@
+// Scripted AgentRunner for tests (SPEC 4.1, CONSTRAINTS 铁律 16). Each run()
+// consumes the next scene in order: it may write files into cwd, emit stream
+// events, run an arbitrary effect (e.g. a git commit), then resolve or reject.
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, normalize, sep } from 'node:path';
+import type { AgentRole, AgentRunner, RunOptions, RunResult } from './index.js';
+
+export interface FakeSceneContext {
+  cwd: string;
+  opts: RunOptions;
+}
+
+interface FakeSceneBase {
+  /** When set, a call with a different role fails instead of consuming the scene. */
+  expectRole?: AgentRole;
+  /** Files to write, keyed by path relative to opts.cwd. */
+  files?: Record<string, string>;
+  /** Passed to opts.onEvent one by one, after files are written. */
+  events?: unknown[];
+  /** Runs after files and events; use it for side effects such as git commits. */
+  effect?: (ctx: FakeSceneContext) => void | Promise<void>;
+}
+
+/** One scripted run: it either resolves with `result` or rejects with `error` (a crash). */
+export type FakeScene = FakeSceneBase &
+  ({ result: RunResult; error?: never } | { error: Error; result?: never });
+
+/** A recorded call. Arrays are copied so later mutation by the caller is not hidden. */
+export interface RecordedCall {
+  role: AgentRole;
+  prompt: string;
+  systemPrompt: string;
+  allowedTools: string[];
+  cwd: string;
+  maxTurns: number;
+  hasOnEvent: boolean;
+}
+
+export class FakeRunnerError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FakeRunnerError';
+  }
+}
+
+function safeRelative(path: string): string {
+  const normalized = normalize(path);
+  if (path === '' || isAbsolute(path) || normalized === '..' || normalized.startsWith(`..${sep}`)) {
+    throw new FakeRunnerError(`scene file path must stay inside cwd: ${JSON.stringify(path)}`);
+  }
+  return normalized;
+}
+
+export class FakeRunner implements AgentRunner {
+  private readonly scenes: readonly FakeScene[];
+  private readonly recorded: RecordedCall[] = [];
+
+  constructor(scenes: readonly FakeScene[]) {
+    for (const scene of scenes) {
+      for (const path of Object.keys(scene.files ?? {})) safeRelative(path);
+    }
+    this.scenes = scenes;
+  }
+
+  /** Every call made so far, in order, including ones that failed. */
+  get calls(): readonly RecordedCall[] {
+    return this.recorded;
+  }
+
+  /** Scenes not yet consumed. */
+  get remaining(): number {
+    return this.scenes.length - this.recorded.length;
+  }
+
+  async run(opts: RunOptions): Promise<RunResult> {
+    const index = this.recorded.length;
+    this.recorded.push({
+      role: opts.role,
+      prompt: opts.prompt,
+      systemPrompt: opts.systemPrompt,
+      allowedTools: [...opts.allowedTools],
+      cwd: opts.cwd,
+      maxTurns: opts.maxTurns,
+      hasOnEvent: opts.onEvent !== undefined,
+    });
+
+    const scene = this.scenes[index];
+    if (scene === undefined) {
+      throw new FakeRunnerError(
+        `script exhausted: call ${String(index + 1)} (role ${opts.role}) has no scene; ${String(this.scenes.length)} scripted`,
+      );
+    }
+    if (scene.expectRole !== undefined && scene.expectRole !== opts.role) {
+      throw new FakeRunnerError(
+        `scene ${String(index)} expects role ${scene.expectRole}, got ${opts.role}`,
+      );
+    }
+
+    for (const [path, content] of Object.entries(scene.files ?? {})) {
+      const target = join(opts.cwd, safeRelative(path));
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, content);
+    }
+    for (const event of scene.events ?? []) opts.onEvent?.(event);
+    await scene.effect?.({ cwd: opts.cwd, opts });
+
+    if (scene.error !== undefined) throw scene.error;
+    return { ...scene.result };
+  }
+}

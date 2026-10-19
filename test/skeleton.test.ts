@@ -108,6 +108,36 @@ describe('skeleton: eslint rules', () => {
   });
 });
 
+describe('skeleton: import isolation (CONSTRAINTS 铁律 15)', () => {
+  const eslint = new ESLint({ cwd: root });
+  const SDK = "import { query } from '@anthropic-ai/claude-agent-sdk';\nexport const q = query;\n";
+
+  async function restrictedImports(file: string, code: string): Promise<number> {
+    // Only lint paths that exist so type-aware rules can resolve the file.
+    const [result] = await eslint.lintText(code, { filePath: join(root, file) });
+    return (result?.messages ?? []).filter((m) => m.ruleId === 'no-restricted-imports').length;
+  }
+
+  it('forbids agent SDK imports in src/ outside src/runner/', async () => {
+    expect(await restrictedImports('src/schema/index.ts', SDK)).toBe(1);
+    expect(await restrictedImports('src/journal.ts', SDK)).toBe(1);
+  });
+
+  it('allows agent SDK imports inside src/runner/', async () => {
+    expect(await restrictedImports('src/runner/fake.ts', SDK)).toBe(0);
+  });
+
+  it('configures src/roles/ to forbid both the SDK and the fake runner', async () => {
+    const config: unknown = await eslint.calculateConfigForFile(join(root, 'src/roles/worker.ts'));
+    const entry =
+      typeof config === 'object' && config !== null && 'rules' in config
+        ? (config.rules as Record<string, unknown>)['no-restricted-imports']
+        : undefined;
+    expect(JSON.stringify(entry)).toContain('@anthropic-ai/*');
+    expect(JSON.stringify(entry)).toContain('runner/');
+  });
+});
+
 describe('skeleton: CI workflow', () => {
   it('listens on push to main (CONSTRAINTS 铁律 5)', () => {
     expect(readText('.github/workflows/ci.yml')).toMatch(/push:\s*\n\s*branches:\s*\[\s*main\s*\]/);
