@@ -9,6 +9,11 @@ const SDK_IMPORTS = {
   group: ['@anthropic-ai/*', '@anthropic-ai/**'],
   message: 'Agent SDKs may only be imported inside src/runner/ (CONSTRAINTS 铁律 15).',
 };
+const WORKER_ROLE_IMPORTS = {
+  regex: '(^|/)worker(\\.js)?$',
+  message:
+    'The reviewer must never reach the worker role or its report reader (SPEC 4.2, CONSTRAINTS 铁律 6).',
+};
 const FAKE_RUNNER_IMPORTS = {
   regex: '(^|/)(runner/)?fake(\\.js)?$',
   message:
@@ -64,6 +69,16 @@ export default tseslint.config(
     files: ['src/roles/**/*.ts'],
     rules: {
       'no-restricted-imports': ['error', { patterns: [SDK_IMPORTS, FAKE_RUNNER_IMPORTS] }],
+    },
+  },
+  {
+    // Overrides the src/roles/ block for the reviewer, so it repeats both patterns.
+    files: ['src/roles/reviewer.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [SDK_IMPORTS, FAKE_RUNNER_IMPORTS, WORKER_ROLE_IMPORTS] },
+      ],
     },
   },
   {

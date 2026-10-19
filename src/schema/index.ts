@@ -194,6 +194,38 @@ export const ReportSchema = z.strictObject({
 });
 export type Report = z.infer<typeof ReportSchema>;
 
+export const VerdictValueSchema = z.enum(['PASS', 'FIX', 'BLOCK']);
+export type VerdictValue = z.infer<typeof VerdictValueSchema>;
+
+/** One acceptance command as actually run by R4 (SPEC 3.5). */
+export const VerifyEvidenceSchema = z.strictObject({
+  cmd: NonEmptyString,
+  exit_code: z.number().int(),
+  summary: z.string(),
+});
+
+/** Trailing JSON block of verdict.md (SPEC 3.5). Written by R4, read by R2. */
+export const VerdictSchema = z.strictObject({
+  schema_version: z.literal(SCHEMA_VERSION),
+  batch_id: BatchIdSchema,
+  verdict: VerdictValueSchema,
+  evidence: z.strictObject({
+    commits_actual: z.array(ShaSchema),
+    verify_results: z.array(VerifyEvidenceSchema),
+    remote_has_head: z.boolean(),
+    ci_conclusion: z.string(),
+    ci_run_url: z.string(),
+    ci_branch_matched: z.boolean(),
+    deps_diff: z.array(z.string()),
+    spec_diff_lines: z.number().int().nonnegative(),
+  }),
+  // SPEC 3.5 does not specify item shapes; arbiter rule 4 only needs emptiness.
+  claim_mismatches: z.array(JsonValueSchema),
+  gaps: z.array(z.string()),
+  reason: z.string(),
+});
+export type Verdict = z.infer<typeof VerdictSchema>;
+
 // ---------------------------------------------------------------------------
 // External: GitHub Actions REST API (GET /repos/{owner}/{repo}/actions/runs)
 // ---------------------------------------------------------------------------
