@@ -39,10 +39,11 @@ export interface ClaudeRunnerOptions {
    * not on the CONSTRAINTS 铁律 13 whitelist).
    */
   query?: ClaudeQuery;
-  /** Defaults to passing through to the SDK; see ADR-004. */
-  permissionMode?: ClaudeQueryOptions['permissionMode'];
   abortController?: () => AbortController;
 }
+
+/** The platform dependency this runner brings (ADR-004); the only place its name is spelled. */
+export const CLAUDE_SDK_PACKAGE = '@anthropic-ai/claude-agent-sdk';
 
 const EXIT_OK = 0;
 const EXIT_FAILED = 1;
@@ -54,14 +55,14 @@ const EXIT_FAILED = 1;
  * be added at all.
  */
 async function loadSdkQuery(): Promise<ClaudeQuery> {
-  const specifier = '@anthropic-ai/claude-agent-sdk';
+  const specifier = CLAUDE_SDK_PACKAGE;
   let sdk: unknown;
   try {
     sdk = await import(specifier);
   } catch (error) {
     throw new Error(
       `${specifier} could not be loaded (${error instanceof Error ? error.message : String(error)}); ` +
-        'its licence is awaiting ADR-004, so it is not a dependency of Collie yet',
+        'install it with npm (ADR-004)',
       { cause: error },
     );
   }
@@ -105,13 +106,11 @@ function toUsage(usage: ResultMessage['usage']): Usage | undefined {
 export class ClaudeRunner implements AgentRunner {
   private readonly config: CollieConfig;
   private readonly queryFn: ClaudeQuery;
-  private readonly permissionMode: ClaudeQueryOptions['permissionMode'];
   private readonly makeAbortController: () => AbortController;
 
   constructor(config: CollieConfig, options: ClaudeRunnerOptions = {}) {
     this.config = config;
     this.queryFn = options.query ?? lazySdkQuery;
-    this.permissionMode = options.permissionMode;
     this.makeAbortController = options.abortController ?? (() => new AbortController());
   }
 
@@ -146,7 +145,11 @@ export class ClaudeRunner implements AgentRunner {
       allowedTools: [...opts.allowedTools],
       cwd: opts.cwd,
       abortController: controller,
-      ...(this.permissionMode === undefined ? {} : { permissionMode: this.permissionMode }),
+      // SPEC 3.1: the role's permission_mode; the SDK refuses bypass without the explicit opt-in.
+      ...(agent.permission_mode === undefined ? {} : { permissionMode: agent.permission_mode }),
+      ...(agent.permission_mode === 'bypassPermissions'
+        ? { allowDangerouslySkipPermissions: true }
+        : {}),
     };
 
     let result: ResultMessage | undefined;

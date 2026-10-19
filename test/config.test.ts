@@ -18,11 +18,13 @@ repo = "https://github.com/CIPFZ/Collie"
 model = "claude-opus-4-6"
 allowed_tools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
 max_turns = 120
+permission_mode = "bypassPermissions"
 
 [agent.reviewer]
 model = "claude-opus-4-6"
 allowed_tools = ["Read", "Glob", "Grep", "Bash"]
 max_turns = 60
+permission_mode = "bypassPermissions"
 
 [limits]
 stall_secs = 90
@@ -69,6 +71,7 @@ describe('config: the repository .collie/collie.toml', () => {
       model: 'claude-opus-4-6',
       allowed_tools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
       max_turns: 120,
+      permission_mode: 'bypassPermissions',
     });
   });
 
@@ -77,6 +80,7 @@ describe('config: the repository .collie/collie.toml', () => {
       model: 'claude-opus-4-6',
       allowed_tools: ['Read', 'Glob', 'Grep', 'Bash'],
       max_turns: 60,
+      permission_mode: 'bypassPermissions',
     });
   });
 
@@ -146,6 +150,26 @@ describe('config: validation errors carry field paths', () => {
       `${VALID_TOML}\n[agent.auditor]\nmodel = "m"\nallowed_tools = []\nmax_turns = 1\n`,
     );
     expect(err.issues.map((i) => i.path)).toEqual(['agent.auditor']);
+  });
+
+  it('reports a permission_mode outside the SPEC 3.1 values', () => {
+    const err = configError(
+      replaceLine(
+        VALID_TOML,
+        'max_turns = 60\npermission_mode = "bypassPermissions"',
+        'max_turns = 60\npermission_mode = "yolo"',
+      ),
+    );
+    expect(err.issues.map((i) => i.path)).toEqual(['agent.reviewer.permission_mode']);
+  });
+
+  it('accepts a role without permission_mode (SDK default)', () => {
+    const text = replaceLine(
+      VALID_TOML,
+      'max_turns = 120\npermission_mode = "bypassPermissions"\n',
+      'max_turns = 120\n',
+    );
+    expect(parseConfig(text, 'inline.toml').agent.worker.permission_mode).toBeUndefined();
   });
 
   it('reports a schema_version mismatch', () => {

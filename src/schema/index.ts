@@ -38,10 +38,15 @@ export const RunIdSchema = z.string().regex(RUN_ID_PATTERN, 'invalid run_id');
 // Config (SPEC 3.1)
 // ---------------------------------------------------------------------------
 
+/** SPEC 3.1: omitted means the SDK default (ask every time). */
+export const PermissionModeSchema = z.enum(['default', 'acceptEdits', 'bypassPermissions']);
+export type PermissionMode = z.infer<typeof PermissionModeSchema>;
+
 export const AgentConfigSchema = z.strictObject({
   model: NonEmptyString,
   allowed_tools: z.array(NonEmptyString),
   max_turns: z.number().int().positive(),
+  permission_mode: PermissionModeSchema.optional(),
 });
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 

@@ -115,13 +115,6 @@ describe('cli: init, show and the R2 commits', () => {
     });
   });
 
-  it('run --runner claude reports a missing SDK as a worker crash, not a silent success', async () => {
-    expect(await box.cli(['run', BATCH, '--runner', 'claude'], undefined)).toBe(20);
-    expect(box.events().find((e) => e.event === 'worker.crashed')).toMatchObject({
-      error: expect.stringMatching(/claude-agent-sdk could not be loaded/) as unknown,
-    });
-  });
-
   it('run rejects an unknown --runner', async () => {
     expect(await box.cli(['run', BATCH, '--runner', 'gpt'], undefined)).toBe(1);
     expect(box.output.join('')).toContain('unknown runner "gpt"');

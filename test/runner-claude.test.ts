@@ -4,7 +4,12 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
-import { ClaudeRunner, type ClaudeQuery, type ClaudeQueryParams } from '../src/runner/claude.js';
+import {
+  CLAUDE_SDK_PACKAGE,
+  ClaudeRunner,
+  type ClaudeQuery,
+  type ClaudeQueryParams,
+} from '../src/runner/claude.js';
 import type { RunOptions } from '../src/runner/index.js';
 
 const config = loadConfig(join(import.meta.dirname, '..'));
@@ -77,6 +82,8 @@ describe('runner-claude: options built from the role config', () => {
         cwd: '/repo',
         abortController: expect.any(AbortController) as unknown,
         settingSources: [],
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
       },
     });
   });
@@ -113,16 +120,33 @@ describe('runner-claude: options built from the role config', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('passes permissionMode only when configured', async () => {
-    const plain = scripted([success()]);
-    await new ClaudeRunner(config, { query: plain.query }).run(opts());
-    expect(plain.calls[0]?.options).not.toHaveProperty('permissionMode');
-    const explicit = scripted([success()]);
-    await new ClaudeRunner(config, {
-      query: explicit.query,
+  it('takes permission_mode from the role config and opts in to bypass explicitly', async () => {
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(config, { query }).run(opts());
+    expect(config.agent.worker.permission_mode).toBe('bypassPermissions');
+    expect(calls[0]?.options).toMatchObject({
       permissionMode: 'bypassPermissions',
-    }).run(opts());
-    expect(explicit.calls[0]?.options?.permissionMode).toBe('bypassPermissions');
+      allowDangerouslySkipPermissions: true,
+    });
+  });
+
+  it('passes no permission options when the role sets none', async () => {
+    const worker: typeof config.agent.worker = { ...config.agent.worker };
+    delete worker.permission_mode;
+    const plain = { ...config, agent: { ...config.agent, worker } };
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(plain, { query }).run(opts());
+    expect(calls[0]?.options).not.toHaveProperty('permissionMode');
+    expect(calls[0]?.options).not.toHaveProperty('allowDangerouslySkipPermissions');
+  });
+
+  it('never opts in to bypass for a non-bypass mode', async () => {
+    const worker = { ...config.agent.worker, permission_mode: 'acceptEdits' as const };
+    const edits = { ...config, agent: { ...config.agent, worker } };
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(edits, { query }).run(opts());
+    expect(calls[0]?.options?.permissionMode).toBe('acceptEdits');
+    expect(calls[0]?.options).not.toHaveProperty('allowDangerouslySkipPermissions');
   });
 });
 
@@ -229,10 +253,12 @@ describe('runner-claude: the real SDK is never loaded by these tests', () => {
     expect(() => new ClaudeRunner(config, { query })).not.toThrow();
   });
 
-  it('fails loudly on the first run when the SDK cannot be loaded', async () => {
-    // The default query needs the SDK package; without it the run must say so
-    // rather than pretend to work (ADR-004 decides whether it may be installed).
-    const runner = new ClaudeRunner(config);
-    await expect(runner.run(opts())).rejects.toThrow(/could not be loaded|ADR-004/);
+  it("names the SDK package as the runner's platform dependency (ADR-004)", () => {
+    expect(CLAUDE_SDK_PACKAGE).toBe('@anthropic-ai/claude-agent-sdk');
+  });
+
+  it('constructs with the real SDK loader without loading it', () => {
+    // Loading happens on the first run only; the tests never trigger it.
+    expect(() => new ClaudeRunner(config)).not.toThrow();
   });
 });
