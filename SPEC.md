@@ -172,6 +172,13 @@ R1 必须停下来与用户重新讨论，不得进入执行环节。
 也能让 `npm test -- xxx` 通过。因此 task 中的「测试内容要求」由 R4 读测试代码核验，
 这是 AGENT-reviewer.md 第 4 节「该写的测试没写」盲区的既定处理方式。
 
+验收命令的可移植性约定（v01-b01 后追加）：
+- 测试过滤**写完整文件路径**（`npm test -- test/schema.test.ts`），不用子串；
+  子串过滤在出现同名片段的文件后，证明的内容会悄悄变化
+- `grep` 只用 POSIX ERE，禁用 `\s` `\d` 等 GNU 扩展（macOS 语义不同）；
+  空白用 `[[:space:]]`
+- 命令须在 Linux 与 macOS 上语义一致，R1 签发前自测
+
 ### 3.3 任务信封（task.md）
 
 R2 写，R3 读。Markdown 正文 + YAML frontmatter。

@@ -5,52 +5,55 @@
 
 更新时间：2026-10-16
 当前版本：v0.1 取证
-当前批次：v01-b01（已签发，待实现）
-CI 实际状态：未触发（工程骨架尚未建立，CI 配置属 v01-b01 条目 1）
+当前批次：v01-b01 已 PASS（附条件）；v01-b02 待签发
+CI 实际状态：worker 声称 4 次 `push / main / success`；R4 因 API 限流未能独立核实，待项目所有者目视确认
 
 ## v0.1 批次（对应 docs/backlog.md）
 
-- [ ] v01-b01 工程骨架与基础设施　← 已签发 task.md
+- [x] v01-b01 工程骨架与基础设施　← PASS（附条件），verdict 见 `.collie/batches/v01-b01/verdict.md`
 - [ ] v01-b02 批次解析与 worker 角色
 - [ ] v01-b03 审核角色与仲裁
 
 ## 已验证完成（经审核 Agent 实测取证）
 
-无。当前仅有文档，无代码。
+v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
+- 7 条验收命令全部 exit 0；`npm test` 111 passed / 0 failed；在干净 clone 上 `npm ci` 复现一致
+- 受保护文件零触碰；改动范围 17 文件全在工程配置 / `src/` / `test/`
+- 测试覆盖超出 task 要求（journal 每种坏行独立用例；config 多错误聚合与 TOML 行号）
+- 铁律 11 由 `no-magic-numbers` + `no-restricted-syntax` 双规则执行，变异测试证实
+- 运行时依赖许可证干净；声称与实测零差异
 
 ## 进行中
 
-v01-b01。task 信封见 `.collie/batches/v01-b01/task.md`，
-kickoff prompt 见 `AGENT_KICKOFF.md`。
+无。等待项目所有者对三项裁决与 CI 目视确认后签发 v01-b02。
 
 ## 已知问题
 
-- 远端访问协议因环境而异：R1/R2 所在环境 SSH 可用、HTTPS 不可用；
-  实现 Agent 环境相反。两者均指向 `CIPFZ/Collie`，不影响工作
-- 本地默认分支初始为 `master`，已改名 `main` 以与 SPEC 的 CI 配置一致
-- 环境未安装 `gh`，CI 结论改用 GitHub 公开 REST API 查询（未鉴权限速 60 次/小时）
-
-## 本轮决策记录（v01-b01 执行计划答复，2026-10-16）
-
-- Q1：`.collie/collie.toml` 由 R1 放置，worker 只读。ROLES / AGENT-worker / SPEC 2.3 已同步
-- Q2：开发依赖经 ADR-002 批准；`smol-toml` 许可证勘误为 BSD-3-Clause；TS 锁 `~6.0.x`
-- Q3 全部采纳：批次条目上限为 schema 内具名常量；`replay` 遇不存在文件返回 `[]`；
-  骨架提交 scope 用 `ci`
-- 验收标准修订：删除恒通过的「无裸写阈值」grep，改由 lint `no-magic-numbers` 覆盖；
-  `npm test -- xxx` 与 CI grep 的能力边界已如实写入 task 与 SPEC 3.2
-- `Event` 扩展字段收紧为 JSON 值（SPEC 3.6）；`run_id` 加路径安全正则
-- backlog.md 与 task.md 对齐，状态改用枚举值 `running`
-- `base_sha` 签发约定写入 SPEC 3.3
+- R4 用未鉴权 GitHub API 查 CI 在共享出口 IP 下不可用（配额 0/60）。需配只读 token 或改为目视确认
+- 远端访问协议因环境而异：R1/R2 环境 SSH 可用、HTTPS 不可用；worker 环境相反
+- Agent 的写文件工具曾把 U+2028/U+2029 原样写入源码，已自查清除。R4 后续批次应扫描此项
 
 ## 开放问题（需项目所有者决策）
 
-见 SPEC 第 10 章 Q1~Q4，均不阻塞 v01-b01。
+- **ADR-003 许可证白名单作用范围**：A 只管运行时 / B 全树列例外 / C 全树无例外。R1 建议 A
+- CI 实际结论目视确认：`134ea31` `3f4992d` `e5c7d3f` `e99fde3` 四次均为 `main / success`？
+
+## 本轮裁决记录（v01-b01 汇报，2026-10-16）
+
+- 裁决 2 追认：`no-restricted-syntax` 补位成立，ADR-002 §4 已改正其错误前提
+- 裁决 3 裁定：`events.ndjson` 不提交，ROLES 第 6 节自相矛盾已消除；
+  新增信封交接机制——worker 以 `report(collie): <batch_id>` 单独提交 report.md，
+  R4 同理提交 verdict.md（铁律 19 唯一例外）
+- 采纳验收命令反馈：测试过滤改为完整路径；grep 限 POSIX ERE；写入 SPEC 3.2
+- 流程缺口：同机假设在 worker 与 R2 分离时不成立，已通过信封交接解决
 
 ## ADR 列表
 
-- ADR-001 TypeScript 选型（已批准，2026-10-16）
+- ADR-001 TypeScript 选型（已批准）
+- ADR-002 开发工具链依赖批准与 SPEC 2.2 勘误（已批准，§4 于本轮修订）
+- ADR-003 许可证白名单作用范围（**待批准**）
 
 ## 下次会话从这里继续
 
-从 v01-b01 开始。三个条目：工程骨架、配置与 schema、事件日志。
-本轮附带验证目标：我们写的验收标准是否真的可机器判定。
+项目所有者裁决 ADR-003 与 CI 目视确认后，R1 签发 v01-b02。
+worker 下轮开工前须先 `git pull` 并提交推送其本地的 `.collie/batches/v01-b01/report.md`。

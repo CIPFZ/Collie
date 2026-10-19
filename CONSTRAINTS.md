@@ -78,10 +78,13 @@ Agent 行为用 `fake.ts` 按脚本模拟。
 
 **铁律 19。** 提交职责分离：代码提交只由 R3 做；`.collie/batches/` 下信封与
 `docs/progress.md` 由 R2 提交。R2 只在 worker 进程退出后才提交，避免交错。
+**唯一例外**（2026-10-16）：worker 写完 `report.md` 后以 `report(collie): <batch_id>`
+单独提交并推送该文件，使信封经仓库到达 R2；R4 的 `verdict.md` 同理。
+`.collie/runs/` 下全部文件一律不提交。
 
 **铁律 20。** 提交信息格式 `<scope>: <summary>`，英文。
 scope 取值：`cli`、`config`、`schema`、`backlog`、`journal`、`git`、`ci`、
-`runner`、`roles`、`verify`、`arbiter`、`progress`、`docs`、`test`、`wip`。
+`runner`、`roles`、`verify`、`arbiter`、`progress`、`docs`、`test`、`wip`、`report`。
 
 ## 6. 中断与恢复
 

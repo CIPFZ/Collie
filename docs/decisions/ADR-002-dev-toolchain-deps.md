@@ -44,11 +44,21 @@
 
 ### 4. 铁律 11 的执行方式补充
 
-「代码中禁止裸写阈值数字」由 ESLint `@typescript-eslint/no-magic-numbers`
-在 `src/**` 上强制执行（放行 0 / 1 / -1），而非依赖 grep。
-原因：grep 只能枚举已知数值，lint 规则覆盖全部字面量。
+「代码中禁止裸写阈值数字」在 `src/**` 上由两条 ESLint 规则共同强制执行：
+
+- `@typescript-eslint/no-magic-numbers`（放行 0 / 1 / -1）
+- `no-restricted-syntax` 禁止 0 和 1 以外的任何数字字面量
+
+**修订（2026-10-16，v01-b01 追认）：** 本节原先只写了 `no-magic-numbers`，
+前提不成立——该规则把 `const stallSecs = 90` 这类具名声明视为合规，不会报告，
+阈值可以藏在常量后面通过 lint。实现 Agent 在 v01-b01 发现此漏洞并补了
+`no-restricted-syntax`，变异测试证实两种写法均被拦下。R1 追认。
+
 结构不变量（如 `Batch.items` 的 1~3 上限）属 schema 定义而非可调阈值，
-以具名常量写在 `src/schema/` 内，不进 `collie.toml`。
+以具名常量写在 `src/schema/` 内，用带理由的 `eslint-disable-next-line` 局部豁免，
+不进 `collie.toml`。全仓 `eslint-disable` 数量由 R4 每批次核查。
+
+grep 不再作为铁律 11 的执行手段：它只能枚举已知数值，lint 规则覆盖全部字面量。
 
 ## 后果
 

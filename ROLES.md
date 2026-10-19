@@ -187,15 +187,26 @@
     batches/<id>/task.md       R2 写 · R3 读
     batches/<id>/report.md     R3 写 · R2 读 · R4 不读
     batches/<id>/verdict.md    R4 写 · R2 读
-    runs/<run>/events.ndjson   R2 写 · 轨迹 · 提交
+    runs/<run>/events.ndjson   R2 写 · 轨迹 · gitignore（见下方说明）
     runs/<run>/stream.ndjson   R2 写 · 易失遥测 · gitignore
     heartbeat                  R2 写 · gitignore
   <代码与测试>                  R3 写 · 唯一写者
 ```
 
 提交职责划分：代码提交只由 R3 做；`.collie/batches/` 下信封与 `docs/progress.md` 由 R2 提交
-（它们是审计证据）；`runs/` 下流日志与 heartbeat 全部 gitignore。
+（它们是审计证据）；`runs/` 下全部文件与 heartbeat 一律 gitignore。
 两者不冲突，因为 R2 只在 worker 进程结束后才写提交。
+
+关于 `events.ndjson` 不提交（2026-10-16 裁定，消除本节此前的自相矛盾）：
+它是 R2 的本地状态源，用于同机崩溃恢复，不是跨机审计证据。
+跨机可追溯的证据是 `batches/<id>/` 下的三份信封——它们随代码提交。
+v0.4 做时间轨迹时，`collie timeline` 从本地 `runs/` 读取；
+若将来需要跨机保留轨迹，另立决策，不在 v0.1~v0.3 范围内。
+
+信封交接（2026-10-16 补充，解决 worker 与 R2 不同机的问题）：
+worker 写完 `report.md` 后，**以 `report(collie): <batch_id>` 为提交信息单独提交并推送该文件**。
+这是铁律 19 的唯一例外，理由：信封必须经仓库到达 R2，同机假设在分布式场景下不成立。
+R4 的 `verdict.md` 同理由 R4 所在环境提交。
 
 全部直接提交 main，不开分支、不开 PR。推送后必须确认 CI 实际触发并通过。
 

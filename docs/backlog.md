@@ -13,8 +13,8 @@
 
 | 优先级 | 批次 | 标题 | 依赖 | 状态 |
 |---|---|---|---|---|
-| 1 | v01-b01 | 工程骨架与基础设施 | — | running |
-| 2 | v01-b02 | 批次解析与 worker 角色 | v01-b01 | pending |
+| 1 | v01-b01 | 工程骨架与基础设施 | — | passed（附条件：CI 结论待目视确认） |
+| 2 | v01-b02 | 批次解析与 worker 角色 | v01-b01 | pending（待签发） |
 | 3 | v01-b03 | 审核角色与仲裁 | v01-b02 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
@@ -72,10 +72,10 @@ CI 是否实际触发且监听分支正确（GitHub API）。
 | 说明 | 命令 | 期望 |
 |---|---|---|
 | 代码规范与类型 | `npm run lint && npm run typecheck` | exit 0 |
-| backlog 解析正确 | `npm test -- backlog` | exit 0 |
-| 拒绝不可判定验收 | `npm test -- backlog-reject` | exit 0 |
-| fake runner 闭环 | `npm test -- worker` | exit 0 |
-| task.md 格式正确 | `npm test -- task-envelope` | exit 0 |
+| backlog 解析正确 | `npm test -- test/backlog.test.ts` | exit 0 |
+| 拒绝不可判定验收 | `npm test -- test/backlog-reject.test.ts` | exit 0 |
+| fake runner 闭环 | `npm test -- test/worker.test.ts` | exit 0 |
+| task.md 格式正确 | `npm test -- test/task-envelope.test.ts` | exit 0 |
 
 额外禁止：
 - 在 `roles/` 中直接调用 Agent SDK（必须经 runner 接口）
@@ -99,12 +99,12 @@ CI 是否实际触发且监听分支正确（GitHub API）。
 | 说明 | 命令 | 期望 |
 |---|---|---|
 | 代码规范与类型 | `npm run lint && npm run typecheck` | exit 0 |
-| 仲裁规则全覆盖 | `npm test -- arbiter` | exit 0 |
-| reviewer 不接收 report 正文 | `npm test -- reviewer-isolation` | exit 0 |
-| 场景 A 假 CI 全绿被拦 | `npm test -- scenario-a` | exit 0 |
-| 场景 B 假测试数被拦 | `npm test -- scenario-b` | exit 0 |
-| 场景 C 偷改 SPEC 被拦 | `npm test -- scenario-c` | exit 0 |
-| 退出码正确 | `npm test -- exit-codes` | exit 0 |
+| 仲裁规则全覆盖 | `npm test -- test/arbiter.test.ts` | exit 0 |
+| reviewer 不接收 report 正文 | `npm test -- test/reviewer-isolation.test.ts` | exit 0 |
+| 场景 A 假 CI 全绿被拦 | `npm test -- test/scenario-a.test.ts` | exit 0 |
+| 场景 B 假测试数被拦 | `npm test -- test/scenario-b.test.ts` | exit 0 |
+| 场景 C 偷改 SPEC 被拦 | `npm test -- test/scenario-c.test.ts` | exit 0 |
+| 退出码正确 | `npm test -- test/exit-codes.test.ts` | exit 0 |
 
 额外禁止：
 - 用约束解码强制 verdict 三值（必须由 arbiter 解析校验）
