@@ -91,7 +91,7 @@ npm run lint && npm run typecheck && npm test
 **先用中文自然语言把四段写完**（这是你的推理空间，不要压缩），
 最后再追加一个围栏 JSON 块。
 
-```markdown
+````markdown
 # 批次 <batch_id> 汇报
 
 ## 做了什么
@@ -122,7 +122,7 @@ npm run lint && npm run typecheck && npm test
   "open_questions": []
 }
 ```
-```
+````
 
 关于尾部 JSON 的重要说明：其中所有字段会被独立审核 Agent 逐项取证核对。
 **如实填写**。虚报不会让你通过，只会导致批次被判 FIX 或 BLOCK 并返工。

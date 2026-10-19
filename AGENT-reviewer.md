@@ -39,7 +39,7 @@
 
 | 取证项 | 做法 |
 |---|---|
-| 验收命令 | 逐条实跑 `task.md` 的 `acceptance[].cmd`，记录退出码与真实输出 |
+| 验收命令 | 逐条实跑 `task.md` 的 `acceptance[].cmd`，记录退出码与真实输出。**命令取 `parseBacklog` 解析后的形式**（`collie show` 可打印），不得从 `.md` 源码原样复制——表格中的 `\|` 是 GFM 转义，原样执行会让 grep 类命令失效放行 |
 | 提交事实 | `git log` 确认提交存在；`git ls-remote` 确认已推送到远端 |
 | CI 实际结论 | 查 CI 实际运行结论与 URL，**并核对其监听分支与仓库实际分支一致** |
 | SPEC 是否被改 | `git diff --stat <base>..<head> -- SPEC.md CONSTRAINTS.md` 等受保护文件 |
@@ -86,7 +86,7 @@
 **先用中文把推理过程与证据写清楚**（这是你的推理空间，不要压缩），
 最后再追加一个围栏 JSON 块。
 
-```markdown
+````markdown
 # 批次 <batch_id> 审核
 
 ## 取证过程
@@ -124,7 +124,7 @@
   "reason": ""
 }
 ```
-```
+````
 
 字段说明：
 - `claim_mismatches` — 每条写明「声称什么、实测什么」

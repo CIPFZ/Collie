@@ -5,16 +5,22 @@
 
 更新时间：2026-10-16
 当前版本：v0.1 取证
-当前批次：v01-b02（已签发，待实现）
+当前批次：v01-b02 已 PASS（附条件：4 个代码提交 CI 待目视确认）；v01-b03 待签发
 CI 实际状态：绿。v01-b01 四次运行由项目所有者目视确认均为 `main / success`
 
 ## v0.1 批次（对应 docs/backlog.md）
 
 - [x] v01-b01 工程骨架与基础设施　← PASS，verdict 见 `.collie/batches/v01-b01/verdict.md`
-- [ ] v01-b02 批次解析与 worker 角色　← 已签发 task.md（base_sha 4a690f5）
+- [x] v01-b02 批次解析与 worker 角色　← PASS（附条件），verdict 见 `.collie/batches/v01-b02/verdict.md`
 - [ ] v01-b03 审核角色与仲裁
 
 ## 已验证完成（经审核 Agent 实测取证）
+
+v01-b02，提交 `0ff9ef5` `8e7dbd4` `4785816` `e30c4ee`（HEAD `e30c4ee`）：
+- 8 条验收全部 exit 0；`npm test` 236 passed / 0 failed
+- 受保护文件零触碰；新增依赖仅 `yaml`（ISC）
+- `no-restricted-imports` 隔离经两处变异测试证实物理生效
+- backlog-reject 20 用例、readReport 8 边界，覆盖超出要求
 
 v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 7 条验收命令全部 exit 0；`npm test` 111 passed / 0 failed；在干净 clone 上 `npm ci` 复现一致
@@ -25,7 +31,7 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 
 ## 进行中
 
-v01-b02。task 信封见 `.collie/batches/v01-b02/task.md`。
+无。等待 CI 目视确认后签发 v01-b03。
 
 ## 已知问题
 
@@ -37,7 +43,15 @@ v01-b02。task 信封见 `.collie/batches/v01-b02/task.md`。
 
 无。
 
-## 本轮裁决记录（v01-b01 汇报，2026-10-16）
+## 本轮裁决记录（v01-b02 汇报，2026-10-16）
+
+- 裁决 1：验收命令唯一执行形式为 `parseBacklog` 输出，禁止从 .md 源码原样复制（SPEC 3.2、AGENT-reviewer 第 2 节）
+- 裁决 2：R1 过失——加 `ci_passed` 未 bump 版本。已升 `SCHEMA_VERSION = 2`，SPEC 3 写入版本历史与 v1→v2 迁移规则，b03 实现 `migrate.ts`；`collie.toml` 同步为 2
+- 裁决 3：AGENT-worker 与 AGENT-reviewer 第 5 节外层围栏改为四反引号
+- 采纳：status 断言用冻结快照；sha 加引号写入 SPEC 3.3
+- `wallclock_secs` 执行点裁定为 R2，`RunOptions` 加可选 `signal`（SPEC 3.3）
+
+## 上轮裁决记录（v01-b01 汇报，2026-10-16）
 
 - 裁决 2 追认：`no-restricted-syntax` 补位成立，ADR-002 §4 已改正其错误前提
 - 裁决 3 裁定：`events.ndjson` 不提交，ROLES 第 6 节自相矛盾已消除；
@@ -54,4 +68,4 @@ v01-b02。task 信封见 `.collie/batches/v01-b02/task.md`。
 
 ## 下次会话从这里继续
 
-v01-b02 已签发。worker 开工前先 `git pull` 到 task 提交之后，并先推送其本地的 v01-b01 report.md。
+项目所有者目视确认 v01-b02 四个代码提交 CI 后，R1 签发 v01-b03。

@@ -2,7 +2,7 @@
 # 本文件由 R1 依据 SPEC 3.1 放置；阈值须与 SPEC 完全一致（铁律 11）。
 # worker 只读。v0.1 实现 `collie init` 后由其从模板生成。
 
-schema_version = 1
+schema_version = 2
 
 [project]
 name = "collie"

@@ -100,13 +100,25 @@ session fork、NDJSON 流解析。用 TS 可直接复用，用其他语言等于
 ## 3. 数据模型
 
 所有跨边界结构集中定义在 `src/schema/`，用 zod 声明并导出类型。
-`SCHEMA_VERSION = 1`，字段变更必须 bump 并写迁移。
+`SCHEMA_VERSION = 2`，字段变更必须 bump 并写迁移。
+
+版本历史：
+- v1（v01-b01）：初始 `CollieConfig` / `Batch` / `Acceptance` / `Event`
+- v2（v01-b02 后，2026-10-16）：`Report.claims` 新增 `ci_passed: boolean`；
+  `TaskFrontmatter` 新增可选 `issued_by` / `revised_at`
+
+迁移规则（b03 实现于 `src/schema/migrate.ts`）：
+- 读取任何信封时先看 `schema_version`，低于当前版本则逐级迁移后再校验
+- v1 → v2：`claims.ci_passed` 缺失时填 `false`（视为「未声称」，对 arbiter 规则 7 保守），
+  `issued_by` / `revised_at` 缺失时省略
+- 写入时一律写当前版本
+- 配置文件 `collie.toml` 的 `schema_version` 同步 bump 为 2
 
 ### 3.1 配置
 
 ```toml
 # .collie/collie.toml
-schema_version = 1
+schema_version = 2
 
 [project]
 name = "collie"
@@ -181,13 +193,20 @@ R1 必须停下来与用户重新讨论，不得进入执行环节。
   空白用 `[[:space:]]`
 - 命令须在 Linux 与 macOS 上语义一致，R1 签发前自测
 
+**验收命令的唯一执行形式（v01-b02 后追加）：以 `parseBacklog` 的输出为准。**
+Markdown 表格中的 `\|` 是 GFM 转义，原样粘进 shell 时 grep 会把 `\|` 当普通字符，
+导致本应拦截违规的命令放行（v01-b02 实测）。因此：
+- `verify.ts` 与 R4 执行验收时必须读 `parseBacklog` 解析后的 `cmd`（`\|` 已还原）
+- 人工执行时须先经 `collie show <batch>` 打印解析后命令，不得从 `.md` 源码复制
+- `AGENT-reviewer.md` 第 2 节同步此要求
+
 ### 3.3 任务信封（task.md）
 
 R2 写，R3 读。Markdown 正文 + YAML frontmatter。
 
 ```markdown
 ---
-schema_version: 1
+schema_version: 2
 run_id: r-0007
 batch_id: v01-b03
 base_sha: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
@@ -222,6 +241,15 @@ revised_at: null            # 可选：重签时间，未重签为 null 或省�
 R4 取证与 arbiter 的受保护文件检查只针对 worker 的提交。
 R1/R2 若在签发后又修改了 SPEC 等文档，必须重新签发 task 并更新 `base_sha`。
 
+frontmatter 中的 sha 字段**必须加引号**：形如 `1234567e10` 的 sha 会被 YAML 解析为数字。
+Collie 生成时自动加引号；人工签发时手动加。
+
+`wallclock_secs` 的执行点（v01-b02 计划反馈后裁定）：由 **R2** 执行，不进 `RunOptions`。
+理由：墙钟是编排层的预算闸，runner 只负责「拉起并返回」；放进 runner 接口会让
+每个 runner 实现各自解释超时语义。R2 在 `runWorker` 外层以 `AbortSignal.timeout` 包裹，
+超时即进入信号阶梯（v0.2），v0.1 先只记 `worker.crashed` 事件并以非零退出码返回。
+`AgentRunner.run` 的 `RunOptions` 增加可选 `signal?: AbortSignal`，供 R2 传入。
+
 ### 3.4 汇报信封（report.md）
 
 R3 写，R2 读，**R4 不读**。Markdown 四段正文 + 尾部围栏 JSON。
@@ -232,7 +260,7 @@ R3 写，R2 读，**R4 不读**。Markdown 四段正文 + 尾部围栏 JSON。
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "batch_id": "v01-b03",
   "head_sha": "e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3",
   "claims": {
@@ -264,7 +292,7 @@ R4 写，R2 读。Markdown 推理正文 + 尾部围栏 JSON。
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "batch_id": "v01-b03",
   "verdict": "PASS",
   "evidence": {
