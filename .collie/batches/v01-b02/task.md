@@ -2,9 +2,10 @@
 schema_version: 1
 run_id: r-0002
 batch_id: v01-b02
-base_sha: 0a0ea43802009e29f3aed3076f7fb31eae27898e
+base_sha: 4a690f567397beb10bfc2b93ab9023a71c3af30e
 created_at: 2026-10-16T22:00:00Z
 attempt: 1
+revised_at: 2026-10-16T23:00:00Z
 interrupted_at: null
 issued_by: human-placeholder-r2
 ---
@@ -16,7 +17,7 @@ issued_by: human-placeholder-r2
 
 ## 开工前
 
-1. `git pull` 到 `0a0ea43` 或之后。上一轮后 SPEC 2.2 / 3.2 / 3.3 / 3.6、CONSTRAINTS 铁律 13 / 19 / 20、
+1. `git pull` 到 `4a690f5` 或之后。上一轮后 SPEC 2.2 / 3.2 / 3.3 / 3.6、CONSTRAINTS 铁律 13 / 19 / 20、
    ROLES 第 6 节、ADR-002 §4 均有修订，ADR-003 已批准。先读 `docs/progress.md` 的「本轮裁决记录」。
 2. 若你本地的 `.collie/batches/v01-b01/report.md` 尚未推送，先以 `report(collie): v01-b01` 单独提交推送它。
 
@@ -71,10 +72,17 @@ issued_by: human-placeholder-r2
 - `runWorker(runner, cfg, batch, root)`：经 runner 拉起 worker，
   systemPrompt 取 `AGENT-worker.md` 内容，allowedTools / maxTurns 取 `cfg.agent.worker`
 - `readReport(root, batchId)`：读回 `report.md`，提取**最后一个**围栏 JSON 块，
-  用 zod 校验（schema 按 SPEC 3.4 在 `src/schema/` 补 `ReportSchema`，含 `claims`）。
+  用 zod 校验（schema 按 SPEC 3.4 在 `src/schema/` 补 `ReportSchema`，含 `claims`；
+  **`claims` 含 `ci_passed: boolean`**，SPEC 3.4 已于 2026-10-16 修订）。
   找不到 JSON 块、多个块取最后一个、校验失败——都抛 `ReportError` 并说明原因
+- `TaskFrontmatterSchema` 为 strict，但须接受 SPEC 3.3 新增的两个可选字段
+  `issued_by?: string` 与 `revised_at?: string | null`（人工签发期实际在用）
+- `Usage` 定为 `{ inputTokens: number; outputTokens: number }`（采纳计划提案）
+- `RunOptions` 不含 `model`：运行时实现在构造时接收配置、按 role 自查（采纳计划提案，b03 落实）
 
 铁律 15：此模块只依赖 `runner/index.ts` 的接口类型，不 import `fake.ts` 或任何 SDK。
+同时在 ESLint 上对 `src/roles/**` 配置 `no-restricted-imports` 物理隔离，
+并在 `src/runner/` 以外的整个 `src/` 禁止导入 `@anthropic-ai/*`（采纳计划提案）。
 
 ## 验收标准
 
@@ -89,9 +97,11 @@ issued_by: human-placeholder-r2
 | 拒绝不可判定验收 | `npm test -- test/backlog-reject.test.ts` | exit 0 |
 | fake runner 闭环 | `npm test -- test/worker.test.ts` | exit 0 |
 | task.md 格式 | `npm test -- test/task-envelope.test.ts` | exit 0 |
-| roles 不直接依赖 SDK 或 fake | `! grep -rE "from ['\"](@anthropic-ai|\.\./runner/fake|\./fake)" src/roles/` | exit 0 |
+| roles 不直接依赖 SDK 或 fake | `test -d src/roles && ! grep -rE "from ['\"](@anthropic-ai\|\.\./runner/fake\|\./fake)" src/roles/` | exit 0 |
 
 能力边界（如实声明）：最后一条 grep 只查 import 字面，R4 另读代码核验。
+（修订 2026-10-16：原命令在 `src/roles/` 不存在时会空跑通过，且未转义的 `|` 会切坏表格；
+已加 `test -d` 前置并按 GFM 转义。感谢执行计划中的指出。）
 测试内容是否覆盖下方要求由 R4 读代码核验。
 
 测试内容要求（R4 读代码核验）：

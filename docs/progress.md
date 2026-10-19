@@ -11,7 +11,7 @@ CI 实际状态：绿。v01-b01 四次运行由项目所有者目视确认均为
 ## v0.1 批次（对应 docs/backlog.md）
 
 - [x] v01-b01 工程骨架与基础设施　← PASS，verdict 见 `.collie/batches/v01-b01/verdict.md`
-- [ ] v01-b02 批次解析与 worker 角色　← 已签发 task.md（base_sha 0a0ea43）
+- [ ] v01-b02 批次解析与 worker 角色　← 已签发 task.md（base_sha 4a690f5）
 - [ ] v01-b03 审核角色与仲裁
 
 ## 已验证完成（经审核 Agent 实测取证）
