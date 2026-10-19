@@ -140,3 +140,54 @@ export const EventSchema = z
   })
   .catchall(JsonValueSchema.optional());
 export type Event = z.infer<typeof EventSchema>;
+
+// ---------------------------------------------------------------------------
+// Envelopes (SPEC 3.3, 3.4)
+// ---------------------------------------------------------------------------
+
+/** Git object id, abbreviated or full (SPEC 3.4). */
+export const SHA_PATTERN = /^[0-9a-f]{7,40}$/;
+export const ShaSchema = z.string().regex(SHA_PATTERN, 'invalid git sha');
+
+/** batch_id becomes a path segment under .collie/batches/, so it must not traverse. */
+export const BatchIdSchema = z.string().regex(RUN_ID_PATTERN, 'invalid batch_id');
+
+const IsoDateTime = z.iso.datetime({ offset: true });
+
+/** task.md frontmatter (SPEC 3.3). Written by R2, read by R3. */
+export const TaskFrontmatterSchema = z.strictObject({
+  schema_version: z.literal(SCHEMA_VERSION),
+  run_id: RunIdSchema,
+  batch_id: BatchIdSchema,
+  base_sha: ShaSchema,
+  created_at: IsoDateTime,
+  attempt: z.number().int().positive(),
+  // v0.2 fills this in; v0.1 always writes null, but the key must be present.
+  interrupted_at: z.null(),
+  issued_by: NonEmptyString.optional(),
+  revised_at: IsoDateTime.nullable().optional(),
+});
+export type TaskFrontmatter = z.infer<typeof TaskFrontmatterSchema>;
+
+/** Everything here is the worker's claim, not a fact (SPEC 3.4, CONSTRAINTS 铁律 4). */
+export const ClaimsSchema = z.strictObject({
+  commits: z.array(ShaSchema),
+  tests_passed: z.number().int().nonnegative(),
+  tests_failed: z.number().int().nonnegative(),
+  pushed: z.boolean(),
+  ci_passed: z.boolean(),
+  new_deps: z.array(NonEmptyString),
+  spec_touched: z.boolean(),
+});
+export type Claims = z.infer<typeof ClaimsSchema>;
+
+/** Trailing JSON block of report.md (SPEC 3.4). Written by R3, read by R2, never by R4. */
+export const ReportSchema = z.strictObject({
+  schema_version: z.literal(SCHEMA_VERSION),
+  batch_id: BatchIdSchema,
+  /** Last code commit, excluding the report(collie) envelope commit. */
+  head_sha: ShaSchema,
+  claims: ClaimsSchema,
+  open_questions: z.array(z.string()),
+});
+export type Report = z.infer<typeof ReportSchema>;
