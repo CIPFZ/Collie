@@ -123,7 +123,7 @@ issued_by: human-placeholder-r2
   `src/verify.ts`、`src/git.ts`、`src/ci.ts`（属 b03）
 - 实现任何 v0.2 及以后的内容（失败恢复、信号阶梯、resume、活性检测）
 - 新增 SPEC 2.2 与 ADR-002 之外的依赖。本批次需要新装的只有 `yaml`（ISC，已在 SPEC 2.2）
-- 修改受保护文件与 `.collie/collie.toml`
+- 修改受保护文件与 `.collie/collie.toml`（`schema_version` 字段除外，见铁律 27）
 
 ## 汇报要求
 

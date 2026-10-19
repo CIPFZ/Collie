@@ -1,8 +1,10 @@
 # Collie 配置文件
 # 本文件由 R1 依据 SPEC 3.1 放置；阈值须与 SPEC 完全一致（铁律 11）。
 # worker 只读。v0.1 实现 `collie init` 后由其从模板生成。
+# schema_version 必须与 src/schema/index.ts 的 SCHEMA_VERSION 一致；
+# 二者由同一个代码提交同步变更（R1 不单独改此字段，见 CONSTRAINTS 铁律 26）。
 
-schema_version = 2
+schema_version = 1
 
 [project]
 name = "collie"
