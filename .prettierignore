@@ -1,0 +1,6 @@
+# R1-owned documents are formatted by their author, not by this toolchain.
+*.md
+.collie/
+package-lock.json
+dist/
+coverage/

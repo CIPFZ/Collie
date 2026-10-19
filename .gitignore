@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+# Runtime state written by R2 (ROLES 6, task v01-b01 item 1).
+.collie/runs/
+.collie/heartbeat
+
+.DS_Store
