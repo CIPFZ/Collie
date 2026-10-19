@@ -100,25 +100,14 @@ session fork、NDJSON 流解析。用 TS 可直接复用，用其他语言等于
 ## 3. 数据模型
 
 所有跨边界结构集中定义在 `src/schema/`，用 zod 声明并导出类型。
-`SCHEMA_VERSION = 2`，字段变更必须 bump 并写迁移。
-
-版本历史：
-- v1（v01-b01）：初始 `CollieConfig` / `Batch` / `Acceptance` / `Event`
-- v2（v01-b02 后，2026-10-16）：`Report.claims` 新增 `ci_passed: boolean`；
-  `TaskFrontmatter` 新增可选 `issued_by` / `revised_at`
-
-迁移规则（b03 实现于 `src/schema/migrate.ts`）：
-- 读取任何信封时先看 `schema_version`，低于当前版本则逐级迁移后再校验
-- v1 → v2：`claims.ci_passed` 缺失时填 `false`（视为「未声称」，对 arbiter 规则 7 保守），
-  `issued_by` / `revised_at` 缺失时省略
-- 写入时一律写当前版本
-- 配置文件 `collie.toml` 的 `schema_version` 同步 bump 为 2
+`SCHEMA_VERSION = 1`。v0.1 期间以可选字段方式扩展，不升版本、不写迁移；
+只有删除或改变已有字段语义时才 bump。
 
 ### 3.1 配置
 
 ```toml
 # .collie/collie.toml
-schema_version = 2
+schema_version = 1
 
 [project]
 name = "collie"
@@ -206,7 +195,7 @@ R2 写，R3 读。Markdown 正文 + YAML frontmatter。
 
 ```markdown
 ---
-schema_version: 2
+schema_version: 1
 run_id: r-0007
 batch_id: v01-b03
 base_sha: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
@@ -260,7 +249,7 @@ R3 写，R2 读，**R4 不读**。Markdown 四段正文 + 尾部围栏 JSON。
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 1,
   "batch_id": "v01-b03",
   "head_sha": "e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3",
   "claims": {
@@ -281,7 +270,7 @@ R3 写，R2 读，**R4 不读**。Markdown 四段正文 + 尾部围栏 JSON。
 字段说明（v01-b02 计划反馈后补充）：
 - `head_sha`：**最后一个代码提交**的 sha，不含随后的 `report(collie):` 信封提交。
   R4 取证范围为 `base_sha..head_sha`，信封提交不在其中
-- `ci_passed`：worker 声称 CI 已对 `head_sha` 实际触发且通过。
+- `ci_passed`（可选，缺失视为 `false`）：worker 声称 CI 已对 `head_sha` 实际触发且通过。
   此字段使场景 A 成为真正的「声称 vs 实测」比对（arbiter 规则 7 据此与 `ci_branch_matched` /
   `ci_conclusion` 对照），而非只检查 CI 本身是否通过
 - sha 字段均须匹配 `/^[0-9a-f]{7,40}$/`
@@ -292,7 +281,7 @@ R4 写，R2 读。Markdown 推理正文 + 尾部围栏 JSON。
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 1,
   "batch_id": "v01-b03",
   "verdict": "PASS",
   "evidence": {

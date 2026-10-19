@@ -21,7 +21,7 @@
 
 工作目录是 git@github.com:CIPFZ/Collie.git 的 clone，开始任何工作前必须按顺序完整阅读：
 
-1. `CONSTRAINTS.md`：全局铁律，共 27 条，不可违反。本项目的硬边界以它为准。
+1. `CONSTRAINTS.md`：全局铁律，不可违反。本项目的硬边界以它为准。
 2. `AGENT-worker.md`：你的工作手册。你的身份、权限边界、工作协议、汇报格式以它为准。
 3. `SPEC.md`：唯一方案来源（Single Source of Truth）。
    先精读第 1 章定位与范围、第 2 章技术选型、第 3 章数据模型、第 4 章模块设计，

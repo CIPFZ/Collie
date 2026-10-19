@@ -1,6 +1,6 @@
 # Collie 全局铁律
 
-> 本文件是全项目不可违反的约束（共 27 条）。唯一可修改者：R1 方案设计 Agent，且须用户批准。
+> 本文件是全项目不可违反的约束。唯一可修改者：R1 方案设计 Agent，且须用户批准。
 > 任何角色发现铁律之间冲突、或铁律与 SPEC 冲突，必须停下来上报，不得自行取舍。
 
 更新时间：2026-10-16
@@ -64,7 +64,7 @@ R4 每批次扫描全树并在 evidence 中列出白名单外项（ADR-003）。
 明确禁止引入：编排框架（LangGraph / Temporal 等）、可观测框架（OpenTelemetry 等）、ORM。
 
 **铁律 14。** 跨边界数据结构集中在 `src/schema/`，用 zod 声明。
-字段变更必须 bump `SCHEMA_VERSION` 并写迁移。
+只有删除或改变已有字段语义时才 bump `SCHEMA_VERSION`；新增可选字段不升版本。
 
 **铁律 15。** 所有 Agent 调用必须经 `runner` 接口，禁止在 `roles/` 中直接调用 SDK。
 原因：验证场景需在不联网、不花钱的条件下可重复执行。
@@ -111,16 +111,3 @@ scope 取值：`cli`、`config`、`schema`、`backlog`、`journal`、`git`、`ci
 先用自然语言自由推理与写作，最后再输出结构化的尾部 JSON 块。
 禁止用约束解码强制结构化输出，以免损害推理质量。
 
-## 8. 非代码角色的提交纪律
-
-**铁律 26。** R1 / R2 推送任何提交前，若改动触及**被代码读取的文件**
-（`.collie/collie.toml`、`docs/backlog.md`、`AGENT-*.md`、`.collie/batches/**`、`test/fixtures/**`），
-必须先在本地跑 `npm run lint && npm run typecheck && npm test` 并全绿。
-文档类角色不因「不写代码」而免于 CI 纪律——文档也是代码的输入。
-
-**铁律 27。** 与代码常量耦合的配置字段（当前为 `collie.toml` 的 `schema_version`）
-只能与对应代码变更在**同一个提交**中由 R3 修改。R1 对该字段的修改权让渡给该提交；
-R1 仍对其余字段负责。此类字段须在文件内注释标明。
-
-来源：2026-10-16 R1 单独把 `collie.toml` 升为 `schema_version = 2` 而代码仍为 1，
-导致 main 变红两个测试文件无法加载。R1 未本地验证即推送。

@@ -15,7 +15,8 @@
 |---|---|---|---|---|
 | 1 | v01-b01 | 工程骨架与基础设施 | — | passed |
 | 2 | v01-b02 | 批次解析与 worker 角色 | v01-b01 | passed |
-| 3 | v01-b03 | 审核角色与仲裁 | v01-b02 | running |
+| 3 | v01-b03 | 取证工具与审核角色 | v01-b02 | running |
+| 4 | v01-b04 | 仲裁、CLI 与三场景验证 | v01-b03 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -87,31 +88,70 @@ R4 读代码核验项（非命令判定）：测试内容是否覆盖 task.md「
 - 在 `roles/` 中直接调用 Agent SDK（必须经 runner 接口）
 - 实现任何 v0.2 及以后的失败恢复逻辑
 
-## v01-b03 审核角色与仲裁
+## v01-b03 取证工具与审核角色
 
 优先级：3　依赖：v01-b02
 
 条目：
-1. `src/verify.ts` + `src/git.ts` + `src/ci.ts`：实跑验收命令并结构化输出；
-   git 封装（log/diff/ls-remote/status/commit）；CI 实际结论查询**并核对监听分支**
-2. `src/roles/reviewer.ts`：从零组装审核 prompt（**代码保证不接收 report 正文参数**）、
-   拉起、读回 `verdict.md` 并校验
-3. `src/arbiter.ts` + `src/progress.ts` + `src/cli.ts`：
-   SPEC 4.3 的八条仲裁规则；依据实测证据写 progress；
-   `collie init` / `collie run` / `collie show` 三个命令与退出码
+1. 两处小改：`claims.ci_passed` 改为可选字段默认 `false`（不升版本、不写迁移）；
+   `backlog.test.ts` 的「恰好三个批次」断言改为只校验 v01-b01/b02 的固定字段；
+   `RunOptions` 加可选 `signal?: AbortSignal`
+2. `src/verify.ts` + `src/git.ts` + `src/ci.ts`：实跑 `parseBacklog` 解析后的验收命令并结构化输出
+   （SPEC 3.2「唯一执行形式」）；git 封装（log / diff --stat / ls-remote / status / commit）；
+   CI 实际结论查询**并核对监听分支**，支持 `GITHUB_TOKEN` 鉴权，无 token 时限流须显式报错而非静默
+3. `src/roles/reviewer.ts`：从零组装审核 prompt（**函数签名不含 report 正文参数**，
+   只接收 `base_sha` / `head_sha` / task 验收项 / SPEC 路径）、经 runner 拉起（`allowedTools`
+   取 `cfg.agent.reviewer`，不含 Write/Edit）、读回 `verdict.md` 用 `VerdictSchema` 校验
+   （schema 按 SPEC 3.5 新增，复用 `extractLastJsonFence`）
 
 验收标准：
 
 | 说明 | 命令 | 期望 |
 |---|---|---|
-| 代码规范与类型 | `npm run lint && npm run typecheck` | exit 0 |
-| 仲裁规则全覆盖 | `npm test -- test/arbiter.test.ts` | exit 0 |
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 验收命令实跑与结构化 | `npm test -- test/verify.test.ts` | exit 0 |
+| git 封装 | `npm test -- test/git.test.ts` | exit 0 |
+| CI 查询与分支核对 | `npm test -- test/ci.test.ts` | exit 0 |
 | reviewer 不接收 report 正文 | `npm test -- test/reviewer-isolation.test.ts` | exit 0 |
+
+R4 读代码核验项：v01-b01 与 v01-b02 的真实 report（无 `ci_passed`）被 `readReport` 接受；
+`reviewer.ts` 的类型签名在编译期就排除 report 正文；`ci.ts` 对限流的处理是报错而非返回 null。
+
+额外禁止：
+- 让 reviewer 具备写入能力（工具白名单不得含 Write/Edit）
+- 实现 `arbiter.ts`、`progress.ts`、`cli.ts`、`runner/claude.ts`（属 b04）
+- `ci.ts` 在测试中访问网络（用注入的 fetch 替身）
+
+## v01-b04 仲裁、CLI 与三场景验证
+
+优先级：4　依赖：v01-b03
+
+条目：
+1. `src/arbiter.ts`：SPEC 4.3 的八条仲裁规则，按顺序命中即停，输出最终 verdict 与 `claim_mismatches`
+2. `src/progress.ts` + `src/cli.ts`：依据 arbiter 输出与 evidence 写 `docs/progress.md`；
+   `collie init` / `collie run <batch>` / `collie show <batch>` 三个命令；
+   退出码 0 / 10 / 20 / 1（SPEC 5）；`run` 以 `AbortSignal.timeout(wallclock_secs)` 包裹 worker（SPEC 3.3）；
+   journal 事件按 SPEC 3.6 写入
+3. `test/scenario-{a,b,c}.test.ts`：用 fake runner 构造 SPEC 8 的三个场景，
+   断言最终 verdict、`claim.mismatch` 事件与 `collie run` 退出码
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 仲裁规则全覆盖 | `npm test -- test/arbiter.test.ts` | exit 0 |
 | 场景 A 假 CI 全绿被拦 | `npm test -- test/scenario-a.test.ts` | exit 0 |
 | 场景 B 假测试数被拦 | `npm test -- test/scenario-b.test.ts` | exit 0 |
 | 场景 C 偷改 SPEC 被拦 | `npm test -- test/scenario-c.test.ts` | exit 0 |
 | 退出码正确 | `npm test -- test/exit-codes.test.ts` | exit 0 |
 
+R4 读代码核验项：八条规则各有独立用例且顺序敏感；三个场景的 fake 剧本确实构造了「声称 vs 实测不符」而非仅构造失败。
+
 额外禁止：
 - 用约束解码强制 verdict 三值（必须由 arbiter 解析校验）
-- 让 reviewer 具备写入能力（工具白名单不得含 Write/Edit）
+- 实现 `runner/claude.ts`（真实 runner 为 v0.1 收尾单独批次，视 b04 结果决定）
