@@ -150,7 +150,8 @@ function parseTable(
       `table header must be ${columns.join(' | ')}: ${detail}`,
     );
   }
-  const separator = lines[start + 1];
+  const separatorIndex = start + 1;
+  const separator = lines[separatorIndex];
   if (
     separator === undefined ||
     !isTableLine(separator.text) ||
@@ -164,7 +165,7 @@ function parseTable(
     );
   }
   const rows: Table['rows'] = [];
-  let i = start + 1 + 1;
+  let i = separatorIndex + 1;
   for (; i < lines.length; i++) {
     const row = lines[i];
     if (row === undefined || !isTableLine(row.text)) break;
@@ -291,7 +292,7 @@ function parseList(
 /** Extracts the command from a cell holding exactly one code span (CommonMark rules). */
 function codeSpan(cell: string): string | undefined {
   const fence = /^`+/.exec(cell)?.[0];
-  if (fence === undefined || !cell.endsWith(fence) || cell.length < fence.length * (1 + 1))
+  if (fence === undefined || !cell.endsWith(fence) || cell.length < fence.length + fence.length)
     return undefined;
   let content = cell.slice(fence.length, cell.length - fence.length);
   if (content.includes(fence)) return undefined;
