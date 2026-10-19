@@ -63,6 +63,14 @@ describe('runner-fake: scripted results', () => {
     );
   });
 
+  it('returns finalText, the channel for the reviewer verdict', async () => {
+    const runner = new FakeRunner([{ result: { exitCode: 0, finalText: '# verdict' } }]);
+    await expect(runner.run(opts({ role: 'reviewer' }))).resolves.toEqual({
+      exitCode: 0,
+      finalText: '# verdict',
+    });
+  });
+
   it('returns a copy so callers cannot mutate the script', async () => {
     const scene: FakeScene = { result: { exitCode: 0 } };
     const runner = new FakeRunner([scene, scene]);

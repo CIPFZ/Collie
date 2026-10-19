@@ -30,6 +30,11 @@ export interface RunResult {
   /** Opaque to Collie; only meaningful to the runner that produced it. */
   sessionId?: string;
   usage?: Usage;
+  /**
+   * The agent's final reply. The reviewer has no write tools, so its verdict
+   * arrives here and R2 persists it as verdict.md (SPEC 3.5).
+   */
+  finalText?: string;
 }
 
 /**
