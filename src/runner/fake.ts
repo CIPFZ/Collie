@@ -34,6 +34,7 @@ export interface RecordedCall {
   cwd: string;
   maxTurns: number;
   hasOnEvent: boolean;
+  hasSignal: boolean;
 }
 
 export class FakeRunnerError extends Error {
@@ -82,7 +83,10 @@ export class FakeRunner implements AgentRunner {
       cwd: opts.cwd,
       maxTurns: opts.maxTurns,
       hasOnEvent: opts.onEvent !== undefined,
+      hasSignal: opts.signal !== undefined,
     });
+    // Like a real runner, refuse to start once cancelled.
+    opts.signal?.throwIfAborted();
 
     const scene = this.scenes[index];
     if (scene === undefined) {
@@ -103,6 +107,7 @@ export class FakeRunner implements AgentRunner {
     }
     for (const event of scene.events ?? []) opts.onEvent?.(event);
     await scene.effect?.({ cwd: opts.cwd, opts });
+    opts.signal?.throwIfAborted();
 
     if (scene.error !== undefined) throw scene.error;
     return { ...scene.result };

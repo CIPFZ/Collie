@@ -142,6 +142,7 @@ describe('runner-fake: call recording', () => {
         cwd,
         maxTurns: 60,
         hasOnEvent: true,
+        hasSignal: false,
       },
       {
         role: 'worker',
@@ -151,6 +152,7 @@ describe('runner-fake: call recording', () => {
         cwd,
         maxTurns: 120,
         hasOnEvent: false,
+        hasSignal: false,
       },
     ]);
     expect(runner.remaining).toBe(0);
@@ -160,5 +162,38 @@ describe('runner-fake: call recording', () => {
     const runner = new FakeRunner([]);
     await expect(runner.run(opts())).rejects.toThrow(FakeRunnerError);
     expect(runner.calls).toHaveLength(1);
+  });
+});
+
+describe('runner-fake: cancellation (SPEC 3.3)', () => {
+  it('records that a signal was passed', async () => {
+    const runner = new FakeRunner([{ result: { exitCode: 0 } }]);
+    await runner.run(opts({ signal: new AbortController().signal }));
+    expect(runner.calls[0]?.hasSignal).toBe(true);
+  });
+
+  it('refuses to start when the signal is already aborted, without side effects', async () => {
+    const controller = new AbortController();
+    controller.abort(new Error('wallclock exceeded'));
+    const runner = new FakeRunner([{ files: { 'out.txt': 'x' }, result: { exitCode: 0 } }]);
+    await expect(runner.run(opts({ signal: controller.signal }))).rejects.toThrow(
+      'wallclock exceeded',
+    );
+    expect(existsSync(join(cwd, 'out.txt'))).toBe(false);
+  });
+
+  it('rejects when the signal aborts during the scene', async () => {
+    const controller = new AbortController();
+    const runner = new FakeRunner([
+      {
+        effect: () => {
+          controller.abort(new Error('timed out mid-run'));
+        },
+        result: { exitCode: 0 },
+      },
+    ]);
+    await expect(runner.run(opts({ signal: controller.signal }))).rejects.toThrow(
+      'timed out mid-run',
+    );
   });
 });

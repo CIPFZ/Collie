@@ -174,6 +174,21 @@ describe('worker: fake runner closed loop', () => {
     await expect(runWorker(failed, config, b02, root)).resolves.toEqual({ exitCode: 2 });
   });
 
+  it('forwards the caller signal to the runner, and passes none by default', async () => {
+    const runner = new FakeRunner([{ result: { exitCode: 0 } }, { result: { exitCode: 0 } }]);
+    await runWorker(runner, config, b02, root);
+    await runWorker(runner, config, b02, root, { signal: new AbortController().signal });
+    expect(runner.calls.map((c) => c.hasSignal)).toEqual([false, true]);
+  });
+
+  it('surfaces an aborted signal as a rejection', async () => {
+    const runner = new FakeRunner([{ result: { exitCode: 0 } }]);
+    const signal = AbortSignal.abort(new Error('wallclock exceeded'));
+    await expect(runWorker(runner, config, b02, root, { signal })).rejects.toThrow(
+      'wallclock exceeded',
+    );
+  });
+
   it('does not let the runner mutate the configured tool list', async () => {
     const runner = new FakeRunner([
       {

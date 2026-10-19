@@ -18,6 +18,11 @@ export interface RunOptions {
   maxTurns: number;
   /** Called once per line of the agent's event stream, in order. */
   onEvent?: (event: unknown) => void;
+  /**
+   * Cancels the run. R2 passes AbortSignal.timeout(wallclock_secs) here (SPEC 3.3);
+   * runners only forward it and must not invent their own timeout semantics.
+   */
+  signal?: AbortSignal;
 }
 
 export interface RunResult {
