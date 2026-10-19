@@ -3,7 +3,7 @@
 > 唯一可修改者：R1 方案设计 Agent（须用户批准）。其他角色只读。
 > 优先级在方案确定阶段一次排定，批次随之固定，**不做滚动重新拆解**。
 
-更新时间：2026-10-16
+更新时间：2026-10-19
 当前版本：v0.1
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
@@ -18,6 +18,7 @@
 | 3 | v01-b03 | 取证工具与审核角色 | v01-b02 | passed |
 | 4 | v01-b04 | 仲裁、CLI 与三场景验证 | v01-b03 | passed |
 | 5 | v01-b05 | 真实 runner | v01-b04 | running |
+| 6 | v01-b05-smoke | 烟雾批次：README 改一行 | v01-b05 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -172,6 +173,11 @@ R4 读代码核验项：八条规则各有独立用例且顺序敏感；三个�
    SDK 特有概念不泄漏到 `runner/` 之外（ROADMAP 0.4）
 2. `collie run` 接入真实 runner：默认用 `claude.ts`，`--runner fake` 保留测试路径；
    `collie init` 生成的配置模板可直接用
+   2a. 配置增加 `permission_mode`（SPEC 3.1）：`AgentConfigSchema` 加可选字段，
+   `ClaudeRunner` 从配置读取；`.collie/collie.toml` 两个角色各加一行 `permission_mode = "bypassPermissions"`，
+   **此两行授权 worker 与 schema 改动在同一提交内修改**（铁律 17：每个提交独立可构建）；
+   `collie init` 模板同步。
+   2b. 仲裁规则 3 的认可依赖清单恢复 `@anthropic-ai/claude-agent-sdk`（ADR-004）
 3. 在本仓库用真实 runner 跑一次 `collie run v01-b05-smoke`（一个只改 README 一行的烟雾批次），
    把完整 task / report / verdict / progress 落盘作为第一个真实样本
 
@@ -189,3 +195,21 @@ R4 读代码核验项：八条规则各有独立用例且顺序敏感；三个�
 额外禁止：
 - 测试中调用真实 SDK 或联网
 - 在 `runner/` 之外 import SDK
+
+## v01-b05-smoke 烟雾批次：README 改一行
+
+优先级：6　依赖：v01-b05
+
+条目：
+1. 在 `README.md` 末尾追加一行：`Collie 用 Collie 跑过的第一个批次：v01-b05-smoke`
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 全部测试通过 | `npm test` | exit 0 |
+| README 已追加该行 | `grep -q "第一个批次：v01-b05-smoke" README.md` | exit 0 |
+| 只改了 README | `test "$(git diff --name-only HEAD~1 HEAD)" = "README.md"` | exit 0 |
+
+额外禁止：
+- 改动 README 以外的任何文件

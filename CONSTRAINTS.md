@@ -61,6 +61,8 @@ ESLint 与类型检查零错误。
 许可证仅接受 MIT / Apache-2.0 / BSD / ISC / 0BSD。
 **开发依赖**及其传递层不受白名单约束，但禁止 GPL / AGPL / SSPL 等强 copyleft。
 R4 每批次扫描全树并在 evidence 中列出白名单外项（ADR-003）。
+**平台依赖例外**：模型供应商官方 SDK（当前仅 `@anthropic-ai/claude-agent-sdk`）豁免白名单，
+条件是只能在 `src/runner/` 内 import，且每一个都以 ADR 列明（ADR-004）。
 明确禁止引入：编排框架（LangGraph / Temporal 等）、可观测框架（OpenTelemetry 等）、ORM。
 
 **铁律 14。** 跨边界数据结构集中在 `src/schema/`，用 zod 声明。

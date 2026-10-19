@@ -66,7 +66,7 @@ session fork、NDJSON 流解析。用 TS 可直接复用，用其他语言等于
 
 | 依赖 | 用途 | 许可证 |
 |---|---|---|
-| `@anthropic-ai/claude-agent-sdk` | 拉起与控制 Agent | 官方 |
+| `@anthropic-ai/claude-agent-sdk` | 拉起与控制 Agent | 供应商条款，ADR-004 豁免 |
 | `commander` | CLI 参数解析 | MIT |
 | `zod` | 尾部 JSON 块的 schema 校验 | MIT |
 | `smol-toml` | 解析 `collie.toml` | BSD-3-Clause |
@@ -116,11 +116,13 @@ repo = "https://github.com/CIPFZ/Collie"
 model = "claude-opus-4-6"
 allowed_tools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
 max_turns = 120
+permission_mode = "bypassPermissions"   # v0.1 裁定，见下
 
 [agent.reviewer]
 model = "claude-opus-4-6"
 allowed_tools = ["Read", "Glob", "Grep", "Bash"]   # 无 Write/Edit：物理上无法改代码
 max_turns = 60
+permission_mode = "bypassPermissions"
 
 [limits]
 stall_secs = 90          # 事件流静默判定卡死（v0.2 生效）
@@ -138,6 +140,13 @@ commands = ["npm run lint", "npm run typecheck", "npm test"]
 provider = "github-actions"
 expected_branch = "main"   # 用于核对 CI 实际监听分支，防止「假全绿」
 ```
+
+`permission_mode` 取值 `default` / `acceptEdits` / `bypassPermissions`，省略时沿用 SDK 默认（逐次询问）。
+**v0.1 裁定（v01-b05）：两个角色都用 `bypassPermissions`。** 无人值守下任何「询问」都等于卡死；
+`acceptEdits` 也救不了，worker 必须跑 `npm test` 和 `git commit`。v0.1 的安全围栏不是审批，
+而是：`allowed_tools` 白名单（reviewer 物理上无 Write/Edit）、reviewer 在只含 head_sha 的 worktree 里运行、
+`max_turns` 与 `wallclock_secs` 硬顶、铁律 19 的受保护文件由 R2 事后取证（规则 2）。
+细粒度门控（hook / 容器）是 v1.0 的议题，不在这里补。
 
 ### 3.2 批次（Batch）
 
