@@ -1,5 +1,4 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -26,13 +25,24 @@ function exitZero(cmd: string, desc = cmd): Acceptance {
   return { desc, cmd, expect: 'exit_zero' };
 }
 
-function sleepersAlive(marker: string): boolean {
+function isAlive(pid: number): boolean {
   try {
-    execFileSync('pgrep', ['-f', marker]);
+    process.kill(pid, 0);
     return true;
   } catch {
     return false;
   }
+}
+
+async function waitForFile(path: string): Promise<string> {
+  for (let i = 0; i < 100; i++) {
+    if (existsSync(path)) {
+      const text = readFileSync(path, 'utf8').trim();
+      if (text !== '') return text;
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`timed out waiting for ${path}`);
 }
 
 describe('verify: runCommand', () => {
@@ -69,18 +79,21 @@ describe('verify: runCommand', () => {
   });
 
   it('kills the whole process group on abort, including grandchildren', async () => {
-    const marker = `collie-verify-${String(process.pid)}-${String(Date.now())}`;
+    // POSIX only: CI's /bin/sh is dash. The inner shell records its pid, then
+    // exec replaces it with sleep, so the file holds the grandchild's pid.
     const controller = new AbortController();
     const started = Date.now();
-    setTimeout(() => {
-      controller.abort(new Error('wallclock exceeded'));
-    }, 200);
-    await expect(
-      runCommand(`sh -c 'exec -a ${marker} sleep 30' & wait`, { cwd, signal: controller.signal }),
-    ).rejects.toThrow('wallclock exceeded');
+    const run = runCommand(`sh -c 'echo $$ > grandchild.pid; exec sleep 30' & wait`, {
+      cwd,
+      signal: controller.signal,
+    });
+    const grandchild = Number(await waitForFile(join(cwd, 'grandchild.pid')));
+    expect(isAlive(grandchild)).toBe(true);
+    controller.abort(new Error('wallclock exceeded'));
+    await expect(run).rejects.toThrow('wallclock exceeded');
     expect(Date.now() - started).toBeLessThan(5000);
     await new Promise((r) => setTimeout(r, 100));
-    expect(sleepersAlive(marker)).toBe(false);
+    expect(isAlive(grandchild)).toBe(false);
   });
 });
 
