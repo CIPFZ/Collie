@@ -4,7 +4,7 @@
 // query() is injected (defaulting to the SDK's) so tests exercise this adapter
 // with a scripted double and never reach the network (CONSTRAINTS 铁律 16).
 import type { CollieConfig } from '../schema/index.js';
-import type { AgentRunner, RunOptions, RunResult, Usage } from './index.js';
+import type { AgentRunner, RunHandle, RunOptions, RunResult, Usage } from './index.js';
 
 /**
  * The slice of the SDK this adapter uses. Keeping it structural means the real
@@ -22,6 +22,8 @@ export interface ClaudeQueryOptions {
   permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk' | 'auto';
   allowDangerouslySkipPermissions?: boolean;
   settingSources?: readonly string[];
+  /** SDK resume field: pass the session id of a previous run to continue it (SPEC 11.2). */
+  resume?: string;
 }
 
 export interface ClaudeQueryParams {
@@ -103,6 +105,15 @@ function toUsage(usage: ResultMessage['usage']): Usage | undefined {
   return { inputTokens: usage.input_tokens ?? 0, outputTokens: usage.output_tokens ?? 0 };
 }
 
+/** Extracts session_id from any message that carries one (SPEC 11.2: never lose it). */
+function extractSessionId(message: unknown): string | undefined {
+  if (typeof message === 'object' && message !== null) {
+    const sid = (message as { session_id?: unknown }).session_id;
+    return typeof sid === 'string' ? sid : undefined;
+  }
+  return undefined;
+}
+
 export class ClaudeRunner implements AgentRunner {
   private readonly config: CollieConfig;
   private readonly queryFn: ClaudeQuery;
@@ -150,32 +161,93 @@ export class ClaudeRunner implements AgentRunner {
       ...(agent.permission_mode === 'bypassPermissions'
         ? { allowDangerouslySkipPermissions: true }
         : {}),
+      // SPEC 11.2: resume a previous session.
+      ...(opts.resumeSessionId === undefined ? {} : { resume: opts.resumeSessionId }),
     };
 
+    // Soft stop breaks the for-await loop (session-preserving); hard/kill aborts the controller.
+    let softStopRequested = false;
+
+    // SPEC 11.2: the RunHandle gives R2 control over the run.
+    // The SDK does not expose a child-process pid, so pid is omitted.
+    const handle: RunHandle = {
+      // eslint-disable-next-line @typescript-eslint/require-await -- interface requires Promise<void>
+      async stop(level: 'soft' | 'hard' | 'kill'): Promise<void> {
+        switch (level) {
+          case 'soft':
+            softStopRequested = true;
+            break;
+          case 'hard':
+            controller.abort(new Error('hard stop'));
+            break;
+          case 'kill':
+            controller.abort(new Error('kill'));
+            break;
+        }
+      },
+    };
+    opts.onStarted?.(handle);
+
     let result: ResultMessage | undefined;
+    // Track sessionId from any message (SPEC 11.2: do not lose it on error).
+    let lastSessionId: string | undefined;
+    let stopped = false;
     try {
       for await (const message of this.queryFn({ prompt: opts.prompt, options: queryOptions })) {
         opts.onEvent?.(message);
+        const sid = extractSessionId(message);
+        if (sid !== undefined) lastSessionId = sid;
         if (isResultMessage(message)) result = message;
+        // Soft stop: finish processing this message, then break (SPEC 11.2).
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by handle.stop() callback
+        if (softStopRequested) {
+          stopped = true;
+          break;
+        }
       }
     } catch (error) {
       opts.signal?.removeEventListener('abort', forwardAbort);
       if (opts.signal?.aborted === true) throw opts.signal.reason;
+      // SPEC 11.2: SDK errors must still return RunResult with sessionId when possible.
+      if (lastSessionId !== undefined) {
+        return {
+          exitCode: EXIT_FAILED,
+          sessionId: lastSessionId,
+          stopReason: 'error',
+        };
+      }
       throw error;
     } finally {
       opts.signal?.removeEventListener('abort', forwardAbort);
     }
 
     if (result === undefined) {
+      // Soft stop may end the stream before a result message arrives.
+      if (stopped) {
+        return {
+          exitCode: EXIT_FAILED,
+          ...(lastSessionId === undefined ? {} : { sessionId: lastSessionId }),
+          stopReason: 'stopped',
+        };
+      }
       throw new Error('the Claude query ended without a result message');
     }
     const succeeded = result.subtype === 'success' && result.is_error !== true;
+    const sessionId = result.session_id ?? lastSessionId;
+    // Map SDK error subtypes to stopReason (SPEC 11.2).
+    const stopReason: RunResult['stopReason'] = (() => {
+      if (stopped) return 'stopped';
+      if (result.subtype === 'error_max_turns') return 'turns_exhausted';
+      if (!succeeded && result.subtype !== 'success') return 'error';
+      return undefined;
+    })();
     return {
       exitCode: succeeded ? EXIT_OK : EXIT_FAILED,
-      ...(result.session_id === undefined ? {} : { sessionId: result.session_id }),
+      ...(sessionId === undefined ? {} : { sessionId }),
       ...(result.usage === undefined ? {} : { usage: toUsage(result.usage) }),
       // Only a successful run's final text is a deliverable (e.g. the verdict).
       ...(succeeded && result.result !== undefined ? { finalText: result.result } : {}),
+      ...(stopReason === undefined ? {} : { stopReason }),
     };
   }
 }

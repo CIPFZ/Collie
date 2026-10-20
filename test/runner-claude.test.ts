@@ -10,7 +10,7 @@ import {
   type ClaudeQuery,
   type ClaudeQueryParams,
 } from '../src/runner/claude.js';
-import type { RunOptions } from '../src/runner/index.js';
+import type { RunHandle, RunOptions } from '../src/runner/index.js';
 
 const config = loadConfig(join(import.meta.dirname, '..'));
 
@@ -102,6 +102,18 @@ describe('runner-claude: options built from the role config', () => {
       maxTurns: config.agent.reviewer.max_turns,
       allowedTools: ['Read', 'Glob', 'Grep', 'Bash'],
     });
+  });
+
+  it('maps resumeSessionId to the SDK resume field (SPEC 11.2)', async () => {
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(config, { query }).run(opts({ resumeSessionId: 'session-42' }));
+    expect(calls[0]?.options?.resume).toBe('session-42');
+  });
+
+  it('does not send resume when resumeSessionId is absent', async () => {
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(config, { query }).run(opts());
+    expect(calls[0]?.options).not.toHaveProperty('resume');
   });
 
   it('never lets the caller raise the configured turn limit', async () => {
@@ -244,6 +256,89 @@ describe('runner-claude: events and cancellation', () => {
       [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(new Error('SDK exploded')) }),
     });
     await expect(new ClaudeRunner(config, { query }).run(opts())).rejects.toThrow('SDK exploded');
+  });
+});
+
+describe('runner-claude: RunHandle and stop levels (SPEC 11.2)', () => {
+  it('calls onStarted with a RunHandle that has no pid (SDK has none)', async () => {
+    const { query } = scripted([success()]);
+    let handle: unknown;
+    await new ClaudeRunner(config, { query }).run(
+      opts({
+        onStarted: (h) => {
+          handle = h;
+        },
+      }),
+    );
+    expect(handle).toBeDefined();
+    expect(handle).not.toHaveProperty('pid');
+    expect(typeof (handle as { stop: unknown }).stop).toBe('function');
+  });
+
+  it('soft stop breaks the stream without aborting the controller', async () => {
+    const calls: ClaudeQueryParams[] = [];
+    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery demands AsyncIterable
+    const query: ClaudeQuery = async function* (params) {
+      calls.push(params);
+      yield assistant('working');
+      // After onStarted fires and soft stop is called, the next yield should cause a break.
+      yield assistant('more work');
+      yield success('done');
+    };
+    let handle: RunHandle | undefined;
+    const result = await new ClaudeRunner(config, { query }).run(
+      opts({
+        onStarted: (h) => {
+          handle = h;
+          void h.stop('soft');
+        },
+      }),
+    );
+    expect(handle).toBeDefined();
+    expect(result.stopReason).toBe('stopped');
+    expect(result.exitCode).toBe(1);
+    // The controller was NOT aborted (soft ≠ hard).
+    expect(calls[0]?.options?.abortController?.signal.aborted).toBe(false);
+  });
+
+  it('hard stop aborts the controller', async () => {
+    const { query, calls } = abortable();
+    let handle: RunHandle | undefined;
+    const run = new ClaudeRunner(config, { query }).run(
+      opts({
+        onStarted: (h) => {
+          handle = h;
+        },
+      }),
+    );
+    // Let the query start, then hard stop.
+    setTimeout(() => {
+      void handle?.stop('hard');
+    }, 10);
+    await expect(run).rejects.toThrow('aborted');
+    expect(calls[0]?.options?.abortController?.signal.aborted).toBe(true);
+  });
+
+  it('preserves sessionId when the SDK throws an error (SPEC 11.2)', async () => {
+    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery demands AsyncIterable
+    const query: ClaudeQuery = async function* () {
+      yield { type: 'system', subtype: 'init', session_id: 'rescued-session' };
+      yield assistant('working');
+      throw new Error('connection lost');
+    };
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.sessionId).toBe('rescued-session');
+    expect(result.exitCode).toBe(1);
+    expect(result.stopReason).toBe('error');
+  });
+
+  it('maps error_max_turns to stopReason turns_exhausted', async () => {
+    const { query } = scripted([
+      { type: 'result', subtype: 'error_max_turns', is_error: true, session_id: 's' },
+    ]);
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.stopReason).toBe('turns_exhausted');
+    expect(result.sessionId).toBe('s');
   });
 });
 

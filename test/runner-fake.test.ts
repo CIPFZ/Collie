@@ -151,6 +151,7 @@ describe('runner-fake: call recording', () => {
         maxTurns: 60,
         hasOnEvent: true,
         hasSignal: false,
+        hasOnStarted: false,
       },
       {
         role: 'worker',
@@ -161,6 +162,7 @@ describe('runner-fake: call recording', () => {
         maxTurns: 120,
         hasOnEvent: false,
         hasSignal: false,
+        hasOnStarted: false,
       },
     ]);
     expect(runner.remaining).toBe(0);

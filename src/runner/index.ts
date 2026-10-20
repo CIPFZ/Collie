@@ -9,6 +9,21 @@ export interface Usage {
   outputTokens: number;
 }
 
+/**
+ * Control handle returned by the runner once it starts (SPEC 11.2).
+ * R2 uses it for the signal ladder (11.6) and heartbeat pid (11.3).
+ */
+export interface RunHandle {
+  /** Child-process pid when the runner has one; used for heartbeat and kill level. */
+  pid?: number;
+  /**
+   * soft:  finish the current turn, session stays complete and resumable.
+   * hard:  abort immediately, session may be incomplete.
+   * kill:  unrecoverable termination; runner may SIGKILL the pid.
+   */
+  stop(level: 'soft' | 'hard' | 'kill'): Promise<void>;
+}
+
 export interface RunOptions {
   role: AgentRole;
   prompt: string;
@@ -23,6 +38,10 @@ export interface RunOptions {
    * runners only forward it and must not invent their own timeout semantics.
    */
   signal?: AbortSignal;
+  /** Resume a previous session (SPEC 11.2); opaque, came from RunResult.sessionId. */
+  resumeSessionId?: string;
+  /** Called once after the runner starts; hands R2 the control handle (SPEC 11.2). */
+  onStarted?: (handle: RunHandle) => void;
 }
 
 export interface RunResult {
@@ -35,6 +54,8 @@ export interface RunResult {
    * arrives here and R2 persists it as verdict.md (SPEC 3.5).
    */
   finalText?: string;
+  /** Why the run ended abnormally (SPEC 11.2); absent on a clean finish. */
+  stopReason?: 'turns_exhausted' | 'stopped' | 'error';
 }
 
 /**

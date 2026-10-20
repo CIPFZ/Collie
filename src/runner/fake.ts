@@ -3,11 +3,13 @@
 // events, run an arbitrary effect (e.g. a git commit), then resolve or reject.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, normalize, sep } from 'node:path';
-import type { AgentRole, AgentRunner, RunOptions, RunResult } from './index.js';
+import type { AgentRole, AgentRunner, RunHandle, RunOptions, RunResult } from './index.js';
 
 export interface FakeSceneContext {
   cwd: string;
   opts: RunOptions;
+  /** Control handle for this run; the effect can call handle.stop('kill') to self-terminate (SPEC 11.9 scenario E). */
+  handle: RunHandle;
 }
 
 interface FakeSceneBase {
@@ -19,6 +21,10 @@ interface FakeSceneBase {
   events?: unknown[];
   /** Runs after files and events; use it for side effects such as git commits. */
   effect?: (ctx: FakeSceneContext) => void | Promise<void>;
+  /** When true, stop('soft') is ignored; only hard/kill terminate (SPEC 11.2). */
+  ignoreSoft?: boolean;
+  /** Pid exposed via the RunHandle; defaults to process.pid when omitted. */
+  pid?: number;
 }
 
 /** One scripted run: it either resolves with `result` or rejects with `error` (a crash). */
@@ -35,6 +41,8 @@ export interface RecordedCall {
   maxTurns: number;
   hasOnEvent: boolean;
   hasSignal: boolean;
+  hasOnStarted: boolean;
+  resumeSessionId?: string;
 }
 
 export class FakeRunnerError extends Error {
@@ -84,6 +92,8 @@ export class FakeRunner implements AgentRunner {
       maxTurns: opts.maxTurns,
       hasOnEvent: opts.onEvent !== undefined,
       hasSignal: opts.signal !== undefined,
+      hasOnStarted: opts.onStarted !== undefined,
+      ...(opts.resumeSessionId === undefined ? {} : { resumeSessionId: opts.resumeSessionId }),
     });
     // Like a real runner, refuse to start once cancelled.
     opts.signal?.throwIfAborted();
@@ -100,13 +110,33 @@ export class FakeRunner implements AgentRunner {
       );
     }
 
+    // Three-level stop (SPEC 11.2): the handle records the highest level received.
+    let stopLevel: 'soft' | 'hard' | 'kill' | undefined;
+    const handle: RunHandle = {
+      ...(scene.pid === undefined ? { pid: process.pid } : { pid: scene.pid }),
+      // eslint-disable-next-line @typescript-eslint/require-await -- interface requires Promise<void>
+      async stop(level: 'soft' | 'hard' | 'kill'): Promise<void> {
+        if (level === 'soft' && scene.ignoreSoft === true) return;
+        stopLevel = level;
+      },
+    };
+    opts.onStarted?.(handle);
+
     for (const [path, content] of Object.entries(scene.files ?? {})) {
       const target = join(opts.cwd, safeRelative(path));
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, content);
     }
     for (const event of scene.events ?? []) opts.onEvent?.(event);
-    await scene.effect?.({ cwd: opts.cwd, opts });
+    await scene.effect?.({ cwd: opts.cwd, opts, handle });
+
+    // A stop during the scene (e.g. the effect called handle.stop('kill'))
+    // terminates with stopReason before checking the signal.
+    if (stopLevel !== undefined) {
+      const base = scene.result ?? { exitCode: 1 };
+      return { ...base, stopReason: 'stopped' };
+    }
+
     opts.signal?.throwIfAborted();
 
     if (scene.error !== undefined) throw scene.error;
