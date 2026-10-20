@@ -1,10 +1,10 @@
-# 批次 v01-b05 汇报
+# 批次 v01-b05 汇报（第二版，2026-10-20，含第三次烟雾运行）
 
 ## 做了什么
 
 本批次没有 R2 签发的 `task.md`，按 `docs/backlog.md` 的 v01-b05 小节和项目所有者在对话中的逐项裁决执行，`base_sha` 取 `545ceb1`。
 
-共 6 个代码提交，每个都在推送后确认了自己的 CI，才推下一个：
+共 7 个代码提交，每个都在推送后确认了自己的 CI，才推下一个：
 
 | 提交 | scope | 条目 | 内容 |
 |---|---|---|---|
@@ -14,132 +14,118 @@
 | `1459299` | arbiter | 2b | 认可依赖清单加回 SDK |
 | `0af10f5` | ci | 2c | 取证前等 CI |
 | `54fa8de` | runner | — | 安装 SDK 0.3.303 |
+| `0fe1d6e` | r2 | 2d | 本版新增：`issued_by: collie`、`final_text` |
 
-另有一个 R2 提交 `9e377e8`（烟雾批次的 task 信封，由 `collie run` 生成，已推送）。
+**条目 1、2、2a、2b、2c**：与第一版一致，这里不再重复。要点如下：
+- `ClaudeRunner` 的配置一律取自角色设置；调用方只能把轮数调低、把工具收窄。
+- signal 透传给 SDK；只有成功的运行才产出 `finalText`。
+- 22 个单元测试全部用替身，不加载 SDK。
+- `waitForCi` 只在 `head_sha` 已推送时才等，超时记录 `ci.wait_timeout`。
 
-**条目 1：`ClaudeRunner`**
-- 用 SDK 的 `query()` 实现 `AgentRunner`：
-  - model、工具白名单、轮数上限取自 `collie.toml` 里对应角色的配置。调用方只能把 `maxTurns` 调低、把工具收窄；越出白名单直接拒绝。
-  - `settingSources: []`：不加载本机的 CLAUDE.md、settings、hooks。
-  - 调用方的 signal 会中止 SDK 的 `abortController`；已经被取消的运行根本不会发起。
-  - 每条消息都经 `onEvent` 转出；只有成功的 result 才产出 `finalText`。
-- `query()` 是注入的，22 个单元测试全部用脚本替身，不加载 SDK、不联网。4 处变异都会让测试失败。
-- SDK 包名只在 `claude.ts` 里写一次（`CLAUDE_SDK_PACKAGE`），由它懒加载；`run.ts` 引用这个常量（已获批准）。
+**条目 2d（`0fe1d6e`，本版新增）**：
+- `buildTask` 写入 `issued_by: collie`（SPEC 3.3），配合已修订的 `AGENT-worker.md` §6：无人值守时直接执行，不等计划确认。
+- `worker.finished` 事件携带 `final_text`，即 worker 最终回复，按字形簇截断到 2000 字并附截断说明（SPEC 3.6）。用的是 Node 内置的 `Intl.Segmenter`，没有新增依赖；中文和组合 emoji 不会被截成两半。
+- `collie show` 把 `final_text` 作为缩进块单独打印，不挤在事件行里。
+- 3 处变异（去掉 `issued_by`、去掉 `final_text`、从不截断）都会让测试失败。全量 500 个测试通过。
 
-**条目 2 / 2a / 2b / 2c**
-- **CLI**：`collie run` 默认用真实 runner；`--runner claude|fake` 可覆盖，未知名字报错；测试注入的 runner 不受这个开关影响。
-- **2a**：`AgentConfigSchema.permission_mode` 为可选，取值 default / acceptEdits / bypassPermissions。`ClaudeRunner` 从配置读取，只有 bypass 才附带 SDK 要求的 `allowDangerouslySkipPermissions`。`collie.toml` 的两行和 init 模板与 schema 在同一个提交里修改（按授权）。
-- **2b**：仲裁规则 3 的认可依赖清单加回了 SDK。
-- **2c**：`waitForCi`：
-  - 轮询的结束条件是期望分支上不再有进行中的运行、并且 GitHub 已经为这个 sha 建了运行。只在其他分支上有运行的情况视为已经有结论，不再等——等下去也改变不了分支不对这件事。
-  - 上限是 `limits.ci_wait_secs`，间隔是 `limits.ci_poll_secs`（这一项按你的选择新增，R1 已补进 SPEC 3.1）；遇到限流会在截止时间内等到重置。
-  - R2 只在 `head_sha` 确实已推送时才等；没推送的提交永远不会有 CI，查一次就结束。
-  - 超时后 CI 记为 `unknown` / `null`，并写入新增事件 `ci.wait_timeout`，字段为 head_sha、waited_secs、polls、last_state（SPEC 3.6 已由 R1 补上；`polls` 是我额外加的）。
-  - 测试用假时钟和 fetch 替身覆盖了：先 pending 后 success、超时、限流、只在其他分支有运行、未推送不等待。3 处变异都会让测试失败。
-- **安装 SDK**：0.3.303。运行时依赖从 5 个增加到 109 个（不算可选的平台二进制包）。白名单外只有 `@opentelemetry/api` 和 `fast-sha256`，已由 ADR-004 补充条款豁免，Collie 的代码不 import 它们（新增的那条验收 grep 为 exit 0）。
+**条目 3：烟雾批次。共三次运行，第三次是正式样本**
 
-**条目 3：烟雾批次。这是两次运行，都如实记录在下面**
-
-运行前我做了两项准备，都没有往仓库写任何东西：
-- 用 reviewer 角色、空目录、单轮跑了一次 SDK 预检：4.3 秒，模型 `claude-opus-4-6` 可用，在嵌套环境里能正常拉起，`finalText="OK"`。
-- `origin` 是 HTTPS 地址，本机没有 GitHub 的 HTTPS 凭据，worker 一推送就会卡住。我用 git 的环境变量配置（`GIT_CONFIG_COUNT` 设置 pushurl，加上 `GIT_SSH_COMMAND`）为这次运行提供 SSH 推送，`.git/config` 没有改动。推送的 dry-run 已验证可行。
-
-**第 1 次运行 `r-20261020-051154`：被中断，不是 Collie 给出的结果**
-- 我在会话里用后台任务启动它，上一个会话结束时，进程随会话一起被杀掉了。这是我的操作失误。
-- journal 只到 `worker.started`（05:11:54），没有任何终止事件，因为 Collie 自己也被杀掉了。
-- 当时 worker 已经在 README 末尾追加了要求的那一行，但没有提交，也没写 report。task 提交 `b76d935` 只在本地。
-- 经你同意后，我把现场归档到 `/tmp/smoke-interrupted/`（journal、task.md、README 的 diff、git 状态），然后还原了 README，丢弃了从未推送的 `b76d935`。这次运行的 journal 仍保留在 `.collie/runs/`（不入库），`collie show` 也会显示它。
-
-**第 2 次运行 `r-20261020-060511`：结果为 BLOCK（退出码 20）。这就是第一个真实样本，没有重跑**
-- 这次用 `setsid nohup` 启动，脱离了会话。
-- 完整 journal：
-
-| 时间（UTC） | 事件 | 内容 |
+| 运行 | 结果 | 原因 |
 |---|---|---|
-| 06:05:11 | `run.started` | |
-| 06:05:11 | `batch.selected` | base_sha=`54fa8de` |
-| 06:05:11 | `batch.task_written` | commit=`9e377e8` |
-| 06:05:11 | `worker.started` | |
-| 06:05:58 | `worker.finished` | exit_code=0 |
-| 06:05:58 | `escalated` | no valid report：report.md 不存在（ENOENT） |
-| 06:05:58 | `run.finished` | verdict=BLOCK，exit_code=20 |
+| ① `r-20261020-051154` | 中断 | 我的会话结束时把进程一起杀掉了（见第一版） |
+| ② `r-20261020-060511` | BLOCK（20） | worker 遵守旧手册 §6，出完计划就退出，没写 report |
+| ③ `r-20261020-063533` | **PASS（0）** | 按 2d 修订后的运行，**只跑了一次，没有重跑** |
 
-- worker 只跑了 47 秒，退出码是 0，**没有改动任何文件、没有提交、没有写 report**（运行后 `git status` 是干净的）。
-- 按 SPEC 6，没有 report 就记 `escalated` 并以 20 退出，reviewer 没有被拉起，所以**没有 verdict.md**；这条路径也不写 progress。
-- 落盘的只有：task 信封（`9e377e8`，已推送，CI 为 success）和 journal（`.collie/runs/` 不入库，完整内容见上表）。
+第 ③ 次运行的完整 journal（UTC）：
+
+| 时间 | 事件 | 内容 |
+|---|---|---|
+| 06:35:33 | `run.started` → `batch.selected` → `batch.task_written` | base `0fe1d6e`，task 提交 `02e79d7` |
+| 06:35:33 | `worker.started` | |
+| 06:45:45 | `worker.finished` | exit 0；`final_text` 已记录（摘要见下） |
+| 06:45:45 | `reviewer.started` | head_sha `b75aa31`，在 worktree 中运行 |
+| 06:55:17 | `reviewer.verdict` | PASS |
+| 07:26:46 | `ci.wait_timeout` | waited_secs=1800，polls=3，last_state=**rate_limited** |
+| 07:26:46 | `run.finished` | verdict=PASS，exit_code=0 |
+
+- **worker**：用时约 10 分钟。提交了 `b75aa31`（只改 README 两行：一个空行，加上指定的那一行），写了 report 并以 `report(collie): v01-b05-smoke`（`943c67b`）提交，然后**自己推送**到 GitHub。它的 `final_text` 如实写着「`npm test` exit 1：66 个测试失败，但这是 pre-existing 的」。
+- **reviewer**：判 PASS，理由是「失败在 base_sha 就已存在，CI 上同一命令通过」。
+- **R2**：
+  - 实测 `npm test` → exit 1，434 passed、66 failed、7 个测试文件失败；其余 4 条命令都是 exit 0。
+  - 已推送：是。
+  - 受保护文件改动 0 行，依赖无变化。
+  - CI：等满 1800 秒，三次查询都被限流，所以记为 `unknown` / `null`，并写了 `ci.wait_timeout` 事件。
+- **arbiter**：规则 1～7 都没有命中，规则 8 采用了 reviewer 的 PASS。
+- **落盘情况**：
+  - 已推送（由 worker 推送）：`02e79d7` task、`b75aa31` README、`943c67b` report。CI：`b75aa31` 和 `943c67b` 都是 main / success；`02e79d7` 是和它们一起推上去的，没有自己的 CI 运行。
+  - **当时只在本地、未推送**（后经裁定以 `8db55f7` 入库，见第四段第 4 条）：R2 的 `2279a85 progress: v01-b05-smoke PASS`，包含 verdict.md（202 行）和 progress.md 里的一条实测记录。`collie run` 本身不推送（SPEC 6）。按你「原样落盘」的要求，我没有改动它，也没有推送它，见第四段。
 
 ## 测试结果
 
-在 `/tmp` 下全新 clone 到 `9e377e8`、执行 `npm ci` 之后，**用 Collie 的 `verify.ts` 运行 `parseBacklog` 解析出的 v01-b05 验收命令**：
+v01-b05 的验收命令，在本地 `2279a85` 上用 Collie 的 `verify.ts` 运行（命令来自 `parseBacklog`）：
 
-| 命令 | 退出码 | 摘要 |
-|---|---|---|
-| `npm run lint` | 0 | `All matched files use Prettier code style!` |
-| `npm run typecheck` | 0 | — |
-| `npm test` | 0 | `493 passed, 0 failed` |
-| `! grep -rlE "@anthropic-ai" src --include='*.ts' \| grep -v '^src/runner/'` | 0 | — |
-| `! grep -rlE "@opentelemetry\|fast-sha256" src --include='*.ts'` | 0 | — |
-| `npm test -- test/runner-claude.test.ts` | 0 | `22 passed, 0 failed` |
-| `test -f .collie/batches/v01-b05-smoke/verdict.md` | **1** | **验收不通过：烟雾批次在 reviewer 之前就升级了，没有产生 verdict** |
-
-全量共 24 个测试文件、493 个用例，失败 0。
-
-**CI**：6 个代码提交全部为 push / main / success。
-
-| sha | run |
+| 命令 | 退出码 |
 |---|---|
-| `e4555c8` | https://github.com/CIPFZ/Collie/actions/runs/39269722603 |
-| `4719412` | https://github.com/CIPFZ/Collie/actions/runs/39270001140 |
-| `da7cf65` | https://github.com/CIPFZ/Collie/actions/runs/39278669170 |
-| `1459299` | https://github.com/CIPFZ/Collie/actions/runs/39280540113 |
-| `0af10f5` | https://github.com/CIPFZ/Collie/actions/runs/39373039296 |
-| `54fa8de` | https://github.com/CIPFZ/Collie/actions/runs/39373328110 |
+| `npm run lint` | 0 |
+| `npm run typecheck` | 0 |
+| `npm test` | 0（`500 passed, 0 failed`） |
+| SDK 包名不出现在 `src/runner/` 之外 | 0 |
+| `@opentelemetry` / `fast-sha256` 不出现在 `src/` | 0 |
+| `npm test -- test/runner-claude.test.ts` | 0（`22 passed, 0 failed`） |
+| `test -f .collie/batches/v01-b05-smoke/verdict.md` | 0（**仅在本地成立**：verdict.md 在未推送的 `2279a85` 里） |
 
-- R2 的提交 `9e377e8`：https://github.com/CIPFZ/Collie/actions/runs/39378956406 ，success。
-- `54fa8de` 是用 `ci.ts` 调 REST API 查到的；其余因为 API 被限流，读的是 GitHub Actions 公开网页内嵌的 JSON（只是我本地的辅助脚本，不是 Collie 的代码）。
+**CI**：
+- 7 个代码提交全部为 push / main / success；`0fe1d6e` 是 https://github.com/CIPFZ/Collie/actions/runs/39381065027 ，其余 6 个见第一版。
+- worker 推送的 `b75aa31`（https://github.com/CIPFZ/Collie/actions/runs/39381664783 ）和 `943c67b`（https://github.com/CIPFZ/Collie/actions/runs/39382264642 ）都是 success。
 
-**受保护文件**：6 个代码提交都没有触及 SPEC、CONSTRAINTS、ROADMAP、ROLES、`AGENT-*`、README、`docs/`、`.collie/batches/`。`.collie/collie.toml` 只在 `da7cf65`（2a）和 `0af10f5`（2c）里修改，两处都有你的授权。
-
-**推送**：`origin/main` 等于 `9e377e8`。
+**受保护文件**：我的 7 个代码提交都没有触及受保护路径。`.collie/collie.toml` 只在 `da7cf65` 和 `0af10f5` 里修改，都有你的授权。
 
 ## 偏离或疑问
 
-1. **【最重要：这个样本说明的问题】worker 手册与无人值守运行冲突。**
-   - `AGENT-worker.md` 是 worker 的 system prompt，它的 §6 要求「输出执行计划……计划确认前不要写任何代码，也不要创建任何文件」。
-   - 在 headless 运行里没有人来确认，worker 遵守这一条，输出计划后正常结束（退出码 0）。这和观察到的现象完全吻合：47 秒、零改动、没有 report。第 1 次运行的 worker 改了 README，说明模型有时会无视这一条，所以行为并不稳定。
-   - **这是推断**：worker 的最终回复没有被记录（见第 2 条），SDK 在隔离模式下也没有留会话记录，我没法直接证实。
-   - 建议 R1 二选一：在 `AGENT-worker.md` 里区分「交互模式」和「collie run 模式」；或者让 `buildTask` 的正文写明「本次由 collie run 无人值守签发，计划无需确认，直接执行」。不过信封里的话能不能覆盖 system prompt 的要求，并不确定。
+1. **【最重要：这次 PASS 是错的，需要你知道】验收命令 `npm test` 实际退出码为 1，仲裁仍然给了 PASS。**
+   - **事实链**：
+     - worker 如实声称 434 passed / 66 failed；R2 实测正好也是 434 / 66。
+     - 所以规则 6（声称与实测不符）没有命中，因为这件事上 worker 没有说谎。
+     - 规则 8 随后采用了 reviewer 的 PASS，而 reviewer 用「这些失败早就存在」把一条明确要求 `exit 0` 的验收说服了过去。
+   - **漏洞在规则本身**：SPEC 4.3 的八条规则里，没有一条规定「R2 实测有验收命令不满足 expect 时，不得 PASS」。规则 5～7 只检查声称与实测不符，对「诚实地失败」无能为力，最后就由 reviewer 的判断兜底。这违背了 v01-b04 定下的原则：事实由 R2 测，reviewer 只贡献判断。
+   - **建议 R1 增加一条规则**，例如插在规则 4 之后：R2 实测的任一验收命令不满足 expect 时，若 verdict 为 PASS，则降为 FIX。三场景测试没能发现这个漏洞，是因为每个场景里都有一个谎言；这一次 worker 是诚实的。
 
-2. **【R2 的盲区】worker 的最终回复没有落盘。**
-   - `run.ts` 只记录了 worker 的 `exit_code`，没有 `finalText`，也没有消息流（`stream.ndjson` 属于 v0.2）。
-   - 结果是这次 BLOCK 的原因在 journal 里只剩「没有 report」，worker 实际说了什么完全找不到。
-   - 建议至少把 worker 的 `finalText`（截断后）写进 `worker.finished` 事件；按 SPEC 3.6，事件的扩展字段可以承载它。
+2. **【根因：66 个失败是我造成的，不是代码问题】**
+   - 为了让 worker 能通过 SSH 推送，我在启动 `collie run` 时导出了 git 环境变量 `GIT_CONFIG_COUNT` / `remote.origin.pushurl`（指向真实的 GitHub）。
+   - 这类变量对**所有** git 进程都生效，包括测试里临时创建、使用本地 bare 远端的仓库，于是它们的推送被改去推真实的 GitHub，结果失败。
+   - **已复现**：在 `b75aa31` 的 worktree 里，不带这些变量是 500 个全部通过，带上这些变量正好是 66 failed / 7 个测试文件失败（evidence、cli、exit-codes、scenario-a/b/c 等）。
+   - 因此 worker 的说法「pre-existing」和 reviewer 的「失败在 base 就存在」都只说对了一半：在那个环境下，base 上确实也会失败；但在干净的环境里根本不存在这些失败。两个 agent 都没能找到真正原因，倒是 R2 的实测忠实记录了它们。
+   - **修正建议**：推送凭据只给 worker 进程，不进入 R2 的验收环境。最简单的做法是把 `origin` 的推送地址配进仓库的 `.git/config`（本机配置，不入库），而不是靠全局环境变量。这属于运行环境配置，不需要改代码。
 
-3. **【验收】`test -f verdict.md` 未通过，b05 不能判 PASS。** 只要 worker 不产出 report，SPEC 6 就会在 reviewer 之前升级，烟雾批次就不会有 verdict。这条验收要在第 1 条解决之后才可能通过。按你「不要重跑」的要求，我没有为了让它通过而再跑。
+3. **CI 证据的结论是「未能取证」，而不是「失败」。**
+   - 整整 30 分钟 API 都处于限流状态，三次查询都被拒绝。`ci.ts` 按 2c 的设计，没有把它误判为成功或失败，而是记为 `unknown` / `null`。
+   - worker 在这次运行里声称 `ci_passed=false`，所以规则 7 也没有命中。它在 report 正文里写了 CI 通过，但结构化的 claims 填的是 false，不过两者没有矛盾。
+   - 这再次说明需要给环境配一个只读的 `GITHUB_TOKEN`。
 
-4. **运行留下的状态**：
-   - `9e377e8` 已推送；它只包含 task 信封，CI 通过。
-   - `.collie/runs/` 下有两次运行的 journal（不入库）；中断那次的现场另外归档在 `/tmp/smoke-interrupted/`。
-   - backlog 里 v01-b05-smoke 的状态仍是 `pending`。R2 写 backlog 状态的功能还没有实现，这个文件也是 R1 的。
+4. **R2 的裁定提交（已裁定：原样入库）。** 推送前我把它 rebase 到了 R1 的 `ebc7742` 之上，以保持 main 是一条直线。改动内容与原提交逐字节相同（已用 `cmp` 核对 patch），作者和提交信息也不变，只有 sha 从 `2279a85` 变成了 `8db55f7`。以下是裁定前的原文：
 
-5. **过程中的失误**：第 1 次运行被我自己的会话结束中断了（见上）。之后真实运行一律用 `setsid nohup` 脱离会话启动。
+   **未推送的 `2279a85` 需要你定。** 它是 R2 对这次运行的裁定记录（verdict 和 progress）。因为它记录的 PASS 是错的（见第 1 条），我没有替你决定要不要推送。可选方案：
+   - 原样推送，作为「第一个真实样本」入库，再由 R1 在 progress 的人工部分注明「此 PASS 因规则缺口不成立」；
+   - 只在本地保留，等规则修订后再处理。
 
-6. **提醒**：中断的那次运行，正好是 v0.2「不丢」要处理的场景：没有终止事件、工作区有半成品、task 提交只在本地。可以拿它作为 v0.2 的第一个测试素材。
+5. **worker 手册的修订确实生效了。** 第 ② 次运行 47 秒就零产出退出；第 ③ 次运行 10 分钟里读文件、改 README、跑测试、写 report、提交、推送都做了，对 66 个失败也如实汇报。`final_text` 也已发挥作用：这次的全部原委都能从 journal 里直接读到。
+
+6. **其他观察**：
+   - 规则 6 只取第一条带测试计数的命令来比对，这次就是 `npm test`，没有问题。
+   - worker 的 commit message 用的是 `docs:` scope，在铁律 20 的允许范围内。
+   - reviewer 的 evidence 和 R2 的实测都一字不差地留在 verdict.md 和 progress 里，便于人工对照。
 
 ## 下一步建议
 
-1. 先解决第 1、2 条，它们决定了 Collie 能不能真正无人值守地干活：
-   - 改 worker 手册或 task 正文，使 `collie run` 模式下无需等待计划确认；
-   - 让 R2 记录 worker 的 `finalText`。
-   - 这两件事做完后，再跑一次烟雾批次，b05 才有可能 PASS。
-2. 是否把 `stream.ndjson` 落盘（v0.2）提前一部分，请 R1 判断。这次只要有它，原因就能当场确认。
-3. 在 v0.2 由 Collie 自己签发第一个任务之前，上面第 1 条必须先解决，否则 worker 会每次都停在出计划这一步。
+1. **先补规则缺口（第 1 条）**，再谈 b05 是否 PASS。按现在的规则，这次运行在形式上满足了验收（verdict.md 存在），但 PASS 本身不成立。
+2. 在仓库的 `.git/config` 配好推送地址，替代全局环境变量（第 2 条）；同时配一个只读的 `GITHUB_TOKEN`（第 3 条）。
+3. 在你决定 `2279a85` 怎么处理之后，如果要再跑一次烟雾批次验证修正结果，需要你明确同意。我不会自行重跑。
 
 ```json
 {
   "schema_version": 1,
   "batch_id": "v01-b05",
-  "head_sha": "54fa8decbee73d1f76ad336d53120fd39c4cf0e4",
+  "head_sha": "0fe1d6ed002499fc8ff7016cdf605cb840a64799",
   "claims": {
     "commits": [
       "e4555c8a20343bcb6fa2730a298ef865407aab74",
@@ -147,9 +133,10 @@
       "da7cf652f06f544086cca4773835070e47b7c968",
       "14592992469e91d9cfd614be94d3d761f1a0295a",
       "0af10f5d06e91595613cc320b31ee5131df2d449",
-      "54fa8decbee73d1f76ad336d53120fd39c4cf0e4"
+      "54fa8decbee73d1f76ad336d53120fd39c4cf0e4",
+      "0fe1d6ed002499fc8ff7016cdf605cb840a64799"
     ],
-    "tests_passed": 493,
+    "tests_passed": 500,
     "tests_failed": 0,
     "pushed": true,
     "ci_passed": true,
@@ -157,10 +144,10 @@
     "spec_touched": false
   },
   "open_questions": [
-    "The real smoke run BLOCKed in 47s: the worker exited 0 with no changes and no report. AGENT-worker.md section 6 (its system prompt) says to output a plan and write nothing until it is confirmed, which can never happen headless. Inferred, not proven: the worker's final text is not recorded.",
-    "R2 records only the worker's exit code; record its finalText (truncated) in worker.finished so a BLOCK like this is explainable from the journal?",
-    "Acceptance 'test -f .collie/batches/v01-b05-smoke/verdict.md' fails: without a report, SPEC 6 escalates before the reviewer. Not re-run, per instruction.",
-    "The first run (r-20261020-051154) was killed with my session; its state is archived in /tmp/smoke-interrupted and its unpushed task commit was discarded with the owner's consent."
+    "Smoke run 3 ended PASS although R2 measured npm test exit 1 (434 passed / 66 failed): the worker reported the failures honestly, so no claim rule fired, and rule 8 adopted the reviewer's PASS. SPEC 4.3 has no rule that a failing acceptance command blocks a PASS. Add one?",
+    "The 66 failures were caused by my run harness: GIT_CONFIG_COUNT pushurl override (for the worker's SSH push) leaked into the tests' throwaway repos. Reproduced 66/66 with the env, 500/500 without. Configure the push URL in .git/config instead.",
+    "CI evidence was unknown: GitHub API rate-limited for the whole 1800s wait; ci.wait_timeout recorded. A read-only GITHUB_TOKEN is needed.",
+    "R2's commit 2279a85 (verdict.md + progress entry recording this PASS) is local and unpushed; push as-is or hold until the rule gap is fixed?"
   ]
 }
 ```
