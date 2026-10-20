@@ -345,7 +345,8 @@ type EventType =
   | 'worker.started' | 'worker.finished' | 'worker.crashed'
   | 'reviewer.started' | 'reviewer.verdict'
   | 'claim.mismatch' | 'verdict.downgraded'
-  | 'escalated';
+  | 'escalated'
+  | 'ci.wait_timeout';   // 等 CI 超过 ci_wait_secs 仍无结论；字段 head_sha / waited_secs / last_state
 ```
 
 v0.1 只需支持上列事件；v0.2 起追加 `worker.stalled` / `worker.idling` /

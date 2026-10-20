@@ -179,7 +179,7 @@ R4 读代码核验项：八条规则各有独立用例且顺序敏感；三个�
    `collie init` 模板同步。
    2b. 仲裁规则 3 的认可依赖清单恢复 `@anthropic-ai/claude-agent-sdk`（ADR-004）
    2c. R2 取证前先等 CI：`ci.ts` 对 `head_sha` 轮询直到结论不是 pending，上限 `limits.ci_wait_secs`、间隔 `limits.ci_poll_secs`
-   （SPEC 3.1，默认 1800 / 30），超时记 `unknown` 并写一条 journal 事件；
+   （SPEC 3.1，默认 1800 / 30），超时记 `unknown` 并写 `ci.wait_timeout` 事件（SPEC 3.6，字段 head_sha / waited_secs / last_state）；
    `collie.toml` 加这两行授权与 schema 改动同一提交；测试用注入的 fetch 替身模拟「先 pending 后 success」
 3. 在本仓库用真实 runner 跑一次 `collie run v01-b05-smoke`（一个只改 README 一行的烟雾批次），
    把完整 task / report / verdict / progress 落盘作为第一个真实样本
