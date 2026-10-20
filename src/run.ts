@@ -17,7 +17,7 @@ import { arbitrate, type ArbiterDecision } from './arbiter.js';
 import { loadBacklog } from './backlog.js';
 import type { Clock, FetchLike } from './ci.js';
 import { loadConfig } from './config.js';
-import { collectEvidence } from './evidence.js';
+import { collectEvidence, type Evidence } from './evidence.js';
 import { addWorktree, commit, git, isAncestor, removeWorktree, revParse, status } from './git.js';
 import { checkHeartbeat, removeHeartbeat, touchHeartbeat, writeHeartbeat } from './heartbeat.js';
 import { createJournal, RUNS_RELATIVE_DIR, type Journal } from './journal.js';
@@ -216,6 +216,35 @@ async function rescueDirtyWorkspace(
   return { sha, files };
 }
 
+const RULE_ESCALATED = 0;
+
+/** Synthetic decision for escalation paths that never reach the arbiter (SPEC 11.7). */
+function escalationDecision(reason: string): ArbiterDecision {
+  return {
+    final: 'BLOCK',
+    original: null,
+    rule: RULE_ESCALATED,
+    reason,
+    mismatches: [],
+    failedAcceptance: [],
+    downgraded: false,
+  };
+}
+
+/** Empty evidence for escalation paths that never reach evidence collection (SPEC 11.7). */
+function emptyEvidence(): Evidence {
+  return {
+    commits_actual: [],
+    verify_results: [],
+    remote_has_head: false,
+    ci_conclusion: 'unknown',
+    ci_run_url: '',
+    ci_branch_matched: null,
+    deps_diff: [],
+    spec_diff_lines: 0,
+  };
+}
+
 /** Real delay: waits `ms` using setTimeout. Production default for ladderDelay. */
 function realDelay(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -259,9 +288,20 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     rec.record('run.finished', { verdict: final, exit_code: EXIT_CODES[final] });
     return { final, exitCode: EXIT_CODES[final], ...extra };
   };
-  const escalate = (reason: string): RunOutcome => {
+  const escalate = async (reason: string): Promise<RunOutcome> => {
     rec.record('escalated', { reason });
-    return finish('BLOCK', { escalation: reason });
+    // SPEC 11.7: any exit writes a progress record — even escalations that never
+    // reach the arbiter. Build synthetic decision + evidence for the commit.
+    const decision = escalationDecision(reason);
+    const progressPath = writeProgress(root, {
+      batchId,
+      runId,
+      at: ctx.now().toISOString(),
+      decision,
+      evidence: emptyEvidence(),
+    });
+    await commit(root, `progress: ${batchId} ${decision.final}`, [relative(root, progressPath)]);
+    return finish('BLOCK', { escalation: reason, decision });
   };
 
   // E2: issue the envelope. base_sha is the last commit before the task commit (SPEC 3.3).
@@ -388,7 +428,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       rec.record('worker.rescued', { sha: rescue.sha, files: rescue.files });
     }
     removeHeartbeat(root);
-    return escalate(`worker crashed: ${message(error)}`);
+    return await escalate(`worker crashed: ${message(error)}`);
   }
 
   // SPEC 11.4: rescue uncommitted work left behind by the worker.
@@ -402,12 +442,12 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   try {
     report = readReport(root, batchId);
   } catch (error) {
-    return escalate(`no valid report: ${message(error)}`);
+    return await escalate(`no valid report: ${message(error)}`);
   }
   // head_sha is itself a claim: it must be a commit built on top of the task commit.
   const headOk = await isAncestor(root, taskSha, report.head_sha).catch(() => false);
   if (!headOk)
-    return escalate(
+    return await escalate(
       `report head_sha ${report.head_sha} does not descend from the task commit ${taskSha}`,
     );
 

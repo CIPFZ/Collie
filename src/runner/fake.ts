@@ -10,6 +10,8 @@ export interface FakeSceneContext {
   opts: RunOptions;
   /** Control handle for this run; the effect can call handle.stop('kill') to self-terminate (SPEC 11.9 scenario E). */
   handle: RunHandle;
+  /** Resolves when any non-ignored stop level is received. Effects can await this to simulate a stalled worker. */
+  stopped: Promise<'soft' | 'hard' | 'kill'>;
 }
 
 interface FakeSceneBase {
@@ -112,12 +114,17 @@ export class FakeRunner implements AgentRunner {
 
     // Three-level stop (SPEC 11.2): the handle records the highest level received.
     let stopLevel: 'soft' | 'hard' | 'kill' | undefined;
+    let stopResolve: ((level: 'soft' | 'hard' | 'kill') => void) | undefined;
+    const stoppedPromise = new Promise<'soft' | 'hard' | 'kill'>((r) => {
+      stopResolve = r;
+    });
     const handle: RunHandle = {
       ...(scene.pid === undefined ? { pid: process.pid } : { pid: scene.pid }),
       // eslint-disable-next-line @typescript-eslint/require-await -- interface requires Promise<void>
       async stop(level: 'soft' | 'hard' | 'kill'): Promise<void> {
         if (level === 'soft' && scene.ignoreSoft === true) return;
         stopLevel = level;
+        stopResolve?.(level);
       },
     };
     opts.onStarted?.(handle);
@@ -128,7 +135,7 @@ export class FakeRunner implements AgentRunner {
       writeFileSync(target, content);
     }
     for (const event of scene.events ?? []) opts.onEvent?.(event);
-    await scene.effect?.({ cwd: opts.cwd, opts, handle });
+    await scene.effect?.({ cwd: opts.cwd, opts, handle, stopped: stoppedPromise });
 
     // A stop during the scene (e.g. the effect called handle.stop('kill'))
     // terminates with stopReason before checking the signal.

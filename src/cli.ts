@@ -33,10 +33,14 @@ export interface CliDeps {
   err: (text: string) => void;
   /** Git remote checked for "pushed". */
   remote?: string;
-  /** Test hook: overrides the worker's wall-clock signal. */
+  /** Test hook: overrides the worker's wall-clock signal (disables internal wallclock timer). */
   workerSignal?: AbortSignal;
   /** Test hook: time source for the CI wait. */
   clock?: Clock;
+  /** Test hook: injected delay for signal ladder grace periods (SPEC 11.6). */
+  ladderDelay?: (ms: number) => Promise<void>;
+  /** Test hook: override liveness monitor check interval (ms). */
+  livenessIntervalMs?: number;
 }
 
 const TEMPLATE = join(import.meta.dirname, '..', 'templates', 'collie.toml');
@@ -141,6 +145,10 @@ async function run(
     now: deps.now,
     ...(deps.workerSignal === undefined ? {} : { workerSignal: deps.workerSignal }),
     ...(deps.clock === undefined ? {} : { clock: deps.clock }),
+    ...(deps.ladderDelay === undefined ? {} : { ladderDelay: deps.ladderDelay }),
+    ...(deps.livenessIntervalMs === undefined
+      ? {}
+      : { livenessIntervalMs: deps.livenessIntervalMs }),
   });
   const how =
     outcome.decision === undefined
