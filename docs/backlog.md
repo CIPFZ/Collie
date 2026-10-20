@@ -36,7 +36,7 @@
 条目：
 1. 工程骨架：`package.json`、`tsconfig.json`（strict）、ESLint（含 `no-explicit-any`、
    `src/**` 上 `no-magic-numbers`）、Prettier、vitest 配置、
-   `.gitignore`（含 `node_modules/`、`dist/`、`.collie/runs/`、`.collie/heartbeat`）、
+   `.gitignore`（含 `node_modules/`、`dist/`、`.collie/runs/`、`.collie/heartbeat.json`）、
    GitHub Actions CI（**监听 main**）。依赖见 SPEC 2.2 与 ADR-002
 2. `src/config.ts` + `src/schema/index.ts`：解析并校验 `.collie/collie.toml`（由 R1 放置，只读），
    `SCHEMA_VERSION = 1`，全部 zod schema（strict）与导出类型
@@ -273,7 +273,9 @@ v0.2 第一批。规格见 SPEC 第 11 章 11.1~11.4、11.8。
    `fake.ts` 实现三级 `stop`，可脚本化「不响应 soft」；`claude.ts` 实现 `RunHandle`
    （soft / hard / kill 的 SDK 映射留在 runner 内，SDK 无 pid 时 `pid` 省略）
 2. `stream.ndjson` 落盘（11.3）；`heartbeat.json` 写入、更新、清理、启动时孤儿检测与并行拒绝（11.3）；
-   新增事件 `run.orphaned` / `worker.rescued`（11.8）
+   新增事件 `run.orphaned` / `worker.rescued`（11.8）。
+   修正 v01-b01 留下的扩展名错误：`.gitignore` 与 `src/cli.ts` 的 `GITIGNORE_ENTRIES`
+   把 `.collie/heartbeat` 改为 `.collie/heartbeat.json`，否则救援提交会把心跳文件带进仓库
 3. 脏工作区救援（11.4）：worker 退出后由 R2 执行 wip 提交并记事件；救援提交不推送。
    场景 E 前半段 `test/scenario-e.test.ts`：断言 kill 后救援提交与事件存在
    （`attempt=2` / `interrupted_at` 的断言留给 v02-b04）
@@ -287,6 +289,7 @@ v0.2 第一批。规格见 SPEC 第 11 章 11.1~11.4、11.8。
 | 全部测试通过 | `npm test` | exit 0 |
 | 场景 E 前半段 | `npm test -- test/scenario-e.test.ts` | exit 0 |
 | 心跳与孤儿检测 | `npm test -- test/heartbeat.test.ts` | exit 0 |
+| 心跳文件被忽略 | `git check-ignore -q .collie/heartbeat.json` | exit 0 |
 | SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
 
 额外禁止：
