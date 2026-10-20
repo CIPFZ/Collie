@@ -346,7 +346,8 @@ type EventType =
   | 'reviewer.started' | 'reviewer.verdict'
   | 'claim.mismatch' | 'verdict.downgraded'
   | 'escalated'
-  | 'ci.wait_timeout';   // 等 CI 超过 ci_wait_secs 仍无结论；字段 head_sha / waited_secs / last_state
+  | 'ci.wait_timeout'    // 等 CI 超过 ci_wait_secs 仍无结论；字段 head_sha / waited_secs / last_state
+  | 'acceptance.failed';  // 规则 8：实测验收未满足；字段 cmd / exit_code / expect
 // worker.finished 携带 exit_code 与 final_text（worker 最终回复，截断至 2000 字），
 // 否则零产出退出的原因无从得知（v01-b05-smoke 教训）。
 ```
@@ -432,8 +433,15 @@ reviewer 的 prompt 由 `roles/reviewer.ts` 从零组装，只允许包含：
 6. claims.tests_* 与 verify_results 不一致     → FIX + 记 claim.mismatch
 7. claims.ci_passed=true 但 ci_conclusion≠success
    或 ci_branch_matched=false                  → FIX + 记 claim.mismatch
-8. 否则采用 verdict 原值
+8. verify_results 中任一条 exit_code≠0
+   或 stdout 不匹配 expect                     → 若 verdict=PASS 则降为 FIX + 记 acceptance.failed
+9. 否则采用 verdict 原值
 ```
+
+规则 8 的来源：v01-b05-smoke 第二次真实运行（2026-10-20）。worker 如实报了 66 个测试失败，
+规则 5~7 因「声称与实测一致」全部不触发，reviewer 以「失败早已存在」为由判 PASS，规则 9 照单采用。
+三场景只覆盖了 worker 说谎的情况，没覆盖「worker 诚实但验收确实没过」。
+验收命令是 PASS 的必要条件，不由 reviewer 的解释豁免。
 
 规则 7 的来源是一次真实教训：某仓库 CI 配置监听 `main` 而实际用 `master`，
 导致 M0 到 M6 全程「CI 全绿」其实从未触发过。此类失败在自动循环中会被放大，
