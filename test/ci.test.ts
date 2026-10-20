@@ -2,11 +2,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   CiError,
   CiRateLimitError,
+  isEnvelopeOnlyDiff,
   parseGitHubRepo,
   queryCi,
+  queryCiWithAttribution,
   waitForCi,
   type CiQuery,
   type Clock,
+  type DescendantCandidate,
   type FetchLike,
 } from '../src/ci.js';
 
@@ -423,5 +426,138 @@ describe('ci: waitForCi (v01-b05 2c)', () => {
       'HTTP 502',
     );
     expect(clock.sleeps).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Descendant attribution (SPEC 3.5 "CI 运行的归属")
+// ---------------------------------------------------------------------------
+
+/** Returns different API responses based on the head_sha parameter in the URL. */
+function perShaFetch(responses: Record<string, () => Response>): FetchLike {
+  return (url) => {
+    const shaMatch = /head_sha=([0-9a-f]+)/.exec(url);
+    const sha = shaMatch?.[1] ?? '';
+    const respond = responses[sha] ?? (() => runs());
+    return Promise.resolve(respond());
+  };
+}
+
+describe('ci: isEnvelopeOnlyDiff (SPEC 3.5)', () => {
+  it('accepts an empty diff', () => {
+    expect(isEnvelopeOnlyDiff([])).toBe(true);
+  });
+
+  it('accepts .collie/ files and docs/progress.md', () => {
+    expect(
+      isEnvelopeOnlyDiff([
+        '.collie/batches/v01-b05-smoke/report.md',
+        '.collie/batches/v01-b05-smoke/verdict.md',
+        'docs/progress.md',
+      ]),
+    ).toBe(true);
+  });
+
+  it('rejects when a source file changed', () => {
+    expect(isEnvelopeOnlyDiff(['.collie/batches/v01-b05/report.md', 'src/ci.ts'])).toBe(false);
+  });
+
+  it('rejects docs/backlog.md (not in the allowlist)', () => {
+    expect(isEnvelopeOnlyDiff(['docs/backlog.md'])).toBe(false);
+  });
+});
+
+const DESC_SHA = 'a'.repeat(40);
+const CODE_DESC_SHA = 'b'.repeat(40);
+
+describe('ci: queryCiWithAttribution (SPEC 3.5)', () => {
+  it('uses head_sha own run when it exists (no descendant fallback)', async () => {
+    const fetch = perShaFetch({
+      [SHA]: () => runs(run({ id: 1 })),
+      [DESC_SHA]: () => runs(run({ id: 2, head_sha: DESC_SHA })),
+    });
+    const descendants: DescendantCandidate[] = [
+      { sha: DESC_SHA, changedFiles: ['.collie/batches/v01-b05-smoke/report.md'] },
+    ];
+    const result = await queryCiWithAttribution(query, fetch, descendants);
+    expect(result.sha).toBe(SHA);
+    expect(result.attributedSha).toBeUndefined();
+    expect(result.runs).toHaveLength(1);
+    expect(result.runs[0]?.id).toBe(1);
+  });
+
+  it('adopts a qualifying descendant when head_sha has no runs', async () => {
+    const fetch = perShaFetch({
+      [SHA]: () => runs(),
+      [DESC_SHA]: () => runs(run({ id: 10, head_sha: DESC_SHA })),
+    });
+    const descendants: DescendantCandidate[] = [
+      {
+        sha: DESC_SHA,
+        changedFiles: ['.collie/batches/v01-b05-smoke/report.md', 'docs/progress.md'],
+      },
+    ];
+    const result = await queryCiWithAttribution(query, fetch, descendants);
+    expect(result.sha).toBe(SHA);
+    expect(result.attributedSha).toBe(DESC_SHA);
+    expect(result.runs).toHaveLength(1);
+    expect(result.branchMatched).toBe(true);
+  });
+
+  it('rejects a descendant that changed code files', async () => {
+    const fetch = perShaFetch({
+      [SHA]: () => runs(),
+      [CODE_DESC_SHA]: () => runs(run({ id: 20, head_sha: CODE_DESC_SHA })),
+    });
+    const descendants: DescendantCandidate[] = [
+      {
+        sha: CODE_DESC_SHA,
+        changedFiles: ['.collie/batches/v01-b05-smoke/report.md', 'src/ci.ts'],
+      },
+    ];
+    const result = await queryCiWithAttribution(query, fetch, descendants);
+    expect(result.sha).toBe(SHA);
+    expect(result.attributedSha).toBeUndefined();
+    expect(result.runs).toHaveLength(0);
+  });
+
+  it('skips a code-changing descendant but adopts the next qualifying one', async () => {
+    const cleanDesc = 'c'.repeat(40);
+    const fetch = perShaFetch({
+      [SHA]: () => runs(),
+      [CODE_DESC_SHA]: () => runs(run({ id: 20, head_sha: CODE_DESC_SHA })),
+      [cleanDesc]: () => runs(run({ id: 30, head_sha: cleanDesc })),
+    });
+    const descendants: DescendantCandidate[] = [
+      { sha: CODE_DESC_SHA, changedFiles: ['src/ci.ts'] },
+      { sha: cleanDesc, changedFiles: ['.collie/batches/v02-b01/report.md'] },
+    ];
+    const result = await queryCiWithAttribution(query, fetch, descendants);
+    expect(result.sha).toBe(SHA);
+    expect(result.attributedSha).toBe(cleanDesc);
+    expect(result.runs[0]?.id).toBe(30);
+  });
+
+  it('returns the empty direct result when no descendant qualifies', async () => {
+    const fetch = perShaFetch({ [SHA]: () => runs() });
+    const result = await queryCiWithAttribution(query, fetch, []);
+    expect(result.sha).toBe(SHA);
+    expect(result.attributedSha).toBeUndefined();
+    expect(result.runs).toHaveLength(0);
+  });
+
+  it('does not adopt a descendant whose CI is still pending', async () => {
+    const fetch = perShaFetch({
+      [SHA]: () => runs(),
+      [DESC_SHA]: () =>
+        runs(run({ id: 15, head_sha: DESC_SHA, status: 'in_progress', conclusion: null })),
+    });
+    const descendants: DescendantCandidate[] = [
+      { sha: DESC_SHA, changedFiles: ['.collie/batches/v01-b05-smoke/report.md'] },
+    ];
+    const result = await queryCiWithAttribution(query, fetch, descendants);
+    expect(result.sha).toBe(SHA);
+    expect(result.attributedSha).toBeUndefined();
+    expect(result.runs).toHaveLength(0);
   });
 });

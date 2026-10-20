@@ -241,6 +241,12 @@ export async function removeWorktree(cwd: string, path: string): Promise<void> {
   await git(cwd, ['worktree', 'remove', '--force', path]);
 }
 
+/** File paths changed between two commits (git diff --name-only, SPEC 3.5 CI attribution). */
+export async function diffNameOnly(cwd: string, base: string, head: string): Promise<string[]> {
+  const out = await git(cwd, ['diff', '--name-only', '-z', base, head, '--']);
+  return out.split(NUL).filter((path) => path !== '');
+}
+
 /** Contents of `path` at `rev`, or undefined when the file does not exist there. */
 export async function showFile(
   cwd: string,

@@ -40,10 +40,14 @@ const decision: ArbiterDecision = {
   downgraded: true,
 };
 
-function entry(batchId: string, final: ProgressEntry['decision']['final'] = 'FIX'): ProgressEntry {
+function entry(
+  batchId: string,
+  final: ProgressEntry['decision']['final'] = 'FIX',
+  runId = 'r-1',
+): ProgressEntry {
   return {
     batchId,
-    runId: 'r-1',
+    runId,
     at: '2026-10-19T12:00:00.000Z',
     decision: { ...decision, final },
     evidence,
@@ -81,14 +85,25 @@ describe('progress: Collie owns one marked block and nothing else', () => {
     expect(text.trimEnd().endsWith(BLOCK_END)).toBe(true);
   });
 
-  it('replaces the entry of the same batch and keeps others', () => {
+  it('replaces the entry of the same run and keeps others', () => {
     let text = applyEntry(HUMAN, entry('v01-b03', 'PASS'));
     text = applyEntry(text, entry('v01-b04', 'FIX'));
     text = applyEntry(text, entry('v01-b04', 'PASS'));
-    expect(text.match(/### v01-b04 ·/g)).toHaveLength(1);
+    expect(text.match(/### v01-b04 · r-1 ·/g)).toHaveLength(1);
     expect(text).toContain('### v01-b03 · r-1 · PASS');
     expect(text).toContain('### v01-b04 · r-1 · PASS');
     expect(text.startsWith(HUMAN)).toBe(true);
+  });
+
+  it('appends per run, not per batch (SPEC 4 progress.ts)', () => {
+    let text = applyEntry(HUMAN, entry('v01-b04', 'FIX', 'r-1'));
+    text = applyEntry(text, entry('v01-b04', 'PASS', 'r-2'));
+    text = applyEntry(text, entry('v01-b04', 'BLOCK', 'r-3'));
+    // All three runs of the same batch must be kept.
+    expect(text.match(/### v01-b04 ·/g)).toHaveLength(3);
+    expect(text).toContain('### v01-b04 · r-1 · FIX');
+    expect(text).toContain('### v01-b04 · r-2 · PASS');
+    expect(text).toContain('### v01-b04 · r-3 · BLOCK');
   });
 
   it('leaves text after the block untouched', () => {

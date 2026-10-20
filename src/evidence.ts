@@ -2,6 +2,7 @@
 // ci.ts measure, in the SPEC 3.5 evidence shape. The arbiter judges claims
 // against this, not against the reviewer's account of the same facts.
 import {
+  isEnvelopeOnlyDiff,
   queryCi,
   waitForCi,
   type CiResult,
@@ -9,7 +10,7 @@ import {
   type Clock,
   type FetchLike,
 } from './ci.js';
-import { diffStat, log, remoteContains, showFile } from './git.js';
+import { diffNameOnly, diffStat, log, remoteContains, showFile } from './git.js';
 import {
   PackageJsonSchema,
   PackageLockSchema,
@@ -189,6 +190,32 @@ export async function collectEvidence(input: EvidenceInput): Promise<CollectedEv
     }
   } catch (error) {
     ci = { error: error instanceof Error ? error.message : String(error) };
+  }
+
+  // SPEC 3.5 "CI 运行的归属": when head_sha has no CI runs of its own, try
+  // descendant commits on the expected branch whose diff is envelope-only.
+  // We already know head_sha's CI result (from waitForCi or queryCi above),
+  // so we only query descendants directly—no redundant head_sha re-query.
+  if (remoteHasHead) {
+    const noRuns = 'error' in ci ? true : ci.runs.length === 0;
+    if (noRuns) {
+      try {
+        const branchRef = `refs/remotes/${input.remote}/${config.ci.expected_branch}`;
+        const descendants = await log(root, headSha, branchRef);
+        for (const d of descendants) {
+          const files = await diffNameOnly(root, headSha, d.sha);
+          if (!isEnvelopeOnlyDiff(files)) continue;
+          const descResult = await queryCi({ ...ciQuery, sha: d.sha }, input.fetch);
+          if (descResult.state === 'completed') {
+            // Attribute the descendant's completed run to head_sha (SPEC 3.5).
+            ci = { ...descResult, sha: headSha };
+            break;
+          }
+        }
+      } catch {
+        // Descendant resolution is best-effort; keep the original ci result.
+      }
+    }
   }
 
   const verify = await runAcceptance(dedupe(input.commands), {

@@ -343,3 +343,70 @@ export async function waitForCi(
     await clock.sleep(Math.min(delay, remaining), query.signal);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Descendant attribution (SPEC 3.5 "CI 运行的归属")
+// ---------------------------------------------------------------------------
+
+/**
+ * Pre-resolved descendant candidate for CI attribution (SPEC 3.5).
+ * evidence.ts resolves these from git log / diff before calling here.
+ */
+export interface DescendantCandidate {
+  sha: string;
+  /** Files changed between head_sha and this descendant (git diff --name-only). */
+  changedFiles: readonly string[];
+}
+
+/**
+ * True when every changed file is under `.collie/` or is `docs/progress.md`
+ * (SPEC 3.5: "只含 `.collie/**` 与 `docs/progress.md`").
+ * An empty diff is trivially envelope-only.
+ */
+export function isEnvelopeOnlyDiff(files: readonly string[]): boolean {
+  const ENVELOPE_PREFIX = '.collie/';
+  const ENVELOPE_EXACT = 'docs/progress.md';
+  return files.every((f) => f.startsWith(ENVELOPE_PREFIX) || f === ENVELOPE_EXACT);
+}
+
+/**
+ * Extended CiResult that tracks whether the run was attributed from a
+ * descendant commit rather than from head_sha itself.
+ */
+export interface AttributedCiResult extends CiResult {
+  /** Set when the result came from a descendant commit, not head_sha itself. */
+  attributedSha?: string;
+}
+
+/**
+ * Queries CI for `query.sha` (head_sha); if it has no runs, tries qualifying
+ * descendants in order (SPEC 3.5 "CI 运行的归属"). A descendant qualifies when
+ * its diff from head_sha contains only `.collie/**` and `docs/progress.md`
+ * (i.e. only envelope commits, code identical to head_sha). Descendants that
+ * change any code file are never adopted.
+ *
+ * The first qualifying descendant with a completed CI result wins. Its result
+ * is returned with `sha` set to the original head_sha and `attributedSha` set
+ * to the descendant so that callers can see where the run actually came from.
+ * Pending or no-branch runs from descendants are never adopted—only a completed
+ * result is useful evidence.
+ */
+export async function queryCiWithAttribution(
+  query: CiQuery,
+  fetchImpl: FetchLike,
+  descendants: readonly DescendantCandidate[],
+): Promise<AttributedCiResult> {
+  const direct = await queryCi(query, fetchImpl);
+  if (direct.runs.length > 0) return direct;
+
+  for (const desc of descendants) {
+    if (!isEnvelopeOnlyDiff(desc.changedFiles)) continue;
+    const descResult = await queryCi({ ...query, sha: desc.sha }, fetchImpl);
+    if (descResult.state === 'completed') {
+      // Attribute the descendant's runs to the original head_sha (SPEC 3.5).
+      return { ...descResult, sha: query.sha, attributedSha: desc.sha };
+    }
+  }
+
+  return direct;
+}

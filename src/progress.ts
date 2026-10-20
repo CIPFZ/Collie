@@ -77,11 +77,13 @@ export function applyEntry(text: string, entry: ProgressEntry): string {
     return `${text.replace(/\n*$/, '\n\n')}${block}`;
   }
   const inner = text.slice(start + BLOCK_START.length, end);
-  // Entries are separated by their "### <batch> ·" headings.
+  // SPEC 4 progress.ts: append per run, not per batch. Only replace entries
+  // with the same batchId AND runId (idempotency), keep other runs of the
+  // same batch intact.
   const entries = inner
     .split(/\n(?=### )/)
     .map((e) => e.trim())
-    .filter((e) => e !== '' && !e.startsWith(`### ${entry.batchId} ·`));
+    .filter((e) => e !== '' && !e.startsWith(`### ${entry.batchId} · ${entry.runId} ·`));
   entries.push(rendered);
   return `${text.slice(0, start + BLOCK_START.length)}\n${entries.join('\n\n')}\n${text.slice(end)}`;
 }
