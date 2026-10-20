@@ -284,6 +284,8 @@ R3 写，R2 读，**R4 不读**。Markdown 四段正文 + 尾部围栏 JSON。
   此字段使场景 A 成为真正的「声称 vs 实测」比对（arbiter 规则 7 据此与 `ci_branch_matched` /
   `ci_conclusion` 对照），而非只检查 CI 本身是否通过
 - sha 字段均须匹配 `/^[0-9a-f]{7,40}$/`
+- `spec_touched`：worker 的提交是否改动了**任何受保护路径**（AGENT-worker.md 第 2 节的全部清单，
+  不只是 `SPEC.md`）。与仲裁规则 2 的检查范围一致（v02-b01 后明确）。
 
 ### 3.5 裁决信封（verdict.md）
 

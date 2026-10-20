@@ -19,7 +19,7 @@
 | 4 | v01-b04 | 仲裁、CLI 与三场景验证 | v01-b03 | passed |
 | 5 | v01-b05 | 真实 runner | v01-b04 | passed |
 | 6 | v01-b05-smoke | 烟雾批次：README 改一行 | v01-b05 | passed |
-| 7 | v02-b01 | 真实运行暴露的两处修补 | v01-b05 | pending |
+| 7 | v02-b01 | 真实运行暴露的两处修补 | v01-b05 | blocked |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -252,3 +252,9 @@ R4 读代码核验项：八条规则各有独立用例且顺序敏感；三个�
 
 额外禁止：
 - 改动 SPEC / CONSTRAINTS / ROLES / backlog
+
+结论（2026-10-20，第一次自举运行）：BLOCK，规则 2，判定正确。条目 2 把 `docs/progress.md` 的回填派给了 worker，
+而该文件是受保护路径——是 R1 签发错误，不是 worker 或 Collie 的问题。
+代码部分（`9962761` 的 ci.ts / progress.ts 改动）已在 main 且验收 5 条全过，予以采用；
+progress.md 的回填内容有误，已由 R2 占位者更正。本批次不重跑。
+教训：task 条目不得要求 worker 写任何第 2 节清单内的文件；R1 签发前对照清单自查。

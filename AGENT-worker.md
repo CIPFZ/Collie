@@ -126,7 +126,8 @@ npm run lint && npm run typecheck && npm test
 
 关于尾部 JSON 的重要说明：其中所有字段会被独立审核 Agent 逐项取证核对。
 **如实填写**。虚报不会让你通过，只会导致批次被判 FIX 或 BLOCK 并返工。
-`spec_touched` 若为 true 会直接导致 BLOCK——你本就无权改 SPEC。
+`spec_touched` 指第 2 节清单里的**任何**文件（不只 `SPEC.md`）是否被你的提交改动。
+若为 true 会直接导致 BLOCK——你本就无权改它们。改了却填 false 会额外记一条声称不符。
 
 ## 6. 第一步
 
