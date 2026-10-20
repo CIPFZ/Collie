@@ -159,4 +159,23 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - CI：unknown，监听分支未能取证
 - 受保护文件改动行数：0
 - 依赖变化：无
+
+### v02-b03 · r-20261020-145024 · PASS
+
+- 时间：2026-10-20T16:10:14.277Z
+- 裁定：规则 9，全部 8 项验收命令实跑通过（exit 0）；4 个提交在 origin/main 上；无受保护文件修改或依赖变化；interrupt() 正确实现并测试；v0.1 场景不受影响。CI 实际结论因无 GH_TOKEN 未能取证（ci_branch_matched=null），配置正确监听 main。
+- 提交：`ba283de` `25fc988` `90857ec` `5b910cb`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，561 passed, 0 failed
+  - `npm test -- test/scenario-g.test.ts` → exit 0，2 passed, 0 failed
+  - `npm test -- test/ladder.test.ts` → exit 0，5 passed, 0 failed
+  - `npm test -- test/scenario-a.test.ts test/scenario-b.test.ts test/scenario-d.test.ts test/scenario-c.test.ts` → exit 0，20 passed, 0 failed
+  - `grep -qE "interrupt\(\)" src/runner/claude.ts && grep -qE "interrupt" test/runner-claude.test.ts` → exit 0，exit 0
+  - `! grep -qE "softStopRequested" src/runner/claude.ts` → exit 0，exit 0
+- 已推送：是
+- CI：unknown，监听分支未能取证
+- 受保护文件改动行数：0
+- 依赖变化：无
 <!-- collie:runs:end -->
