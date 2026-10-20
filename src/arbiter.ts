@@ -2,7 +2,7 @@
 // verdict is an input, not the answer: protected-file edits, unapproved
 // dependencies and claims contradicted by evidence override it. Rules are
 // evaluated in order and the first hit decides.
-import type { Claims, Verdict, VerdictValue } from './schema/index.js';
+import type { Acceptance, Claims, Verdict, VerdictValue } from './schema/index.js';
 
 /** A claim the worker made that R4's evidence contradicts (SPEC 3.6 claim.mismatch). */
 export interface ClaimMismatch {
@@ -21,6 +21,18 @@ export interface ArbiterInput {
   approvedDeps: readonly string[];
   /** Command whose verify_results entry carries the test counts (rule 6). */
   testCommand: string;
+  /**
+   * Acceptance commands R2 ran that did not meet their expect (rule 8), judged
+   * by verify.ts against the full stdout, which the evidence summary lacks.
+   */
+  failedAcceptance: readonly FailedAcceptance[];
+}
+
+/** One acceptance command that R2 measured as not satisfied (SPEC 3.6 acceptance.failed). */
+export interface FailedAcceptance {
+  cmd: string;
+  exit_code: number;
+  expect: Acceptance['expect'];
 }
 
 export interface ArbiterDecision {
@@ -35,6 +47,8 @@ export interface ArbiterDecision {
    * SPEC 4.3, plus the denied claim behind a rule 2 or 3 BLOCK.
    */
   mismatches: ClaimMismatch[];
+  /** Rule 8: unmet acceptance commands, journaled as acceptance.failed. */
+  failedAcceptance: FailedAcceptance[];
   downgraded: boolean;
 }
 
@@ -47,7 +61,8 @@ const RULE_REVIEWER_MISMATCHES = 4;
 const RULE_PUSH = 5;
 const RULE_TESTS = 6;
 const RULE_CI = 7;
-const RULE_DEFAULT = 8;
+const RULE_ACCEPTANCE = 8;
+const RULE_DEFAULT = 9;
 /* eslint-enable no-restricted-syntax */
 
 /** Strong copyleft licences that block in any dependency tree (ADR-003). */
@@ -105,6 +120,7 @@ function decide(
     rule,
     reason,
     mismatches,
+    failedAcceptance: [],
     downgraded: original !== null && original !== final,
   };
 }
@@ -223,6 +239,20 @@ export function arbitrate(input: ArbiterInput): ArbiterDecision {
     });
   }
 
-  // Rule 8.
+  // Rule 8: acceptance is a precondition of PASS that no reviewer explanation waives
+  // (SPEC 4.3, v01-b05-smoke: an honest worker, a failing npm test, a reviewer PASS).
+  if (input.failedAcceptance.length > 0 && original === 'PASS') {
+    return {
+      ...decide(
+        original,
+        'FIX',
+        RULE_ACCEPTANCE,
+        `${String(input.failedAcceptance.length)} acceptance command(s) not met: ${input.failedAcceptance.map((f) => f.cmd).join('; ')}`,
+      ),
+      failedAcceptance: [...input.failedAcceptance],
+    };
+  }
+
+  // Rule 9.
   return decide(original, original, RULE_DEFAULT, verdict.reason);
 }

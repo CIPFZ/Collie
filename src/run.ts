@@ -116,6 +116,11 @@ function findBatch(root: string, batchId: string): Batch {
   return batch;
 }
 
+/** The expect of `cmd` among the commands R2 ran (global [verify] first, then the batch). */
+function expectOf(cmd: string, commands: readonly Acceptance[]): Acceptance['expect'] {
+  return commands.find((c) => c.cmd === cmd)?.expect ?? 'exit_zero';
+}
+
 /** Global [verify] commands, then the batch acceptance (SPEC 3.1). */
 function verifyCommands(globalCommands: readonly string[], batch: Batch): Acceptance[] {
   return [
@@ -293,6 +298,14 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       : verdict,
     approvedDeps: APPROVED_DEPENDENCIES,
     testCommand: collected.testCommand ?? 'npm test',
+    // R2's own judgement of every command against its expect (verify.ts), full stdout included.
+    failedAcceptance: collected.verify
+      .filter((r) => !r.passed)
+      .map((r) => ({
+        cmd: r.cmd,
+        exit_code: r.exit_code,
+        expect: expectOf(r.cmd, verifyCommands(config.verify.commands, batch)),
+      })),
   });
   for (const m of decision.mismatches) {
     rec.record('claim.mismatch', {
@@ -300,6 +313,13 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       field: m.field,
       claimed: toJson(m.claimed),
       actual: toJson(m.actual),
+    });
+  }
+  for (const f of decision.failedAcceptance) {
+    rec.record('acceptance.failed', {
+      cmd: f.cmd,
+      exit_code: f.exit_code,
+      expect: toJson(f.expect),
     });
   }
   if (decision.downgraded) {

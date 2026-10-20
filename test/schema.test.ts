@@ -205,9 +205,10 @@ describe('schema: Event round-trip', () => {
     expect(issuePaths(EventSchema, { ...validEvent, event })).toEqual(['event']);
   });
 
-  it('defines the 12 v0.1 event types of SPEC 3.6 plus ci.wait_timeout (v01-b05 2c)', () => {
-    expect(EVENT_TYPES).toHaveLength(13);
+  it('defines the 12 v0.1 event types of SPEC 3.6 plus ci.wait_timeout and acceptance.failed', () => {
+    expect(EVENT_TYPES).toHaveLength(14);
     expect(EVENT_TYPES).toContain('ci.wait_timeout');
+    expect(EVENT_TYPES).toContain('acceptance.failed');
   });
 
   it.each(['../escape', 'a/b', '', '.hidden', 'r 1'])('rejects unsafe run_id %j', (run_id) => {

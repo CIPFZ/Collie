@@ -36,6 +36,7 @@ const decision: ArbiterDecision = {
       actual: { passed: 44, failed: 3 },
     },
   ],
+  failedAcceptance: [],
   downgraded: true,
 };
 

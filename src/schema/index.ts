@@ -132,6 +132,8 @@ export const EVENT_TYPES = [
   'escalated',
   // v01-b05 2c: R2 gave up waiting for CI; the CI evidence is recorded as unknown.
   'ci.wait_timeout',
+  // Rule 8 (SPEC 4.3): an acceptance command R2 ran did not meet its expect.
+  'acceptance.failed',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);

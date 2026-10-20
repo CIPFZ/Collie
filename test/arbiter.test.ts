@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { arbitrate, type ArbiterInput } from '../src/arbiter.js';
+import { arbitrate, type ArbiterInput, type FailedAcceptance } from '../src/arbiter.js';
 import type { Claims, Verdict } from '../src/schema/index.js';
 
 const HEAD = 'dbe90a4036e360312e0f6d3aab6131937ca9161a';
@@ -46,6 +46,7 @@ function input(
     claims?: Partial<Claims>;
     verdict?: Partial<Verdict>;
     evidence?: Partial<Evidence>;
+    failed?: FailedAcceptance[];
   } = {},
 ): ArbiterInput {
   const verdict: Verdict = {
@@ -58,25 +59,27 @@ function input(
     verdict: { ok: true, value: verdict },
     approvedDeps: APPROVED,
     testCommand: TEST_CMD,
+    failedAcceptance: overrides.failed ?? [],
   };
 }
 
 describe('arbiter: baseline', () => {
-  it('rule 8 keeps the reviewer verdict when every claim holds', () => {
+  it('rule 9 keeps the reviewer verdict when every claim holds', () => {
     expect(arbitrate(input())).toEqual({
       final: 'PASS',
       original: 'PASS',
-      rule: 8,
+      rule: 9,
       reason: 'all evidence agrees',
       mismatches: [],
+      failedAcceptance: [],
       downgraded: false,
     });
   });
 
-  it.each(['FIX', 'BLOCK'] as const)('rule 8 keeps an honest %s', (verdict) => {
+  it.each(['FIX', 'BLOCK'] as const)('rule 9 keeps an honest %s', (verdict) => {
     expect(arbitrate(input({ verdict: { verdict } }))).toMatchObject({
       final: verdict,
-      rule: 8,
+      rule: 9,
       downgraded: false,
     });
   });
@@ -123,7 +126,7 @@ describe('arbiter: rule 3, dependencies', () => {
       arbitrate(
         input({ evidence: { deps_diff: ['yaml', 'zod@^4.6.7', 'commander@15.0.0 (MIT)'] } }),
       ).rule,
-    ).toBe(8);
+    ).toBe(9);
   });
 
   it('blocks an unapproved dependency, naming it', () => {
@@ -193,7 +196,7 @@ describe('arbiter: rule 5, push claim', () => {
   it('does not fire when the worker did not claim to have pushed', () => {
     expect(
       arbitrate(input({ claims: { pushed: false }, evidence: { remote_has_head: false } })).rule,
-    ).toBe(8);
+    ).toBe(9);
   });
 });
 
@@ -245,7 +248,7 @@ describe('arbiter: rule 6, test counts', () => {
         },
       }),
     );
-    expect(decision).toMatchObject({ final: 'FIX', rule: 8, downgraded: false });
+    expect(decision).toMatchObject({ final: 'FIX', rule: 9, downgraded: false });
   });
 });
 
@@ -268,7 +271,45 @@ describe('arbiter: rule 7, CI claim', () => {
         evidence: { ci_branch_matched: null, ci_conclusion: 'unknown' },
       }),
     );
-    expect(decision.rule).toBe(8);
+    expect(decision.rule).toBe(9);
+  });
+});
+
+describe('arbiter: rule 8, acceptance not met', () => {
+  const failing: FailedAcceptance[] = [{ cmd: TEST_CMD, exit_code: 1, expect: 'exit_zero' }];
+
+  it('downgrades an honest PASS to FIX when an acceptance command failed', () => {
+    // v01-b05-smoke: honest claims, a failing command, a reviewer PASS.
+    const decision = arbitrate(input({ failed: failing }));
+    expect(decision).toMatchObject({
+      final: 'FIX',
+      original: 'PASS',
+      rule: 8,
+      downgraded: true,
+      mismatches: [],
+      failedAcceptance: failing,
+    });
+    expect(decision.reason).toContain('npm test');
+  });
+
+  it('covers stdout_matches failures too', () => {
+    const unmatched: FailedAcceptance[] = [
+      { cmd: 'node -v', exit_code: 0, expect: { stdout_matches: '^v22\\.' } },
+    ];
+    expect(arbitrate(input({ failed: unmatched }))).toMatchObject({ final: 'FIX', rule: 8 });
+  });
+
+  it.each(['FIX', 'BLOCK'] as const)('leaves a reviewer %s as it is', (verdict) => {
+    expect(arbitrate(input({ verdict: { verdict }, failed: failing }))).toMatchObject({
+      final: verdict,
+      rule: 9,
+      downgraded: false,
+      failedAcceptance: [],
+    });
+  });
+
+  it('does not fire when every acceptance command was met', () => {
+    expect(arbitrate(input({ failed: [] })).rule).toBe(9);
   });
 });
 
@@ -315,6 +356,21 @@ describe('arbiter: order matters, first hit wins', () => {
         .rule,
     ).toBe(5);
     expect(arbitrate(input({ evidence: { ...tests, ci_branch_matched: false } })).rule).toBe(6);
+  });
+
+  it('rules 5-7 (a lie) beat rule 8 (an honest failure)', () => {
+    const failing: FailedAcceptance[] = [{ cmd: TEST_CMD, exit_code: 1, expect: 'exit_zero' }];
+    expect(arbitrate(input({ evidence: { ci_branch_matched: false }, failed: failing })).rule).toBe(
+      7,
+    );
+  });
+
+  it('rule 2 (BLOCK) beats rule 8 (FIX)', () => {
+    const failing: FailedAcceptance[] = [{ cmd: TEST_CMD, exit_code: 1, expect: 'exit_zero' }];
+    expect(arbitrate(input({ evidence: { spec_diff_lines: 1 }, failed: failing }))).toMatchObject({
+      final: 'BLOCK',
+      rule: 2,
+    });
   });
 
   it('never softens a reviewer BLOCK to FIX in rules 5-7', () => {
