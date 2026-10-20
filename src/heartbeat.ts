@@ -80,7 +80,14 @@ export function checkHeartbeat(root: string): HeartbeatCheck {
   } catch {
     return { status: 'none' };
   }
-  const parsed = HeartbeatSchema.safeParse(JSON.parse(raw));
+  let parsed: ReturnType<typeof HeartbeatSchema.safeParse>;
+  try {
+    parsed = HeartbeatSchema.safeParse(JSON.parse(raw));
+  } catch {
+    // Corrupted JSON: remove and treat as missing.
+    rmSync(path, { force: true });
+    return { status: 'none' };
+  }
   if (!parsed.success) {
     // Corrupted heartbeat: treat as orphan with a synthetic data block so
     // the caller can record the event and clean up.
