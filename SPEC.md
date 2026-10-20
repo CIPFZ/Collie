@@ -212,7 +212,7 @@ base_sha: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
 created_at: 2026-10-16T12:00:00Z
 attempt: 1
 interrupted_at: null        # v0.2：上一轮中断位置，仅 R2 知道
-issued_by: collie           # 可选：签发者标识；人工占位期为 human-placeholder-r2
+issued_by: collie           # collie run 签发时必填为 collie；人工签发写 human-placeholder-r2。AGENT-worker 第 6 节据此决定是否等计划确认
 revised_at: null            # 可选：重签时间，未重签为 null 或省略
 ---
 
@@ -347,6 +347,8 @@ type EventType =
   | 'claim.mismatch' | 'verdict.downgraded'
   | 'escalated'
   | 'ci.wait_timeout';   // 等 CI 超过 ci_wait_secs 仍无结论；字段 head_sha / waited_secs / last_state
+// worker.finished 携带 exit_code 与 final_text（worker 最终回复，截断至 2000 字），
+// 否则零产出退出的原因无从得知（v01-b05-smoke 教训）。
 ```
 
 v0.1 只需支持上列事件；v0.2 起追加 `worker.stalled` / `worker.idling` /
