@@ -123,4 +123,21 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - CI：unknown，监听分支未能取证
 - 受保护文件改动行数：0
 - 依赖变化：无
+
+### v02-b01 · r-20261020-092112 · BLOCK（reviewer 原判 PASS，规则 2 降级）
+
+- 时间：2026-10-20T10:17:00.915Z
+- 裁定：规则 2，protected files changed by 33 lines
+- 提交：`9962761`
+- 验收命令：5/5 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，525 passed, 0 failed
+  - `npm test -- test/ci.test.ts` → exit 0，48 passed, 0 failed
+  - `test "$(grep -c 'v01-b05-smoke' docs/progress.md)" -ge 4` → exit 0，exit 0
+- 已推送：是
+- CI：unknown，监听分支未能取证
+- 受保护文件改动行数：33
+- 依赖变化：无
+- 声称与实测不符：spec_touched
 <!-- collie:runs:end -->
