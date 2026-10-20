@@ -1,9 +1,9 @@
 ---
 schema_version: 1
-run_id: r-20261020-063533
+run_id: r-20261020-081526
 batch_id: v01-b05-smoke
-base_sha: 0fe1d6ed002499fc8ff7016cdf605cb840a64799
-created_at: 2026-10-20T06:35:33.345Z
+base_sha: 32eff85b782df01f78e3146386bbec277f2711a7
+created_at: 2026-10-20T08:15:26.417Z
 attempt: 1
 interrupted_at: null
 issued_by: collie
