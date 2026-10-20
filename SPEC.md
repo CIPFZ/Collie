@@ -133,6 +133,7 @@ fix_max = 2              # 同批次 FIX 上限（v0.3 生效）
 dry_k = 2                # 连续 dry 轮数（v0.5 生效）
 ci_wait_secs = 1800      # R2 取证前等待 head_sha 的 CI 出结论的上限；超时按 unknown 处理
 ci_poll_secs = 30        # 等待期间查询 CI 的间隔
+grace_secs = 20          # 信号阶梯每级宽限（v0.2，schema 可选，见 11.1）
 
 [verify]
 # reviewer 必跑的全局命令，批次级命令在 task 中追加
@@ -352,13 +353,14 @@ type EventType =
   | 'claim.mismatch' | 'verdict.downgraded'
   | 'escalated'
   | 'ci.wait_timeout'    // 等 CI 超过 ci_wait_secs 仍无结论；字段 head_sha / waited_secs / last_state
-  | 'acceptance.failed';  // 规则 8：实测验收未满足；字段 cmd / exit_code / expect
+  | 'acceptance.failed'   // 规则 8：实测验收未满足；字段 cmd / exit_code / expect
+  | 'run.orphaned' | 'worker.stalled' | 'worker.idling'
+  | 'worker.signaled' | 'worker.rescued' | 'worker.resumed';  // v0.2，见第 11 章
 // worker.finished 携带 exit_code 与 final_text（worker 最终回复，截断至 2000 字），
 // 否则零产出退出的原因无从得知（v01-b05-smoke 教训）。
 ```
 
-v0.1 只需支持上列事件；v0.2 起追加 `worker.stalled` / `worker.idling` /
-`worker.signaled` / `worker.rescued` / `worker.resumed`。
+v0.1 只需支持 v0.1 的事件；v0.2 事件的字段定义见第 11 章。
 
 ## 4. 模块设计
 
@@ -563,3 +565,120 @@ v0.1 不做下列内容，防止范围蔓延：
 | Q2 | `docs/backlog.md` 用 Markdown 表格是否足够？是否需要独立的结构化文件？ | 先用 Markdown（R1 与人都要读写）。若解析脆弱则改为 frontmatter 承载结构 |
 | Q3 | `collie.toml` 放 `.collie/` 下还是仓库根？ | 暂定 `.collie/` 下，与运行时文件同域 |
 | Q4 | 完成判定的四种判据，最终选哪个？ | 按用户要求保留全部，v0.5 起记录对比数据后再定 |
+
+
+## 11. v0.2 失败检测与恢复
+
+目标（ROADMAP 第 4 节）：worker 在任何时刻被中断，信息零丢失，下一轮能正确接续。
+本章在 v0.1 的结构上只做追加；v0.1 的三场景与规则 1~9 不变。
+
+### 11.1 新增配置（`[limits]`）
+
+```toml
+stall_secs = 90          # 事件流静默判定卡死（v0.1 已占位）
+progress_secs = 900      # 有事件但无产出判定空转（v0.1 已占位）
+grace_secs = 20          # 信号阶梯每级之间的宽限
+resume_max = 2           # 同一批次 resume 上限（v0.1 已占位）
+```
+
+v0.2 起新增的 `limits` 字段在 schema 中一律**可选**，缺省取本节默认值（代码中为与 SPEC 同值的具名常量）。
+原因：`.collie/collie.toml` 是受保护路径，由 `collie run` 拉起的 worker 不能改它（规则 2）；
+R1 在批次通过后把新字段补进 toml。补进之后 toml 即为唯一事实源（铁律 11）。
+
+### 11.2 runner 接口追加
+
+```ts
+interface RunOptions {
+  // ...v0.1 字段
+  /** 续接上一次运行；值来自上一次 RunResult.sessionId，对 Collie 不透明 */
+  resumeSessionId?: string;
+  /** 运行开始后立即回调一次，交出控制句柄 */
+  onStarted?: (handle: RunHandle) => void;
+}
+interface RunHandle {
+  /** 若 runner 有子进程则给出其 pid，用于 heartbeat 与 kill 级 */
+  pid?: number;
+  /**
+   * soft：让当前轮次结束后停下，session 完整可续接
+   * hard：立即中止，session 可能残缺
+   * kill：不可恢复地终止；runner 可实现为对 pid 发 SIGKILL
+   */
+  stop(level: 'soft' | 'hard' | 'kill'): Promise<void>;
+}
+```
+
+ROADMAP 写的 SIGINT → SIGTERM → SIGKILL 是子进程语义；Collie 只认 soft / hard / kill 三级，
+映射到具体信号或 SDK 调用是 runner 内部的事（ROADMAP 0.4）。`fake.ts` 必须实现三级并可脚本化「不响应 soft」。
+
+### 11.3 落盘与心跳
+
+- `.collie/runs/<run_id>/stream.ndjson`：worker 的原始事件流，`onEvent` 每收一条追加一行，不做任何解析。
+  与 `events.ndjson`（Collie 自己的 journal）分开。
+- `.collie/heartbeat.json`：`{ run_id, batch_id, pid, started_at, updated_at }`。
+  run 开始时写入，每收到一条事件更新 `updated_at`，run 正常结束时删除。
+  下一次 `collie run` 启动时若文件存在且 `pid` 不存活，判定「上一次被 kill」：
+  记 `run.orphaned` 事件（字段 run_id / batch_id / updated_at），执行 11.4 的救援，再删除该文件。
+  若 `pid` 存活则拒绝启动（铁律 1：永不并行写入），退出码 1。
+
+### 11.4 脏工作区救援
+
+worker 退出后（无论原因），若 `git status --porcelain` 非空，R2 执行
+`git add -A && git commit -m "wip(collie): <batch_id> rescue"`，记 `worker.rescued` 事件（字段 sha / files）。
+救援提交不推送。它位于 `base_sha..head_sha` 之内，规则 2 照常统计其中的受保护路径改动。
+
+### 11.5 活性检测
+
+R2 在 worker 运行期间按两条独立计时判定：
+
+- **卡死**：距上一条事件超过 `stall_secs` → 记 `worker.stalled`，进入 11.6 阶梯。
+- **空转**：持续收到事件，但「产出指纹」超过 `progress_secs` 无变化 → 记 `worker.idling`，进入 11.6 阶梯。
+  产出指纹 = `HEAD` sha + `git status --porcelain` 输出的哈希，每收到一条事件采样一次。
+
+两者都以事件为驱动，没有事件时只有 stall 计时在走。
+
+### 11.6 信号阶梯
+
+```
+stop('soft') → 等 grace_secs → 未退出则 stop('hard') → 等 grace_secs → 未退出则 stop('kill')
+```
+
+每级记一条 `worker.signaled`（字段 level / reason，reason 取 stalled / idling / wallclock）。
+v0.1 的 `wallclock_secs` 超时从「直接 abort + 记 crashed」改为走本阶梯，reason=wallclock。
+阶梯结束后一律执行 11.4 救援。
+
+### 11.7 中断标记与 resume
+
+一次运行若以 stalled / idling / wallclock / orphaned / 非零退出结束，称为**中断**。
+下一次对同一批次 `collie run` 时：
+
+- `task.md` frontmatter：`attempt` 递增；`interrupted_at` 填
+  `"<上次 run_id> <结束原因> <最后一条事件类型>@<时间>"`；若有救援提交，加 `rescue_sha`。
+- `task.md` 正文追加一节「上一轮中断」：原样写出上述信息，并写明
+  「请先核实 `rescue_sha` 中的半成品是否完整，不要把它当作已完成」。这段只有 R2 知道，worker 自己说不出来。
+- 若上次 `RunResult.sessionId` 存在且本批次累计 resume 次数 < `resume_max`：
+  传 `resumeSessionId`，记 `worker.resumed`（字段 session_id / attempt）。
+- 否则：不传 session，新 worker 按 task 正文的中断说明自行从 `git log` 与 `docs/progress.md` 定位。
+  记 `worker.resumed` 且 `session_id: null`。
+
+### 11.8 新增事件类型
+
+`run.orphaned` / `worker.stalled` / `worker.idling` / `worker.signaled` / `worker.rescued` / `worker.resumed`。
+只新增，不升 `SCHEMA_VERSION`（铁律 14 新解）。
+
+### 11.9 v0.2 验收：三种中断必须被接住
+
+全部用 `fake.ts` 构造，自动化可重跑，断言只看仓库与 journal 状态。
+
+**场景 E 中途被杀。** fake worker 改了两个文件后进程被 kill（fake 以「写文件后 stop('kill') 自己」模拟）。
+期望：`worker.rescued` 事件存在，`wip(collie): <batch_id> rescue` 提交存在且含那两个文件；
+再次 `collie run` 同一批次，`task.md` 的 `attempt=2`、`interrupted_at` 非空、正文含 `rescue_sha`。
+
+**场景 F 模型断连。** fake worker 第一次以非零退出且给出 sessionId；第二次运行收到 `resumeSessionId` 后成功。
+期望：第二次 `worker.resumed` 带该 session_id；构造第三、四次仍失败，第四次（超过 `resume_max`）
+`worker.resumed.session_id` 为 null。
+
+**场景 G 空转。** fake worker 持续发事件但不改任何文件，超过 `progress_secs`（测试里配成 1 秒）。
+期望：`worker.idling` → `worker.signaled(soft)` → fake 响应 soft 退出 → 无救援（工作区干净）；
+变体：fake 不响应 soft，期望 `signaled(hard)` 继续出现。
+
+补充：场景 E/F/G 的 `collie show` 输出必须能按顺序还原事件链。

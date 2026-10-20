@@ -4,7 +4,7 @@
 > 优先级在方案确定阶段一次排定，批次随之固定，**不做滚动重新拆解**。
 
 更新时间：2026-10-20
-当前版本：v0.1
+当前版本：v0.2
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -20,6 +20,9 @@
 | 5 | v01-b05 | 真实 runner | v01-b04 | passed |
 | 6 | v01-b05-smoke | 烟雾批次：README 改一行 | v01-b05 | passed |
 | 7 | v02-b01 | 真实运行暴露的两处修补 | v01-b05 | blocked |
+| 8 | v02-b02 | 落盘、心跳与救援 | v01-b05 | pending |
+| 9 | v02-b03 | 活性检测与信号阶梯 | v02-b02 | pending |
+| 10 | v02-b04 | 中断标记与 resume | v02-b03 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -258,3 +261,92 @@ R4 读代码核验项：八条规则各有独立用例且顺序敏感；三个�
 代码部分（`9962761` 的 ci.ts / progress.ts 改动）已在 main 且验收 5 条全过，予以采用；
 progress.md 的回填内容有误，已由 R2 占位者更正。本批次不重跑。
 教训：task 条目不得要求 worker 写任何第 2 节清单内的文件；R1 签发前对照清单自查。
+
+## v02-b02 落盘、心跳与救援
+
+优先级：8　依赖：v01-b05
+
+v0.2 第一批。规格见 SPEC 第 11 章 11.1~11.4、11.8。
+
+条目：
+1. `src/runner/index.ts` 追加 `resumeSessionId` / `onStarted` / `RunHandle`（11.2）；
+   `fake.ts` 实现三级 `stop`，可脚本化「不响应 soft」；`claude.ts` 实现 `RunHandle`
+   （soft / hard / kill 的 SDK 映射留在 runner 内，SDK 无 pid 时 `pid` 省略）
+2. `stream.ndjson` 落盘（11.3）；`heartbeat.json` 写入、更新、清理、启动时孤儿检测与并行拒绝（11.3）；
+   新增事件 `run.orphaned` / `worker.rescued`（11.8）
+3. 脏工作区救援（11.4）：worker 退出后由 R2 执行 wip 提交并记事件；救援提交不推送。
+   场景 E 前半段 `test/scenario-e.test.ts`：断言 kill 后救援提交与事件存在
+   （`attempt=2` / `interrupted_at` 的断言留给 v02-b04）
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 场景 E 前半段 | `npm test -- test/scenario-e.test.ts` | exit 0 |
+| 心跳与孤儿检测 | `npm test -- test/heartbeat.test.ts` | exit 0 |
+| SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `.collie/collie.toml`）；本批次不新增配置字段
+- 测试联网或调用真实 SDK
+
+## v02-b03 活性检测与信号阶梯
+
+优先级：9　依赖：v02-b02
+
+规格见 SPEC 11.1、11.5、11.6、11.8。
+
+条目：
+1. 活性检测（11.5）：启用 `stall_secs` / `progress_secs`，卡死与空转两条计时，产出指纹按事件采样；
+   新增事件 `worker.stalled` / `worker.idling`
+2. 信号阶梯（11.6）：`limits.grace_secs` 加为可选字段默认 20；soft → grace → hard → grace → kill，
+   每级记 `worker.signaled`；`wallclock_secs` 超时改走阶梯（reason=wallclock），
+   原 `worker.crashed` 路径仅保留给 runner 自身异常
+3. 场景 G 及其「不响应 soft」变体：`test/scenario-g.test.ts`
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 场景 G 两个变体 | `npm test -- test/scenario-g.test.ts` | exit 0 |
+| 阶梯单元测试 | `npm test -- test/ladder.test.ts` | exit 0 |
+| v0.1 三场景与场景 D 不受影响 | `npm test -- test/scenario-a.test.ts test/scenario-b.test.ts test/scenario-c.test.ts test/scenario-d.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；`grace_secs` 不写入 toml，由 R1 事后补
+- 阶梯计时用注入的时钟，测试不得真实等待超过 2 秒
+
+## v02-b04 中断标记与 resume
+
+优先级：10　依赖：v02-b03
+
+规格见 SPEC 11.7、11.9。
+
+条目：
+1. 中断判定与 `task.md` 注入（11.7）：`attempt` 递增、`interrupted_at`、`rescue_sha`、正文「上一轮中断」一节；
+   `TaskFrontmatterSchema` 加可选 `rescue_sha`，不升版本
+2. resume 策略（11.7）：按 `resume_max` 决定是否传 `resumeSessionId`；新增事件 `worker.resumed`
+3. 场景 E 后半段（attempt / interrupted_at / rescue_sha）与场景 F：
+   `test/scenario-e.test.ts` 补全，`test/scenario-f.test.ts` 新增；
+   `collie show` 按顺序还原 E / F / G 的事件链
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 场景 E 完整 | `npm test -- test/scenario-e.test.ts` | exit 0 |
+| 场景 F | `npm test -- test/scenario-f.test.ts` | exit 0 |
+| show 还原事件链 | `npm test -- test/show.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- resume 的 session 内容进入 journal（只记 session_id）
