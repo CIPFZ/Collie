@@ -192,7 +192,7 @@ R4 读代码核验项：八条规则各有独立用例且顺序敏感；三个�
 | 类型检查零错误 | `npm run typecheck` | exit 0 |
 | 全部测试通过 | `npm test` | exit 0 |
 | SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
-| 平台树不被 Collie 调用 | `! grep -rlE "@opentelemetry|fast-sha256" src --include='*.ts'` | exit 0 |
+| 平台树不被 Collie 调用 | `! grep -rlE "@opentelemetry\|fast-sha256" src --include='*.ts'` | exit 0 |
 | claude runner 单元测试（SDK 用替身） | `npm test -- test/runner-claude.test.ts` | exit 0 |
 | 烟雾批次样本存在 | `test -f .collie/batches/v01-b05-smoke/verdict.md` | exit 0 |
 
