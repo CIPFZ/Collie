@@ -63,6 +63,7 @@ ESLint 与类型检查零错误。
 R4 每批次扫描全树并在 evidence 中列出白名单外项（ADR-003）。
 **平台依赖例外**：模型供应商官方 SDK（当前仅 `@anthropic-ai/claude-agent-sdk`）豁免白名单，
 条件是只能在 `src/runner/` 内 import，且每一个都以 ADR 列明（ADR-004）。
+豁免覆盖该 SDK 的整棵传递依赖树；「禁止 OpenTelemetry」只针对 Collie 自己采用它，不针对 SDK 间接带入。
 明确禁止引入：编排框架（LangGraph / Temporal 等）、可观测框架（OpenTelemetry 等）、ORM。
 
 **铁律 14。** 跨边界数据结构集中在 `src/schema/`，用 zod 声明。

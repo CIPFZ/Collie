@@ -37,3 +37,17 @@
 
 - 铁律 13 追加「平台依赖例外」一句。
 - 仲裁规则 3 的认可依赖清单恢复 `@anthropic-ai/claude-agent-sdk`。
+
+## 补充（2026-10-20，v01-b05 安装前核对）
+
+SDK 0.3.303 带入 109 个运行时传递依赖。白名单外的只有两项：
+`@opentelemetry/api` 1.9.1（Apache-2.0，`@anthropic-ai/sdk` 的 peer 依赖）与
+`fast-sha256` 1.3.0（Unlicense，经 `standardwebhooks` 引入）。
+
+裁定：
+1. **平台豁免覆盖 SDK 的整棵传递依赖树。** 条件不变：Collie 自己的代码不 import 其中任何一个包，
+   由 b05 的验收 grep 保证（`@anthropic-ai` 不出 `src/runner/`；追加 `@opentelemetry` 同样不得出现在 `src/` 任何位置）。
+2. 铁律 13 禁止 OpenTelemetry 的那句，针对的是 **Collie 自己采用它做可观测框架**（ROADMAP 第 11 节），
+   不针对供应商 SDK 间接带入且 Collie 不调用的情况。
+3. R4 的全树扫描把平台树内的白名单外项列为「平台树，已豁免」而非违规。
+4. 包名在源码中只出现一次（`src/runner/claude.ts` 的 `CLAUDE_SDK_PACKAGE`），`run.ts` 引用该常量——接受。

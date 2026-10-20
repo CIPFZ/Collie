@@ -131,6 +131,7 @@ wallclock_secs = 2700    # 单批次墙钟硬顶
 resume_max = 2           # resume 上限（v0.2 生效）
 fix_max = 2              # 同批次 FIX 上限（v0.3 生效）
 dry_k = 2                # 连续 dry 轮数（v0.5 生效）
+ci_wait_secs = 1800      # R2 取证前等待 head_sha 的 CI 出结论的上限；超时按 unknown 处理
 
 [verify]
 # reviewer 必跑的全局命令，批次级命令在 task 中追加
