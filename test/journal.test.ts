@@ -110,7 +110,7 @@ describe('journal: append and replay', () => {
     journal.append(ev('escalated'));
     const before = readFileSync(file, 'utf8');
     expect(() => {
-      journal.append(ev('worker.stalled' as Event['event']));
+      journal.append(ev('worker.unknown_test_type' as Event['event']));
     }).toThrow(JournalError);
     expect(readFileSync(file, 'utf8')).toBe(before);
   });
@@ -242,7 +242,10 @@ describe('journal: corrupted lines fail replay with the line number', () => {
 
   it('reports a line that is JSON but not a valid event, with the field path', () => {
     appendGood(1);
-    appendFileSync(file, `${JSON.stringify({ ...ev('run.started'), event: 'worker.stalled' })}\n`);
+    appendFileSync(
+      file,
+      `${JSON.stringify({ ...ev('run.started'), event: 'worker.unknown_test_type' })}\n`,
+    );
     const err = replayError();
     expect(err.line).toBe(2);
     expect(err.message).toMatch(/:2: invalid event: event: /);

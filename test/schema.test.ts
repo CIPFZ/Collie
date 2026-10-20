@@ -49,6 +49,7 @@ const validConfig: CollieConfig = {
     dry_k: 2,
     ci_wait_secs: 1800,
     ci_poll_secs: 30,
+    grace_secs: 20,
   },
   verify: { commands: ['npm run lint', 'npm run typecheck', 'npm test'] },
   ci: { provider: 'github-actions', expected_branch: 'main' },
@@ -195,20 +196,20 @@ describe('schema: Event round-trip', () => {
     expect(EventSchema.safeParse({ ...validEvent, event }).success).toBe(true);
   });
 
-  it.each(['worker.stalled', 'worker.idling', 'worker.signaled', 'worker.resumed'])(
-    'rejects event type %s (not yet added)',
-    (event) => {
-      expect(issuePaths(EventSchema, { ...validEvent, event })).toEqual(['event']);
-    },
-  );
+  it.each(['worker.resumed'])('rejects event type %s (not yet added)', (event) => {
+    expect(issuePaths(EventSchema, { ...validEvent, event })).toEqual(['event']);
+  });
 
   it('defines the v0.1 event types plus v0.2 types added so far', () => {
-    expect(EVENT_TYPES).toHaveLength(16);
+    expect(EVENT_TYPES).toHaveLength(19);
     expect(EVENT_TYPES).toContain('ci.wait_timeout');
     expect(EVENT_TYPES).toContain('acceptance.failed');
-    // v0.2 additions (SPEC 11.8)
+    // v0.2 additions (SPEC 11.3–11.6)
     expect(EVENT_TYPES).toContain('run.orphaned');
     expect(EVENT_TYPES).toContain('worker.rescued');
+    expect(EVENT_TYPES).toContain('worker.stalled');
+    expect(EVENT_TYPES).toContain('worker.idling');
+    expect(EVENT_TYPES).toContain('worker.signaled');
   });
 
   it.each(['../escape', 'a/b', '', '.hidden', 'r 1'])('rejects unsafe run_id %j', (run_id) => {

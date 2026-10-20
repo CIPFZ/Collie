@@ -96,6 +96,7 @@ describe('config: the repository .collie/collie.toml', () => {
       dry_k: 2,
       ci_wait_secs: 1800,
       ci_poll_secs: 30,
+      grace_secs: 20,
     });
   });
 

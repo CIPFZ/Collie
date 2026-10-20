@@ -12,6 +12,13 @@ export const BATCH_ITEMS_MIN = 1;
 // eslint-disable-next-line no-restricted-syntax -- SPEC 3.2 / 铁律 8: at most 3 items per batch
 export const BATCH_ITEMS_MAX = 3;
 
+/**
+ * SPEC 11.1: default grace_secs for the signal ladder. Used when the field is
+ * absent from collie.toml (v0.2 fields are schema-optional, SPEC 11.1).
+ */
+// eslint-disable-next-line no-restricted-syntax -- SPEC 11.1: grace period default, named constant
+export const DEFAULT_GRACE_SECS = 20;
+
 /** JSON value, the only payload an NDJSON event line can round-trip losslessly (SPEC 3.6). */
 export type JsonValue =
   string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -61,6 +68,8 @@ export const LimitsSchema = z.strictObject({
   ci_wait_secs: z.number().int().positive(),
   /** Interval between CI polls while waiting. */
   ci_poll_secs: z.number().int().positive(),
+  /** SPEC 11.1: grace period between signal ladder levels; optional, defaults to 20s. */
+  grace_secs: z.number().int().positive().optional().default(DEFAULT_GRACE_SECS),
 });
 export type Limits = z.infer<typeof LimitsSchema>;
 
@@ -137,6 +146,10 @@ export const EVENT_TYPES = [
   // v0.2 (SPEC 11.3, 11.4, 11.8): heartbeat orphan and dirty-workspace rescue.
   'run.orphaned',
   'worker.rescued',
+  // v0.2 (SPEC 11.5, 11.6): liveness detection and signal ladder.
+  'worker.stalled',
+  'worker.idling',
+  'worker.signaled',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);
