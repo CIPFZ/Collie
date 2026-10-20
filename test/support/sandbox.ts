@@ -222,6 +222,8 @@ export interface WorkerPlan {
   claims: Omit<Claims, 'commits'>;
   /** Skip writing report.md entirely. */
   noReport?: boolean;
+  /** The worker's final reply (RunResult.finalText). */
+  finalText?: string;
 }
 
 /** A worker scene that really commits code and tests, then reports `plan.claims`. */
@@ -256,7 +258,8 @@ export function workerScene(box: Sandbox, plan: WorkerPlan): FakeScene {
       }
       if (plan.push) await git(cwd, ['push', '-q', 'origin', 'main']);
     },
-    result: { exitCode: 0 },
+    result:
+      plan.finalText === undefined ? { exitCode: 0 } : { exitCode: 0, finalText: plan.finalText },
   };
 }
 

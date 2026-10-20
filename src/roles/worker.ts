@@ -19,6 +19,8 @@ export const BATCHES_RELATIVE_DIR = join('.collie', 'batches');
 export const TASK_FILE_NAME = 'task.md';
 export const REPORT_FILE_NAME = 'report.md';
 export const WORKER_MANUAL = 'AGENT-worker.md';
+/** issued_by of every envelope collie run writes (SPEC 3.3). */
+export const ISSUER = 'collie';
 
 /** Facts only R2 knows when issuing a task (SPEC 3.3). Time is passed in, never read here. */
 export interface TaskContext {
@@ -129,6 +131,8 @@ export function buildTask(batch: Batch, ctx: TaskContext): TaskEnvelope {
     created_at: ctx.created_at,
     attempt: ctx.attempt,
     interrupted_at: null,
+    // SPEC 3.3: tells the worker no human will confirm a plan (AGENT-worker.md 6).
+    issued_by: ISSUER,
   };
   // renderFrontmatter validates, so an invalid context fails here, not at the worker.
   return { frontmatter, markdown: `${renderFrontmatter(frontmatter)}\n${renderBody(batch)}` };

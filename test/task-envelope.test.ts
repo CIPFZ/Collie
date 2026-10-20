@@ -81,12 +81,18 @@ describe('task-envelope: frontmatter (SPEC 3.3)', () => {
       created_at: '2026-10-16T22:00:00Z',
       attempt: 1,
       interrupted_at: null,
+      issued_by: 'collie',
     });
     expect(task.frontmatter).toEqual(parsed);
   });
 
   it('writes interrupted_at: null explicitly', () => {
     expect(yaml.split('\n')).toContain('interrupted_at: null');
+  });
+
+  it('marks the envelope as issued by collie, so the worker does not wait for plan approval', () => {
+    // AGENT-worker.md 6: issued_by: collie means unattended; SPEC 3.3 makes it mandatory.
+    expect(yaml.split('\n')).toContain('issued_by: collie');
   });
 
   it('starts the body after the closing ---', () => {

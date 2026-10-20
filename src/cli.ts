@@ -165,14 +165,28 @@ function batchEvents(root: string, batchId: string): Event[] {
     .filter((e) => e.batch_id === batchId);
 }
 
+/** Event fields shown as an indented block under the event line, not inline. */
+const BLOCK_FIELDS = new Set(['final_text']);
+
 function describeEvent(event: Event): string {
   const { ts, run_id: runId, event: type } = event;
   const shown = new Set(['ts', 'run_id', 'batch_id', 'event']);
-  const detail = Object.entries(event)
-    .filter(([k, v]) => !shown.has(k) && v !== undefined)
+  const fields = Object.entries(event).filter(([k, v]) => !shown.has(k) && v !== undefined);
+  const detail = fields
+    .filter(([k]) => !BLOCK_FIELDS.has(k))
     .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
     .join(' ');
-  return `${ts} ${runId} ${type}${detail === '' ? '' : ` ${detail}`}`;
+  const blocks = fields
+    .filter(([k]) => BLOCK_FIELDS.has(k))
+    .map(([k, v]) => {
+      const text = typeof v === 'string' ? v : JSON.stringify(v);
+      return `\n    ${k}:\n${text
+        .split('\n')
+        .map((line) => `      ${line}`)
+        .join('\n')}`;
+    })
+    .join('');
+  return `${ts} ${runId} ${type}${detail === '' ? '' : ` ${detail}`}${blocks}`;
 }
 
 function section(title: string, body: string | undefined): string {

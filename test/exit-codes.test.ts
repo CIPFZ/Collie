@@ -1,5 +1,6 @@
 // SPEC 5: collie run exits 0 PASS / 10 FIX / 20 BLOCK / 1 Collie error.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { truncate } from '../src/run.js';
 import { FakeRunner } from '../src/runner/fake.js';
 import {
   BATCH,
@@ -196,5 +197,68 @@ describe('exit-codes: R2 waits for CI before measuring it (v01-b05 2c)', () => {
     ]);
     expect(await box.run(r, { clock })).toBe(10);
     expect(clock.slept).toEqual([]);
+  });
+});
+
+describe('exit-codes: worker.finished carries the final text (SPEC 3.6, v01-b05 2d)', () => {
+  it('records a short final text verbatim', async () => {
+    const r = new FakeRunner([
+      workerScene(box, {
+        passing: 5,
+        failing: 0,
+        push: true,
+        claims: honestClaims(5, true),
+        finalText: 'plan: read, implement, test',
+      }),
+      fooledReviewerScene(box),
+    ]);
+    await box.run(r);
+    expect(box.events().find((e) => e.event === 'worker.finished')).toMatchObject({
+      exit_code: 0,
+      final_text: 'plan: read, implement, test',
+    });
+  });
+
+  it('records no final_text when the worker produced none', async () => {
+    await box.run(honest(box));
+    expect(box.events().find((e) => e.event === 'worker.finished')).not.toHaveProperty(
+      'final_text',
+    );
+  });
+
+  it('collie show prints the final text as an indented block', async () => {
+    const r = new FakeRunner([
+      workerScene(box, {
+        passing: 5,
+        failing: 0,
+        push: true,
+        claims: honestClaims(5, true),
+        finalText: 'line one\nline two',
+      }),
+      fooledReviewerScene(box),
+    ]);
+    await box.run(r);
+    box.output.length = 0;
+    await box.cli(['show', BATCH], undefined);
+    expect(box.output.join('')).toContain(
+      'worker.finished exit_code=0\n    final_text:\n      line one\n      line two',
+    );
+  });
+});
+
+describe('exit-codes: truncate (format bound, not a threshold)', () => {
+  it('keeps short text unchanged', () => {
+    expect(truncate('abc', 2000)).toBe('abc');
+  });
+
+  it('cuts long text and says how much was dropped', () => {
+    const out = truncate('x'.repeat(2500), 2000);
+    expect(out.startsWith('x'.repeat(2000))).toBe(true);
+    expect(out).toContain('[truncated 500 chars]');
+  });
+
+  it('never splits a multi-byte character or an emoji sequence', () => {
+    expect(truncate('中文测试', 2)).toBe('中文…[truncated 2 chars]');
+    expect(truncate('👨‍👩‍👧x', 1)).toBe('👨‍👩‍👧…[truncated 1 chars]');
   });
 });

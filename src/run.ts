@@ -38,6 +38,9 @@ export const EXIT_CODES: Readonly<Record<VerdictValue | 'ERROR', number>> = {
 
 // eslint-disable-next-line no-restricted-syntax -- unit conversion, not a threshold
 const MS_PER_SECOND = 1000;
+/** SPEC 3.6: worker.finished.final_text is cut to this many characters (a format bound, not a tunable). */
+// eslint-disable-next-line no-restricted-syntax -- fixed by SPEC 3.6
+export const FINAL_TEXT_MAX = 2000;
 
 /**
  * Dependencies approved by SPEC 2.2 and ADR-002, plus the platform SDK of the
@@ -201,7 +204,13 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     ctx.workerSignal ?? AbortSignal.timeout(config.limits.wallclock_secs * MS_PER_SECOND);
   try {
     const result = await runWorker(ctx.runner, config, batch, root, { signal });
-    rec.record('worker.finished', { exit_code: result.exitCode });
+    rec.record('worker.finished', {
+      exit_code: result.exitCode,
+      // SPEC 3.6: without it a zero-output exit cannot be explained (v01-b05-smoke).
+      ...(result.finalText === undefined
+        ? {}
+        : { final_text: truncate(result.finalText, FINAL_TEXT_MAX) }),
+    });
   } catch (error) {
     // v0.1: a timeout is recorded as a crash; the signal ladder is v0.2 (SPEC 3.3).
     rec.record('worker.crashed', { error: message(error), timed_out: signal.aborted });
@@ -315,6 +324,19 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     envelopes.push(relative(root, verdictPath(root, batchId)));
   await commit(root, `progress: ${batchId} ${decision.final}`, envelopes);
   return finish(decision.final, { decision });
+}
+
+/**
+ * Keeps the first `max` user-perceived characters (grapheme clusters), so CJK
+ * text, emoji and combining sequences are never cut in half.
+ */
+export function truncate(text: string, max: number): string {
+  const graphemes = Array.from(
+    new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text),
+    (s) => s.segment,
+  );
+  if (graphemes.length <= max) return text;
+  return `${graphemes.slice(0, max).join('')}…[truncated ${String(graphemes.length - max)} chars]`;
 }
 
 /** Narrows an arbitrary claim or measurement to a JSON value for the journal. */
