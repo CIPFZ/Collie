@@ -1,11 +1,12 @@
 ---
 schema_version: 1
-run_id: r-20261020-060511
+run_id: r-20261020-063533
 batch_id: v01-b05-smoke
-base_sha: 54fa8decbee73d1f76ad336d53120fd39c4cf0e4
-created_at: 2026-10-20T06:05:11.449Z
+base_sha: 0fe1d6ed002499fc8ff7016cdf605cb840a64799
+created_at: 2026-10-20T06:35:33.345Z
 attempt: 1
 interrupted_at: null
+issued_by: collie
 ---
 
 # 批次 v01-b05-smoke：烟雾批次：README 改一行
