@@ -8,6 +8,7 @@ import {
   CLAUDE_SDK_PACKAGE,
   ClaudeRunner,
   type ClaudeQuery,
+  type ClaudeQueryIterable,
   type ClaudeQueryParams,
 } from '../src/runner/claude.js';
 import type { RunHandle, RunOptions } from '../src/runner/index.js';
@@ -66,6 +67,40 @@ function abortable(): { query: ClaudeQuery; calls: ClaudeQueryParams[] } {
     throw new Error('aborted');
   };
   return { query, calls };
+}
+
+/**
+ * A query double whose iterable exposes interrupt() (SPEC 11.2, v02-b03).
+ * When interrupt() is called, the iterator stops yielding further messages.
+ */
+function interruptableQuery(messages: unknown[]): {
+  query: ClaudeQuery;
+  calls: ClaudeQueryParams[];
+  wasInterrupted: () => boolean;
+} {
+  let _interrupted = false;
+  const calls: ClaudeQueryParams[] = [];
+  const query: ClaudeQuery = (params: ClaudeQueryParams): ClaudeQueryIterable => {
+    calls.push(params);
+    let index = 0;
+    return {
+      [Symbol.asyncIterator](): AsyncIterator<unknown> {
+        return {
+          async next(): Promise<IteratorResult<unknown>> {
+            await Promise.resolve();
+            if (_interrupted || index >= messages.length) {
+              return { done: true, value: undefined };
+            }
+            return { done: false, value: messages[index++] };
+          },
+        };
+      },
+      interrupt(): void {
+        _interrupted = true;
+      },
+    };
+  };
+  return { query, calls, wasInterrupted: () => _interrupted };
 }
 
 describe('runner-claude: options built from the role config', () => {
@@ -275,16 +310,12 @@ describe('runner-claude: RunHandle and stop levels (SPEC 11.2)', () => {
     expect(typeof (handle as { stop: unknown }).stop).toBe('function');
   });
 
-  it('soft stop breaks the stream without aborting the controller', async () => {
-    const calls: ClaudeQueryParams[] = [];
-    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery demands AsyncIterable
-    const query: ClaudeQuery = async function* (params) {
-      calls.push(params);
-      yield assistant('working');
-      // After onStarted fires and soft stop is called, the next yield should cause a break.
-      yield assistant('more work');
-      yield success('done');
-    };
+  it('soft stop calls interrupt() on the query iterable without aborting the controller', async () => {
+    const { query, calls, wasInterrupted } = interruptableQuery([
+      assistant('working'),
+      assistant('more work'),
+      success('done'),
+    ]);
     let handle: RunHandle | undefined;
     const result = await new ClaudeRunner(config, { query }).run(
       opts({
@@ -295,6 +326,8 @@ describe('runner-claude: RunHandle and stop levels (SPEC 11.2)', () => {
       }),
     );
     expect(handle).toBeDefined();
+    // interrupt() was called on the iterable.
+    expect(wasInterrupted()).toBe(true);
     expect(result.stopReason).toBe('stopped');
     expect(result.exitCode).toBe(1);
     // The controller was NOT aborted (soft ≠ hard).

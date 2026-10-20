@@ -32,7 +32,18 @@ export interface ClaudeQueryParams {
 }
 
 /** query() resolves to an async iterator of NDJSON messages (SDKMessage in the SDK). */
-export type ClaudeQuery = (params: ClaudeQueryParams) => AsyncIterable<unknown>;
+export type ClaudeQuery = (params: ClaudeQueryParams) => ClaudeQueryIterable;
+
+/**
+ * The async iterable returned by the SDK's query(). It may expose `interrupt()`
+ * (SPEC 11.2, v02-b03): calling it ends the current turn gracefully, keeping the
+ * session resumable. Test doubles that do not provide it are still valid — the
+ * runner calls `interrupt?.()` defensively.
+ */
+export interface ClaudeQueryIterable extends AsyncIterable<unknown> {
+  /** SDK-level interrupt: finishes the current turn, session stays complete (SPEC 11.2). */
+  interrupt?: () => void;
+}
 
 export interface ClaudeRunnerOptions {
   /**
@@ -72,13 +83,40 @@ async function loadSdkQuery(): Promise<ClaudeQuery> {
   if (typeof query !== 'function') {
     throw new Error(`${specifier} does not export query()`);
   }
-  return (query as (params: ClaudeQueryParams) => AsyncIterable<unknown>).bind(sdk);
+  return (query as (params: ClaudeQueryParams) => ClaudeQueryIterable).bind(sdk);
 }
 
 /** The default query: resolves the SDK once, then delegates. */
-const lazySdkQuery: ClaudeQuery = async function* (params) {
-  const query = await loadSdkQuery();
-  yield* query(params);
+const lazySdkQuery: ClaudeQuery = (params) => {
+  // Return an async iterable that lazily loads the SDK and delegates.
+  let iterablePromise: Promise<ClaudeQueryIterable> | undefined;
+  let resolvedIterable: ClaudeQueryIterable | undefined;
+
+  function getIterable(): Promise<ClaudeQueryIterable> {
+    iterablePromise ??= loadSdkQuery().then((q) => {
+      resolvedIterable = q(params);
+      return resolvedIterable;
+    });
+    return iterablePromise;
+  }
+
+  return {
+    [Symbol.asyncIterator](): AsyncIterator<unknown> {
+      let delegateIterator: AsyncIterator<unknown> | undefined;
+      return {
+        async next(): Promise<IteratorResult<unknown>> {
+          if (delegateIterator === undefined) {
+            const iterable = await getIterable();
+            delegateIterator = iterable[Symbol.asyncIterator]();
+          }
+          return delegateIterator.next();
+        },
+      };
+    },
+    interrupt(): void {
+      resolvedIterable?.interrupt?.();
+    },
+  };
 };
 
 // Message shapes read from the SDK, narrowed locally so nothing leaks out.
@@ -165,8 +203,11 @@ export class ClaudeRunner implements AgentRunner {
       ...(opts.resumeSessionId === undefined ? {} : { resume: opts.resumeSessionId }),
     };
 
-    // Soft stop breaks the for-await loop (session-preserving); hard/kill aborts the controller.
-    let softStopRequested = false;
+    // Soft stop calls interrupt() on the query iterable (SPEC 11.2 v02-b03: SDK-level
+    // graceful stop, session stays resumable); hard/kill aborts the controller.
+    const queryIterable = this.queryFn({ prompt: opts.prompt, options: queryOptions });
+    // Track whether interrupt() was requested; used after the loop to set stopReason.
+    let interrupted = false;
 
     // SPEC 11.2: the RunHandle gives R2 control over the run.
     // The SDK does not expose a child-process pid, so pid is omitted.
@@ -175,7 +216,8 @@ export class ClaudeRunner implements AgentRunner {
       async stop(level: 'soft' | 'hard' | 'kill'): Promise<void> {
         switch (level) {
           case 'soft':
-            softStopRequested = true;
+            interrupted = true;
+            queryIterable.interrupt?.();
             break;
           case 'hard':
             controller.abort(new Error('hard stop'));
@@ -191,19 +233,12 @@ export class ClaudeRunner implements AgentRunner {
     let result: ResultMessage | undefined;
     // Track sessionId from any message (SPEC 11.2: do not lose it on error).
     let lastSessionId: string | undefined;
-    let stopped = false;
     try {
-      for await (const message of this.queryFn({ prompt: opts.prompt, options: queryOptions })) {
+      for await (const message of queryIterable) {
         opts.onEvent?.(message);
         const sid = extractSessionId(message);
         if (sid !== undefined) lastSessionId = sid;
         if (isResultMessage(message)) result = message;
-        // Soft stop: finish processing this message, then break (SPEC 11.2).
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by handle.stop() callback
-        if (softStopRequested) {
-          stopped = true;
-          break;
-        }
       }
     } catch (error) {
       opts.signal?.removeEventListener('abort', forwardAbort);
@@ -222,8 +257,9 @@ export class ClaudeRunner implements AgentRunner {
     }
 
     if (result === undefined) {
-      // Soft stop may end the stream before a result message arrives.
-      if (stopped) {
+      // interrupt() may end the stream before a result message arrives.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by handle.stop()
+      if (interrupted) {
         return {
           exitCode: EXIT_FAILED,
           ...(lastSessionId === undefined ? {} : { sessionId: lastSessionId }),
@@ -236,7 +272,8 @@ export class ClaudeRunner implements AgentRunner {
     const sessionId = result.session_id ?? lastSessionId;
     // Map SDK error subtypes to stopReason (SPEC 11.2).
     const stopReason: RunResult['stopReason'] = (() => {
-      if (stopped) return 'stopped';
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by handle.stop()
+      if (interrupted) return 'stopped';
       if (result.subtype === 'error_max_turns') return 'turns_exhausted';
       if (!succeeded && result.subtype !== 'success') return 'error';
       return undefined;
