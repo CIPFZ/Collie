@@ -3,7 +3,7 @@
 > 唯一可修改者：R1 方案设计 Agent（须用户批准）。其他角色只读。
 > 优先级在方案确定阶段一次排定，批次随之固定，**不做滚动重新拆解**。
 
-更新时间：2026-10-19
+更新时间：2026-10-20
 当前版本：v0.1
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
@@ -17,8 +17,9 @@
 | 2 | v01-b02 | 批次解析与 worker 角色 | v01-b01 | passed |
 | 3 | v01-b03 | 取证工具与审核角色 | v01-b02 | passed |
 | 4 | v01-b04 | 仲裁、CLI 与三场景验证 | v01-b03 | passed |
-| 5 | v01-b05 | 真实 runner | v01-b04 | running |
-| 6 | v01-b05-smoke | 烟雾批次：README 改一行 | v01-b05 | pending |
+| 5 | v01-b05 | 真实 runner | v01-b04 | passed |
+| 6 | v01-b05-smoke | 烟雾批次：README 改一行 | v01-b05 | passed |
+| 7 | v02-b01 | 真实运行暴露的两处修补 | v01-b05 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -223,3 +224,29 @@ R4 读代码核验项：八条规则各有独立用例且顺序敏感；三个�
 
 额外禁止：
 - 改动 README 以外的任何文件
+
+结论（2026-10-20）：交付物在第 3 次运行已落地，第 4 次运行判 FIX 是因验收第 3 条基于「最近一次提交」，
+不幂等。教训：验收命令只断言仓库状态，不断言 diff。本批次判 passed，不再运行。
+
+## v02-b01 真实运行暴露的两处修补
+
+优先级：7　依赖：v01-b05　**第一个由 `collie run` 签发并执行的批次。**
+
+条目：
+1. `ci.ts`：`head_sha` 无自身运行时，采信满足 SPEC 4.2「CI 运行的归属」条件的后代提交运行；
+   不满足条件的后代不采信；测试覆盖三种情况（自身运行 / 合规后代 / 改了代码的后代）
+2. `progress.ts`：Collie 标记段按运行追加一行（SPEC 2.3），不覆盖；
+   回填 v01-b05-smoke 的 4 次运行各一行，数据取自 git 历史与 journal
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| CI 归属三种情况 | `npm test -- test/ci.test.ts` | exit 0 |
+| progress 含 4 次烟雾运行 | `test "$(grep -c 'v01-b05-smoke' docs/progress.md)" -ge 4` | exit 0 |
+
+额外禁止：
+- 改动 SPEC / CONSTRAINTS / ROLES / backlog

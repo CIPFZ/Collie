@@ -319,6 +319,9 @@ R4 写，R2 读。Markdown 推理正文 + 尾部围栏 JSON。
 `ci_branch_matched` 为 `boolean | null`（`null` = 未能取证），`ci_run_url` 可为空串；
 `conditions?: string[]` 可选，非空表示 PASS 附条件。arbiter 把 `ci_branch_matched=null`
 视为未取证：若 `claims.ci_passed=true` 则按规则 7 降 FIX。
+CI 运行的归属（v01-b05-smoke 后）：`head_sha` 自己的运行优先；若不存在，可采信其**后代提交**
+在 `expected_branch` 上的运行，条件是 `git diff --name-only head_sha..后代` 只含 `.collie/**` 与
+`docs/progress.md`（即只多了信封提交，代码与 head_sha 相同）。其他后代一律不采信。
 reviewer 交付方式：无写工具，verdict 正文作为**最终回复文本**返回，
 `RunResult.finalText` 承载，由 R2 写入 `verdict.md`。
 reviewer 在检出于 `head_sha` 的独立 worktree 中工作，该 worktree 不含 `report.md`。
@@ -377,7 +380,8 @@ src/
     reviewer.ts           组装审核 prompt、拉起 reviewer、收 verdict
   verify.ts               实跑验收命令并结构化输出
   arbiter.ts              claim 比对与 verdict 降级裁定
-  progress.ts             依据实测证据写 docs/progress.md
+  progress.ts             依据实测证据写 docs/progress.md：Collie 标记段按**运行**追加一行
+                          （run_id / batch / 结果 / 退出码 / head_sha），不按批次覆盖；verdict.md 仍为批次最新
 ```
 
 ### 4.1 `runner` 抽象的必要性
