@@ -90,18 +90,17 @@ describe('exit-codes: escalations (SPEC 6) are BLOCK', () => {
     expect(await box.run(r)).toBe(20);
     expect(box.events().find((e) => e.event === 'worker.crashed')).toMatchObject({
       error: 'agent crashed',
-      timed_out: false,
     });
   });
 
-  it('20 when the wall clock runs out, recorded as worker.crashed (SPEC 3.3)', async () => {
+  it('20 when the worker is externally aborted, recorded as worker.crashed', async () => {
     const r = new FakeRunner([
       workerScene(box, { passing: 5, failing: 0, push: true, claims: honestClaims(5, true) }),
     ]);
     const expired = AbortSignal.abort(new Error('wallclock_secs exceeded'));
     expect(await box.run(r, { workerSignal: expired })).toBe(20);
     expect(box.events().find((e) => e.event === 'worker.crashed')).toMatchObject({
-      timed_out: true,
+      error: 'wallclock_secs exceeded',
     });
   });
 });

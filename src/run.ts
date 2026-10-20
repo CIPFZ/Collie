@@ -21,6 +21,7 @@ import { collectEvidence } from './evidence.js';
 import { addWorktree, commit, git, isAncestor, removeWorktree, revParse, status } from './git.js';
 import { checkHeartbeat, removeHeartbeat, touchHeartbeat, writeHeartbeat } from './heartbeat.js';
 import { createJournal, RUNS_RELATIVE_DIR, type Journal } from './journal.js';
+import { LivenessMonitor, runLadder, type LadderReason } from './ladder.js';
 import { writeProgress } from './progress.js';
 import { readVerdict, runReviewer, verdictPath } from './roles/reviewer.js';
 import { buildTask, readReport, runWorker, taskPath, writeTask } from './roles/worker.js';
@@ -86,10 +87,14 @@ export interface RunContext {
   remote: string;
   /** Injected clock for deterministic envelopes and journal timestamps. */
   now: () => Date;
-  /** Override for tests; defaults to AbortSignal.timeout(limits.wallclock_secs). */
+  /** Override for tests; when set, disables the internal wallclock timer. */
   workerSignal?: AbortSignal;
   /** Time source for the CI wait; tests pass a fake one. */
   clock?: Clock;
+  /** Injected delay for the signal ladder grace periods (SPEC 11.6: tests must not wait >2s). */
+  ladderDelay?: (ms: number) => Promise<void>;
+  /** Override the liveness monitor check interval (ms) for tests. */
+  livenessIntervalMs?: number;
 }
 
 export interface RunOutcome {
@@ -211,6 +216,13 @@ async function rescueDirtyWorkspace(
   return { sha, files };
 }
 
+/** Real delay: waits `ms` using setTimeout. Production default for ladderDelay. */
+function realDelay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 /** Runs one batch end to end. Never throws for agent misbehaviour; only for Collie's own failures. */
 export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   const { root, batchId, runId } = ctx;
@@ -268,16 +280,66 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
 
   // E3/E4: the worker, bounded by the wall clock (SPEC 3.3).
   rec.record('worker.started');
-  const signal =
-    ctx.workerSignal ?? AbortSignal.timeout(config.limits.wallclock_secs * MS_PER_SECOND);
+
+  // Liveness detection and signal ladder state (SPEC 11.5, 11.6).
+  let workerHandle: RunHandle | undefined;
+  let workerExited = false;
+  let workerExitResolve: (() => void) | undefined;
+  const workerExitPromise = new Promise<void>((r) => {
+    workerExitResolve = r;
+  });
+  let ladderRunning = false;
+  const graceSecs = config.limits.grace_secs;
+  const ladderDelay = ctx.ladderDelay ?? realDelay;
+
+  function startLadder(reason: LadderReason): void {
+    if (ladderRunning || workerExited || workerHandle === undefined) return;
+    ladderRunning = true;
+    if (reason === 'stalled') rec.record('worker.stalled');
+    if (reason === 'idling') rec.record('worker.idling');
+    void runLadder({
+      handle: workerHandle,
+      graceSecs,
+      reason,
+      callbacks: {
+        onSignaled: (level, r) => {
+          rec.record('worker.signaled', { level, reason: r });
+        },
+      },
+      isExited: () => workerExited,
+      exitPromise: workerExitPromise,
+      delay: ladderDelay,
+    });
+  }
+
+  // Wallclock timeout triggers the signal ladder (SPEC 11.6: reason=wallclock).
+  const wallclockMs = config.limits.wallclock_secs * MS_PER_SECOND;
+  const wallclockTimer =
+    ctx.workerSignal === undefined
+      ? setTimeout(() => {
+          startLadder('wallclock');
+        }, wallclockMs)
+      : undefined;
+
+  // Liveness monitor (SPEC 11.5).
+  const monitor = new LivenessMonitor({
+    stallSecs: config.limits.stall_secs,
+    progressSecs: config.limits.progress_secs,
+    root,
+    onStalled: () => {
+      startLadder('stalled');
+    },
+    onIdling: () => {
+      startLadder('idling');
+    },
+    ...(ctx.livenessIntervalMs === undefined ? {} : { checkIntervalMs: ctx.livenessIntervalMs }),
+  });
 
   // SPEC 11.3: stream + heartbeat callbacks.
-  // workerHandle will be used by the signal ladder (v0.2 b03); kept for that wiring.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- wired by v02-b03 signal ladder
-  let workerHandle: RunHandle | undefined;
   const onEvent = (event: unknown): void => {
     appendStream(root, runId, event);
     touchHeartbeat(root, ctx.now().toISOString());
+    monitor.onEvent();
   };
   const onStarted = (handle: RunHandle): void => {
     workerHandle = handle;
@@ -288,14 +350,23 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       started_at: ctx.now().toISOString(),
       updated_at: ctx.now().toISOString(),
     });
+    monitor.start();
+  };
+
+  const cleanupTimers = (): void => {
+    workerExited = true;
+    workerExitResolve?.();
+    monitor.stop();
+    if (wallclockTimer !== undefined) clearTimeout(wallclockTimer);
   };
 
   try {
     const result = await runWorker(ctx.runner, config, batch, root, {
-      signal,
+      ...(ctx.workerSignal === undefined ? {} : { signal: ctx.workerSignal }),
       onEvent,
       onStarted,
     });
+    cleanupTimers();
     rec.record('worker.finished', {
       exit_code: result.exitCode,
       // SPEC 3.6: without it a zero-output exit cannot be explained (v01-b05-smoke).
@@ -305,8 +376,12 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       ...(result.stopReason === undefined ? {} : { stop_reason: result.stopReason }),
     });
   } catch (error) {
-    // v0.1: a timeout is recorded as a crash; the signal ladder is v0.2 (SPEC 3.3).
-    rec.record('worker.crashed', { error: message(error), timed_out: signal.aborted });
+    cleanupTimers();
+    // SPEC 11.6: worker.crashed only for runner self-exceptions, not ladder-induced stops.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by startLadder() during async worker
+    if (!ladderRunning) {
+      rec.record('worker.crashed', { error: message(error) });
+    }
     // SPEC 11.4: rescue any uncommitted work even on crash.
     const rescue = await rescueDirtyWorkspace(root, batchId);
     if (rescue !== undefined) {
