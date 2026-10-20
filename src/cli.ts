@@ -10,7 +10,7 @@ import { FakeRunner } from './runner/fake.js';
 import { Command, CommanderError } from 'commander';
 import { loadBacklog } from './backlog.js';
 import { loadConfig } from './config.js';
-import type { FetchLike } from './ci.js';
+import type { Clock, FetchLike } from './ci.js';
 import { CONFIG_RELATIVE_PATH, parseConfig } from './config.js';
 import { git } from './git.js';
 import { createJournal, EVENTS_FILE_NAME, RUNS_RELATIVE_DIR } from './journal.js';
@@ -35,6 +35,8 @@ export interface CliDeps {
   remote?: string;
   /** Test hook: overrides the worker's wall-clock signal. */
   workerSignal?: AbortSignal;
+  /** Test hook: time source for the CI wait. */
+  clock?: Clock;
 }
 
 const TEMPLATE = join(import.meta.dirname, '..', 'templates', 'collie.toml');
@@ -138,6 +140,7 @@ async function run(
     remote: deps.remote ?? 'origin',
     now: deps.now,
     ...(deps.workerSignal === undefined ? {} : { workerSignal: deps.workerSignal }),
+    ...(deps.clock === undefined ? {} : { clock: deps.clock }),
   });
   const how =
     outcome.decision === undefined

@@ -47,6 +47,8 @@ const validConfig: CollieConfig = {
     resume_max: 2,
     fix_max: 2,
     dry_k: 2,
+    ci_wait_secs: 1800,
+    ci_poll_secs: 30,
   },
   verify: { commands: ['npm run lint', 'npm run typecheck', 'npm test'] },
   ci: { provider: 'github-actions', expected_branch: 'main' },
@@ -203,8 +205,9 @@ describe('schema: Event round-trip', () => {
     expect(issuePaths(EventSchema, { ...validEvent, event })).toEqual(['event']);
   });
 
-  it('defines exactly the 12 v0.1 event types of SPEC 3.6', () => {
-    expect(EVENT_TYPES).toHaveLength(12);
+  it('defines the 12 v0.1 event types of SPEC 3.6 plus ci.wait_timeout (v01-b05 2c)', () => {
+    expect(EVENT_TYPES).toHaveLength(13);
+    expect(EVENT_TYPES).toContain('ci.wait_timeout');
   });
 
   it.each(['../escape', 'a/b', '', '.hidden', 'r 1'])('rejects unsafe run_id %j', (run_id) => {

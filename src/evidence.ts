@@ -1,7 +1,14 @@
 // R2's own evidence (SPEC 8, CONSTRAINTS 铁律 4): what verify.ts, git.ts and
 // ci.ts measure, in the SPEC 3.5 evidence shape. The arbiter judges claims
 // against this, not against the reviewer's account of the same facts.
-import { queryCi, type CiResult, type FetchLike } from './ci.js';
+import {
+  queryCi,
+  waitForCi,
+  type CiResult,
+  type CiWait,
+  type Clock,
+  type FetchLike,
+} from './ci.js';
 import { diffStat, log, remoteContains, showFile } from './git.js';
 import {
   PackageJsonSchema,
@@ -31,6 +38,8 @@ export const PROTECTED_PATHS: readonly string[] = [
   '.collie/collie.toml',
 ];
 
+// eslint-disable-next-line no-restricted-syntax -- unit conversion, not a threshold
+const MS_PER_SECOND = 1000;
 const STRONG_COPYLEFT = /\b(?:A?GPL|SSPL)\b/i;
 const LOCK_PACKAGE_PREFIX = 'node_modules/';
 
@@ -47,6 +56,8 @@ export interface EvidenceInput {
   config: CollieConfig;
   fetch: FetchLike;
   signal?: AbortSignal;
+  /** Time source for the CI wait; tests pass a fake one. */
+  clock?: Clock;
 }
 
 export interface CollectedEvidence {
@@ -55,6 +66,8 @@ export interface CollectedEvidence {
   /** Command whose test counts arbiter rule 6 compares, if any produced counts. */
   testCommand: string | undefined;
   ci: CiResult | { error: string };
+  /** Set when R2 waited for CI to settle (head_sha was on the remote). */
+  ciWait?: CiWait;
   /** Why remote_has_head is false when the remote could not be read. */
   remoteError?: string;
 }
@@ -147,17 +160,33 @@ export async function collectEvidence(input: EvidenceInput): Promise<CollectedEv
     remoteError = error instanceof Error ? error.message : String(error);
   }
 
+  // Wait for head_sha's CI to settle before measuring it (v01-b05 2c). A commit
+  // that is not on the remote will never get CI, so it is queried once, not awaited.
+  const ciQuery = {
+    repo: config.project.repo,
+    sha: headSha,
+    expectedBranch: config.ci.expected_branch,
+    ...signalOpt,
+  };
   let ci: CollectedEvidence['ci'];
+  let ciWait: CiWait | undefined;
   try {
-    ci = await queryCi(
-      {
-        repo: config.project.repo,
-        sha: headSha,
-        expectedBranch: config.ci.expected_branch,
-        ...signalOpt,
-      },
-      input.fetch,
-    );
+    if (remoteHasHead) {
+      ciWait = await waitForCi(
+        ciQuery,
+        input.fetch,
+        {
+          timeoutMs: config.limits.ci_wait_secs * MS_PER_SECOND,
+          pollMs: config.limits.ci_poll_secs * MS_PER_SECOND,
+        },
+        input.clock,
+      );
+      ci = ciWait.result ?? {
+        error: `CI did not settle within ci_wait_secs (${String(config.limits.ci_wait_secs)}s; last state ${ciWait.lastState})`,
+      };
+    } else {
+      ci = await queryCi(ciQuery, input.fetch);
+    }
   } catch (error) {
     ci = { error: error instanceof Error ? error.message : String(error) };
   }
@@ -184,6 +213,7 @@ export async function collectEvidence(input: EvidenceInput): Promise<CollectedEv
     verify,
     testCommand,
     ci,
+    ...(ciWait === undefined ? {} : { ciWait }),
     ...(remoteError === undefined ? {} : { remoteError }),
   };
 }

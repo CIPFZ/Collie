@@ -33,6 +33,8 @@ wallclock_secs = 2700
 resume_max = 2
 fix_max = 2
 dry_k = 2
+ci_wait_secs = 1800
+ci_poll_secs = 30
 
 [verify]
 commands = ["npm run lint", "npm run typecheck", "npm test"]
@@ -92,6 +94,8 @@ describe('config: the repository .collie/collie.toml', () => {
       resume_max: 2,
       fix_max: 2,
       dry_k: 2,
+      ci_wait_secs: 1800,
+      ci_poll_secs: 30,
     });
   });
 

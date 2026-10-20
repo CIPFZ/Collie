@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { arbitrate, type ArbiterDecision } from './arbiter.js';
 import { loadBacklog } from './backlog.js';
-import type { FetchLike } from './ci.js';
+import type { Clock, FetchLike } from './ci.js';
 import { loadConfig } from './config.js';
 import { collectEvidence } from './evidence.js';
 import { addWorktree, commit, isAncestor, removeWorktree, revParse } from './git.js';
@@ -72,6 +72,8 @@ export interface RunContext {
   now: () => Date;
   /** Override for tests; defaults to AbortSignal.timeout(limits.wallclock_secs). */
   workerSignal?: AbortSignal;
+  /** Time source for the CI wait; tests pass a fake one. */
+  clock?: Clock;
 }
 
 export interface RunOutcome {
@@ -259,7 +261,16 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       commands: verifyCommands(config.verify.commands, batch),
       config,
       fetch: ctx.fetch,
+      ...(ctx.clock === undefined ? {} : { clock: ctx.clock }),
     });
+    if (collected.ciWait?.timedOut === true) {
+      rec.record('ci.wait_timeout', {
+        head_sha: report.head_sha,
+        waited_secs: Math.round(collected.ciWait.waitedMs / MS_PER_SECOND),
+        polls: collected.ciWait.polls,
+        last_state: collected.ciWait.lastState,
+      });
+    }
     return { verdict, collected };
   });
   const { verdict, collected } = outcome;

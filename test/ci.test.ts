@@ -4,7 +4,9 @@ import {
   CiRateLimitError,
   parseGitHubRepo,
   queryCi,
+  waitForCi,
   type CiQuery,
+  type Clock,
   type FetchLike,
 } from '../src/ci.js';
 
@@ -294,5 +296,132 @@ describe('ci: failures reject instead of returning null', () => {
   it('rejects runs that belong to another sha', async () => {
     const { fetch } = fakeFetch(() => runs(run({ id: 1, head_sha: 'f'.repeat(40) })));
     await expect(queryCi(query, fetch)).rejects.toThrow(`not ${SHA}`);
+  });
+});
+
+/** A fake clock: sleep advances time instantly and records each delay. */
+function fakeClock(): Clock & { sleeps: number[]; t: number } {
+  const clock = {
+    t: 1_000_000,
+    sleeps: [] as number[],
+    now: () => clock.t,
+    sleep: (ms: number) => {
+      clock.sleeps.push(ms);
+      clock.t += ms;
+      return Promise.resolve();
+    },
+  };
+  return clock;
+}
+
+/** Answers with the next scripted response on each call, repeating the last one. */
+function sequence(...responses: (() => Response)[]): { fetch: FetchLike; calls: number } {
+  const state = { calls: 0 };
+  return {
+    get calls() {
+      return state.calls;
+    },
+    fetch: () => {
+      const respond = responses[Math.min(state.calls, responses.length - 1)];
+      state.calls++;
+      if (respond === undefined) throw new Error('no response scripted');
+      return Promise.resolve(respond());
+    },
+  };
+}
+
+const LIMITS = { timeoutMs: 1800_000, pollMs: 30_000 };
+const pending = (): Response => runs(run({ id: 5, status: 'in_progress', conclusion: null }));
+const green = (): Response => runs(run({ id: 5 }));
+
+describe('ci: waitForCi (v01-b05 2c)', () => {
+  it('polls a pending run until it succeeds', async () => {
+    const clock = fakeClock();
+    const script = sequence(pending, pending, green);
+    const wait = await waitForCi(query, script.fetch, LIMITS, clock);
+    expect(wait).toMatchObject({
+      timedOut: false,
+      polls: 3,
+      waitedMs: 60_000,
+      lastState: 'completed',
+    });
+    expect(wait.result).toMatchObject({ conclusion: 'success', branchMatched: true });
+    expect(clock.sleeps).toEqual([30_000, 30_000]);
+  });
+
+  it('returns at once when CI already finished', async () => {
+    const clock = fakeClock();
+    const wait = await waitForCi(query, sequence(green).fetch, LIMITS, clock);
+    expect(wait).toMatchObject({ timedOut: false, polls: 1, waitedMs: 0 });
+    expect(clock.sleeps).toEqual([]);
+  });
+
+  it('keeps waiting while GitHub has not created a run yet', async () => {
+    const clock = fakeClock();
+    const wait = await waitForCi(query, sequence(() => runs(), green).fetch, LIMITS, clock);
+    expect(wait).toMatchObject({ timedOut: false, polls: 2 });
+  });
+
+  it('does not wait for a run that exists only on another branch', async () => {
+    const clock = fakeClock();
+    const wait = await waitForCi(
+      query,
+      sequence(() => runs(run({ id: 7, head_branch: 'master' }))).fetch,
+      LIMITS,
+      clock,
+    );
+    expect(wait).toMatchObject({ timedOut: false, polls: 1, lastState: 'none' });
+    expect(wait.result?.branchMatched).toBe(false);
+  });
+
+  it('times out at ci_wait_secs with the last state, never sleeping past the deadline', async () => {
+    const clock = fakeClock();
+    const wait = await waitForCi(
+      query,
+      sequence(pending).fetch,
+      { timeoutMs: 100_000, pollMs: 30_000 },
+      clock,
+    );
+    expect(wait).toMatchObject({
+      result: undefined,
+      timedOut: true,
+      waitedMs: 100_000,
+      lastState: 'pending',
+    });
+    expect(clock.sleeps).toEqual([30_000, 30_000, 30_000, 10_000]);
+  });
+
+  it('waits out a rate limit until its reset, then reads the result', async () => {
+    const clock = fakeClock();
+    const resetSecs = String(Math.floor(clock.t / 1000) + 120);
+    const limited = (): Response =>
+      json({ message: 'API rate limit exceeded' }, 403, {
+        'x-ratelimit-remaining': '0',
+        'x-ratelimit-reset': resetSecs,
+      });
+    const wait = await waitForCi(query, sequence(limited, green).fetch, LIMITS, clock);
+    expect(wait).toMatchObject({ timedOut: false, polls: 2 });
+    expect(clock.sleeps).toEqual([120_000]);
+  });
+
+  it('times out as rate_limited when the limit outlasts the deadline', async () => {
+    const clock = fakeClock();
+    const limited = (): Response => json({ message: 'API rate limit exceeded' }, 429);
+    const wait = await waitForCi(
+      query,
+      sequence(limited).fetch,
+      { timeoutMs: 60_000, pollMs: 30_000 },
+      clock,
+    );
+    expect(wait).toMatchObject({ timedOut: true, lastState: 'rate_limited' });
+  });
+
+  it('rejects on errors other than rate limits instead of waiting', async () => {
+    const clock = fakeClock();
+    const broken = (): Response => new Response('down', { status: 502 });
+    await expect(waitForCi(query, sequence(broken).fetch, LIMITS, clock)).rejects.toThrow(
+      'HTTP 502',
+    );
+    expect(clock.sleeps).toEqual([]);
   });
 });

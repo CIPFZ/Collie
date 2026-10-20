@@ -143,3 +143,58 @@ describe('exit-codes: the journal of a full run (SPEC 3.6)', () => {
     ]);
   });
 });
+
+describe('exit-codes: R2 waits for CI before measuring it (v01-b05 2c)', () => {
+  /** Advances instantly; records how long R2 would have slept. */
+  function instantClock(): {
+    now: () => number;
+    sleep: (ms: number) => Promise<void>;
+    slept: number[];
+  } {
+    let t = 0;
+    const slept: number[] = [];
+    return {
+      slept,
+      now: () => t,
+      sleep: (ms) => {
+        slept.push(ms);
+        t += ms;
+        return Promise.resolve();
+      },
+    };
+  }
+
+  it('waits through pending polls and then passes with the real result', async () => {
+    box.ciPendingPolls = 2;
+    const clock = instantClock();
+    expect(await box.run(honest(box), { clock })).toBe(0);
+    expect(clock.slept).toEqual([30_000, 30_000]);
+    expect(box.eventTypes()).not.toContain('ci.wait_timeout');
+  });
+
+  it('gives up at ci_wait_secs, journals ci.wait_timeout and treats the CI claim as unproven', async () => {
+    box.ciPendingPolls = Number.POSITIVE_INFINITY;
+    const clock = instantClock();
+    expect(await box.run(honest(box), { clock })).toBe(10);
+    const events = box.events();
+    expect(events.find((e) => e.event === 'ci.wait_timeout')).toMatchObject({
+      waited_secs: 1800,
+      last_state: 'pending',
+    });
+    expect(events.find((e) => e.event === 'claim.mismatch')).toMatchObject({
+      rule: 7,
+      actual: { ci_conclusion: 'unknown', ci_branch_matched: null },
+    });
+  });
+
+  it('does not wait at all for a head that was never pushed', async () => {
+    box.ciPendingPolls = Number.POSITIVE_INFINITY;
+    const clock = instantClock();
+    const r = new FakeRunner([
+      workerScene(box, { passing: 5, failing: 0, push: false, claims: honestClaims(5, false) }),
+      fooledReviewerScene(box),
+    ]);
+    expect(await box.run(r, { clock })).toBe(10);
+    expect(clock.slept).toEqual([]);
+  });
+});

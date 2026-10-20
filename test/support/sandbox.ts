@@ -75,6 +75,9 @@ export class Sandbox {
   /** Branch the fake GitHub Actions API reports runs on (scenario A sets 'master'). */
   ciBranch = 'main';
   ciConclusion = 'success';
+  /** Polls that answer 'in_progress' before the run completes (Infinity: never completes). */
+  ciPendingPolls = 0;
+  ciPolls = 0;
   /** What the fake reviewer could see in its working directory. */
   reviewerSawReport: boolean | undefined;
   reviewerCwd: string | undefined;
@@ -143,8 +146,8 @@ export class Sandbox {
       event: 'push',
       head_branch: this.ciBranch,
       head_sha: sha,
-      status: 'completed',
-      conclusion: this.ciConclusion,
+      status: this.ciPolls++ < this.ciPendingPolls ? 'in_progress' : 'completed',
+      conclusion: this.ciPolls <= this.ciPendingPolls ? null : this.ciConclusion,
       html_url: 'https://github.com/example/sandbox/actions/runs/42',
       created_at: '2026-10-19T12:00:00Z',
     };

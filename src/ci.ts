@@ -251,3 +251,95 @@ export async function queryCi(query: CiQuery, fetchImpl: FetchLike): Promise<CiR
   }
   return assess(query.sha, page.map(toRun), query.expectedBranch);
 }
+
+/** Time source for waitForCi; injected so tests advance a fake clock instead of sleeping. */
+export interface Clock {
+  now: () => number;
+  sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
+}
+
+export const realClock: Clock = {
+  now: () => Date.now(),
+  sleep: (ms, signal) =>
+    new Promise((resolve, reject) => {
+      if (signal?.aborted === true) {
+        reject(signal.reason instanceof Error ? signal.reason : new CiError('aborted'));
+        return;
+      }
+      const timer = setTimeout(resolve, ms);
+      signal?.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(timer);
+          reject(signal.reason instanceof Error ? signal.reason : new CiError('aborted'));
+        },
+        { once: true },
+      );
+    }),
+};
+
+export interface CiWait {
+  /** Settled result, or undefined when the wait timed out. */
+  result: CiResult | undefined;
+  timedOut: boolean;
+  waitedMs: number;
+  polls: number;
+  /** What the last poll saw: a CiResult state, 'no_runs' or 'rate_limited'. */
+  lastState: CiResult['state'] | 'no_runs' | 'rate_limited';
+}
+
+/**
+ * Not yet settled: a run on the expected branch is still going, or GitHub has
+ * no run for the sha at all (just after a push it may not have created one).
+ * Runs that exist only on other branches are settled: waiting cannot fix the
+ * branch (the master/main lesson), so the arbiter must see the mismatch now.
+ */
+function unsettled(result: CiResult): 'pending' | 'no_runs' | undefined {
+  if (result.state === 'pending') return 'pending';
+  if (result.runs.length === 0) return 'no_runs';
+  return undefined;
+}
+
+/**
+ * Polls queryCi until head_sha's CI settles or `timeoutMs` passes (v01-b05 2c).
+ * Rate limits are waited out within the deadline. Other errors reject, as in queryCi.
+ */
+export async function waitForCi(
+  query: CiQuery,
+  fetchImpl: FetchLike,
+  limits: { timeoutMs: number; pollMs: number },
+  clock: Clock = realClock,
+): Promise<CiWait> {
+  const start = clock.now();
+  const deadline = start + limits.timeoutMs;
+  let polls = 0;
+  let lastState: CiWait['lastState'];
+  for (;;) {
+    polls++;
+    let delay = limits.pollMs;
+    try {
+      const result = await queryCi(query, fetchImpl);
+      const waiting = unsettled(result);
+      if (waiting === undefined) {
+        return {
+          result,
+          timedOut: false,
+          waitedMs: clock.now() - start,
+          polls,
+          lastState: result.state,
+        };
+      }
+      lastState = waiting;
+    } catch (error) {
+      if (!(error instanceof CiRateLimitError)) throw error;
+      lastState = 'rate_limited';
+      if (error.resetAt !== undefined)
+        delay = Math.max(delay, error.resetAt.getTime() - clock.now());
+    }
+    const remaining = deadline - clock.now();
+    if (remaining <= 0) {
+      return { result: undefined, timedOut: true, waitedMs: clock.now() - start, polls, lastState };
+    }
+    await clock.sleep(Math.min(delay, remaining), query.signal);
+  }
+}

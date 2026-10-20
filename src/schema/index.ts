@@ -57,6 +57,10 @@ export const LimitsSchema = z.strictObject({
   resume_max: z.number().int().nonnegative(),
   fix_max: z.number().int().nonnegative(),
   dry_k: z.number().int().positive(),
+  /** Upper bound on waiting for head_sha's CI to leave pending before R2 measures (SPEC 3.1). */
+  ci_wait_secs: z.number().int().positive(),
+  /** Interval between CI polls while waiting. */
+  ci_poll_secs: z.number().int().positive(),
 });
 export type Limits = z.infer<typeof LimitsSchema>;
 
@@ -126,6 +130,8 @@ export const EVENT_TYPES = [
   'claim.mismatch',
   'verdict.downgraded',
   'escalated',
+  // v01-b05 2c: R2 gave up waiting for CI; the CI evidence is recorded as unknown.
+  'ci.wait_timeout',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);
