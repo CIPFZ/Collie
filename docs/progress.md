@@ -140,4 +140,23 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：33
 - 依赖变化：无
 - 声称与实测不符：spec_touched
+
+### v02-b02 · r-20261020-124813 · PASS
+
+- 时间：2026-10-20T13:53:46.672Z
+- 裁定：规则 9，全部 8 条验收命令实跑通过；3 个提交已推送至 origin/main；受保护文件与依赖零变化；diff 范围落在条目之内；关键实现 soft≠hard、resume 映射、sessionId 保全、heartbeat 生命周期、rescue 逻辑经代码审读确认正确。CI 因环境无 gh 认证未取证（ci_branch_matched=null），交由 arbiter 规则 7 裁定。
+- 提交：`f800f19` `42b7722` `1299f3a`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，554 passed, 0 failed
+  - `npm test -- test/scenario-e.test.ts` → exit 0，5 passed, 0 failed
+  - `npm test -- test/heartbeat.test.ts` → exit 0，10 passed, 0 failed
+  - `git check-ignore -q .collie/heartbeat.json` → exit 0，exit 0
+  - `grep -qE "resume" test/runner-claude.test.ts` → exit 0，exit 0
+  - `! grep -rlE "@anthropic-ai" src --include='*.ts' | grep -v '^src/runner/'` → exit 0，exit 0
+- 已推送：是
+- CI：unknown，监听分支未能取证
+- 受保护文件改动行数：0
+- 依赖变化：无
 <!-- collie:runs:end -->
