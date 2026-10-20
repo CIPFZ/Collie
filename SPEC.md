@@ -115,7 +115,7 @@ repo = "https://github.com/CIPFZ/Collie"
 [agent.worker]
 model = "claude-opus-4-6"
 allowed_tools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
-max_turns = 120
+max_turns = 200           # v02-b02 第 1 次运行 120 轮用满（三条目 +668 行），上调
 permission_mode = "bypassPermissions"   # v0.1 裁定，见下
 
 [agent.reviewer]
@@ -605,7 +605,20 @@ interface RunHandle {
    */
   stop(level: 'soft' | 'hard' | 'kill'): Promise<void>;
 }
+interface RunResult {
+  // ...v0.1 字段
+  /** 非正常结束时的原因；runner 自身异常以外，一律返回 RunResult 而不是抛出 */
+  stopReason?: 'turns_exhausted' | 'stopped' | 'error';
+}
 ```
+
+约束（v02-b02 第 1 次运行暴露）：
+- `soft` 与 `hard` 不得实现为同一个调用。`soft` 必须是「本轮结束后停、session 可续接」的 SDK 级中断；
+  `hard` 才是 abort。
+- SDK 因轮数用满等原因中止时，runner 须捕获并返回 `RunResult`（`exitCode` 非零、`stopReason`、
+  以及已从事件流里拿到的 `sessionId`），不得让 `sessionId` 随异常丢失。
+- runner 的测试须断言注入的 `query()` 实际收到的选项：`resumeSessionId` 落到 SDK 认的续接字段上。
+  字段名对不上时 typecheck 不会报错，只有这条断言能抓住。
 
 ROADMAP 写的 SIGINT → SIGTERM → SIGKILL 是子进程语义；Collie 只认 soft / hard / kill 三级，
 映射到具体信号或 SDK 调用是 runner 内部的事（ROADMAP 0.4）。`fake.ts` 必须实现三级并可脚本化「不响应 soft」。
@@ -648,7 +661,8 @@ v0.1 的 `wallclock_secs` 超时从「直接 abort + 记 crashed」改为走本�
 
 ### 11.7 中断标记与 resume
 
-一次运行若以 stalled / idling / wallclock / orphaned / 非零退出结束，称为**中断**。
+一次运行若以 stalled / idling / wallclock / orphaned / turns_exhausted / 非零退出结束，称为**中断**。
+任何结束方式（含 crashed / escalated）都要在 `docs/progress.md` 追加一条运行记录（2.3）。
 下一次对同一批次 `collie run` 时：
 
 - `task.md` frontmatter：`attempt` 递增；`interrupted_at` 填

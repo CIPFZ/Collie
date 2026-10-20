@@ -271,7 +271,9 @@ v0.2 第一批。规格见 SPEC 第 11 章 11.1~11.4、11.8。
 条目：
 1. `src/runner/index.ts` 追加 `resumeSessionId` / `onStarted` / `RunHandle`（11.2）；
    `fake.ts` 实现三级 `stop`，可脚本化「不响应 soft」；`claude.ts` 实现 `RunHandle`
-   （soft / hard / kill 的 SDK 映射留在 runner 内，SDK 无 pid 时 `pid` 省略）
+   （soft / hard / kill 的 SDK 映射留在 runner 内，SDK 无 pid 时 `pid` 省略）。
+   按 SPEC 11.2 的约束：soft 用 SDK 的轮次级 `interrupt()`，不得与 hard 同为 abort；
+   `test/runner-claude.test.ts` 须断言注入的 `query()` 收到的选项中，SDK 的 `resume` 字段等于 `resumeSessionId`
 2. `stream.ndjson` 落盘（11.3）；`heartbeat.json` 写入、更新、清理、启动时孤儿检测与并行拒绝（11.3）；
    新增事件 `run.orphaned` / `worker.rescued`（11.8）。
    修正 v01-b01 留下的扩展名错误：`.gitignore` 与 `src/cli.ts` 的 `GITIGNORE_ENTRIES`
@@ -290,11 +292,16 @@ v0.2 第一批。规格见 SPEC 第 11 章 11.1~11.4、11.8。
 | 场景 E 前半段 | `npm test -- test/scenario-e.test.ts` | exit 0 |
 | 心跳与孤儿检测 | `npm test -- test/heartbeat.test.ts` | exit 0 |
 | 心跳文件被忽略 | `git check-ignore -q .collie/heartbeat.json` | exit 0 |
+| resume 字段映射有断言 | `grep -qE "resume" test/runner-claude.test.ts` | exit 0 |
 | SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
 
 额外禁止：
 - 改动任何受保护路径（含 `.collie/collie.toml`）；本批次不新增配置字段
 - 测试联网或调用真实 SDK
+
+记录：第 1 次运行 r-20261020-120837 BLOCK，worker 120 轮用满、未写 report，R2 未取证。
+worker 的 3 个提交存档于 tag `v02-b02-attempt1`，未审核不采用，main 重置后重跑；
+worker `max_turns` 上调为 200（SPEC 3.1）。
 
 ## v02-b03 活性检测与信号阶梯
 
@@ -307,7 +314,8 @@ v0.2 第一批。规格见 SPEC 第 11 章 11.1~11.4、11.8。
    新增事件 `worker.stalled` / `worker.idling`
 2. 信号阶梯（11.6）：`limits.grace_secs` 加为可选字段默认 20；soft → grace → hard → grace → kill，
    每级记 `worker.signaled`；`wallclock_secs` 超时改走阶梯（reason=wallclock），
-   原 `worker.crashed` 路径仅保留给 runner 自身异常
+   原 `worker.crashed` 路径仅保留给 runner 自身异常；任何结束方式（含 crashed / escalated）
+   都追加一条 progress 运行记录（11.7 第二句）
 3. 场景 G 及其「不响应 soft」变体：`test/scenario-g.test.ts`
 
 验收标准：
@@ -334,7 +342,8 @@ v0.2 第一批。规格见 SPEC 第 11 章 11.1~11.4、11.8。
 条目：
 1. 中断判定与 `task.md` 注入（11.7）：`attempt` 递增、`interrupted_at`、`rescue_sha`、正文「上一轮中断」一节；
    `TaskFrontmatterSchema` 加可选 `rescue_sha`，不升版本
-2. resume 策略（11.7）：按 `resume_max` 决定是否传 `resumeSessionId`；新增事件 `worker.resumed`
+2. resume 策略（11.7）：按 `resume_max` 决定是否传 `resumeSessionId`；新增事件 `worker.resumed`；
+   `claude.ts` 在 SDK 轮数用满时返回带 `sessionId` 与 `stopReason: 'turns_exhausted'` 的 `RunResult`（11.2）
 3. 场景 E 后半段（attempt / interrupted_at / rescue_sha）与场景 F：
    `test/scenario-e.test.ts` 补全，`test/scenario-f.test.ts` 新增；
    `collie show` 按顺序还原 E / F / G 的事件链

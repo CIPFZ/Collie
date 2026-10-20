@@ -17,7 +17,7 @@ repo = "https://github.com/CIPFZ/Collie"
 [agent.worker]
 model = "claude-opus-4-6"
 allowed_tools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
-max_turns = 120
+max_turns = 200
 permission_mode = "bypassPermissions"
 
 [agent.reviewer]
@@ -72,7 +72,7 @@ describe('config: the repository .collie/collie.toml', () => {
     expect(config.agent.worker).toEqual({
       model: 'claude-opus-4-6',
       allowed_tools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
-      max_turns: 120,
+      max_turns: 200,
       permission_mode: 'bypassPermissions',
     });
   });
@@ -170,8 +170,8 @@ describe('config: validation errors carry field paths', () => {
   it('accepts a role without permission_mode (SDK default)', () => {
     const text = replaceLine(
       VALID_TOML,
-      'max_turns = 120\npermission_mode = "bypassPermissions"\n',
-      'max_turns = 120\n',
+      'max_turns = 200\npermission_mode = "bypassPermissions"\n',
+      'max_turns = 200\n',
     );
     expect(parseConfig(text, 'inline.toml').agent.worker.permission_mode).toBeUndefined();
   });

@@ -12,7 +12,7 @@ repo = "https://github.com/CIPFZ/Collie"
 # SPEC 3.1
 model = "claude-opus-4-6"
 allowed_tools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
-max_turns = 120
+max_turns = 200
 permission_mode = "bypassPermissions"   # SPEC 3.1 v0.1 裁定：无人值守下询问即卡死
 
 [agent.reviewer]
