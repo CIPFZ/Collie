@@ -1,10 +1,10 @@
-# 批次 v01-b05 汇报（第二版，2026-10-20，含第三次烟雾运行）
+# 批次 v01-b05 汇报（第三版，2026-10-20，含第四次烟雾运行与规则 8）
 
 ## 做了什么
 
 本批次没有 R2 签发的 `task.md`，按 `docs/backlog.md` 的 v01-b05 小节和项目所有者在对话中的逐项裁决执行，`base_sha` 取 `545ceb1`。
 
-共 7 个代码提交，每个都在推送后确认了自己的 CI，才推下一个：
+共 8 个代码提交，每个都在推送后确认了自己的 CI，才推下一个：
 
 | 提交 | scope | 条目 | 内容 |
 |---|---|---|---|
@@ -14,7 +14,8 @@
 | `1459299` | arbiter | 2b | 认可依赖清单加回 SDK |
 | `0af10f5` | ci | 2c | 取证前等 CI |
 | `54fa8de` | runner | — | 安装 SDK 0.3.303 |
-| `0fe1d6e` | r2 | 2d | 本版新增：`issued_by: collie`、`final_text` |
+| `0fe1d6e` | r2 | 2d | `issued_by: collie`、`final_text` |
+| `32eff85` | arbiter | 2e | 第三版新增：仲裁规则 8 与场景 D |
 
 **条目 1、2、2a、2b、2c**：与第一版一致，这里不再重复。要点如下：
 - `ClaudeRunner` 的配置一律取自角色设置；调用方只能把轮数调低、把工具收窄。
@@ -28,15 +29,49 @@
 - `collie show` 把 `final_text` 作为缩进块单独打印，不挤在事件行里。
 - 3 处变异（去掉 `issued_by`、去掉 `final_text`、从不截断）都会让测试失败。全量 500 个测试通过。
 
-**条目 3：烟雾批次。共三次运行，第三次是正式样本**
+**条目 2e（`32eff85`，第三版新增）**：
+- 实现 SPEC 4.3 新增的规则 8：只要 R2 实测有任一验收命令不满足 expect（退出码或 stdout），reviewer 的 PASS 就降为 FIX，并逐条记 `acceptance.failed` 事件（SPEC 3.6，字段 cmd / exit_code / expect）；reviewer 原判 FIX 或 BLOCK 时保持不变。
+- 原规则 8 改为规则 9，1～7 的编号和顺序都不变。所以有谎言时，仍然先被规则 5～7 当作声称不符记录下来。
+- R2 传给 arbiter 的是 `verify.ts` 自己的判定结果（基于完整 stdout），而不是 evidence 里的摘要。
+- `test/scenario-d.test.ts`：worker 诚实地报了 3 个真实失败，reviewer 判 PASS，Collie 最终判 FIX，退出码 10；对照组（同一个诚实 worker，测试全绿）判 PASS。
+- **关掉规则 8 后只有场景 D 失败（4 个用例里 3 个），场景 A、B、C 全部不受影响。** arbiter 测试新增了规则 8 的独立用例，以及顺序用例（规则 2、7 都先于规则 8）。全量 512 个测试通过。
+
+**推送配置（按裁定第 3 条）**：推送地址和 SSH 密钥现在写在本仓库的 `.git/config` 里（`remote.origin.pushurl`、`core.sshCommand`；本机配置，不入库），启动脚本不再导出任何 `GIT_CONFIG_*` 变量。已验证：直接 `git push --dry-run` 可用；在 R2 那种 worktree 里跑全量测试是 512/512，测试临时建的仓库不再受影响。
+
+**条目 3：烟雾批次。共四次运行**
 
 | 运行 | 结果 | 原因 |
 |---|---|---|
 | ① `r-20261020-051154` | 中断 | 我的会话结束时把进程一起杀掉了（见第一版） |
 | ② `r-20261020-060511` | BLOCK（20） | worker 遵守旧手册 §6，出完计划就退出，没写 report |
-| ③ `r-20261020-063533` | **PASS（0）** | 按 2d 修订后的运行，**只跑了一次，没有重跑** |
+| ③ `r-20261020-063533` | PASS（0），**不成立** | 2d 修订后的运行；规则缺口加上我的环境变量问题（见下） |
+| ④ `r-20261020-081526` | **FIX（10），裁定正确** | 规则 8 和推送配置修好后的运行（第三版新增，只跑了一次） |
 
-第 ③ 次运行的完整 journal（UTC）：
+**第 ④ 次运行**（第三版新增）的完整 journal（UTC）：
+
+| 时间 | 事件 | 内容 |
+|---|---|---|
+| 08:15:26 | `run.started` → `batch.selected` → `batch.task_written` | base `32eff85`，task 提交 `ebf8c94` |
+| 08:15:26 | `worker.started` | |
+| 08:22:10 | `worker.finished` | exit 0；`final_text`：「README 标记行已由前一轮（`b75aa31`）写入，本轮无实际代码变更可做……验收第 3 条无法达成」 |
+| 08:22:11 | `reviewer.started` | head_sha `ebf8c94`（就是 task 提交本身） |
+| 08:25:15 | `reviewer.verdict` | FIX |
+| 08:55:33 | `ci.wait_timeout` | waited_secs=1800，polls=2，last_state=rate_limited |
+| 08:55:33 | `run.finished` | verdict=FIX，exit_code=10 |
+
+- **worker**（约 7 分钟）：判断正确，README 那一行在第 ③ 次运行时已经写进去了，本轮无事可做，所以**没有做任何代码提交**，只写了 report（`fe8cf23`，worker 自己推送，CI 为 success）。claims 如实填写：`commits: []`、512 passed / 0 failed、`pushed: false`、`ci_passed: false`。
+- **reviewer**：判 FIX，理由是取证范围为空、验收第 3 条失败、前两条通过只是因为前一轮留下的状态。
+- **R2 实测**：
+  - `npm test` → 512 passed，exit 0（环境问题已消除）；
+  - 验收第 3 条 `test "$(git diff --name-only HEAD~1 HEAD)" = "README.md"` → **exit 1**；
+  - 其余命令都是 exit 0；受保护文件改动 0 行，依赖无变化；
+  - CI 又被限流，等满 1800 秒后记为 `ci.wait_timeout`。
+- **arbiter**：规则 1～7 都没有命中。规则 8 没有生效，因为 reviewer 本来就判了 FIX——规则 8 只把 PASS 降为 FIX，FIX 原样保留。最后由规则 9 给出 FIX。如果 reviewer 判了 PASS，规则 8 就会以同一条失败命令把它降为 FIX，场景 D 证实的正是这条路径。
+- **落盘情况**：
+  - task 信封 `ebf8c94` 和 report `fe8cf23` 已推送（由 worker 一起推送）；
+  - R2 的 `ef753b8 progress: v01-b05-smoke FIX`（verdict.md 和 progress 记录）**随本 report 一起推送**，见第四段第 7 条。
+
+第 ③ 次运行的完整 journal（UTC，保留第二版原文）：
 
 | 时间 | 事件 | 内容 |
 |---|---|---|
@@ -62,7 +97,22 @@
 
 ## 测试结果
 
-v01-b05 的验收命令，在本地 `2279a85` 上用 Collie 的 `verify.ts` 运行（命令来自 `parseBacklog`）：
+**第三版**：在 `/tmp` 下全新 clone 到 `ef753b8`、执行 `npm ci` 之后，用 Collie 的 `verify.ts` 运行 v01-b05 的验收命令（来自 `parseBacklog`），**8 条全部 exit 0**：
+
+| 命令 | 退出码 |
+|---|---|
+| `npm run lint` | 0 |
+| `npm run typecheck` | 0 |
+| `npm test` | 0（`512 passed, 0 failed`） |
+| SDK 包名不出现在 `src/runner/` 之外 | 0 |
+| `@opentelemetry` / `fast-sha256` 不出现在 `src/` | 0 |
+| `npm test -- test/runner-claude.test.ts` | 0（`22 passed, 0 failed`） |
+| `test -f .collie/batches/v01-b05-smoke/verdict.md` | 0（第 ④ 次运行的 verdict，随本 report 推送入库） |
+| `npm test -- test/scenario-d.test.ts` | 0（`4 passed, 0 failed`） |
+
+CI：`32eff85` https://github.com/CIPFZ/Collie/actions/runs/39391757229 ，success；worker 推送的 `fe8cf23` https://github.com/CIPFZ/Collie/actions/runs/39392867373 ，success。
+
+第二版原文（在本地 `2279a85` 上，用 Collie 的 `verify.ts` 运行）：
 
 | 命令 | 退出码 |
 |---|---|
@@ -115,17 +165,34 @@ v01-b05 的验收命令，在本地 `2279a85` 上用 Collie 的 `verify.ts` 运�
    - worker 的 commit message 用的是 `docs:` scope，在铁律 20 的允许范围内。
    - reviewer 的 evidence 和 R2 的实测都一字不差地留在 verdict.md 和 progress 里，便于人工对照。
 
+7. **【第三版】R2 的裁定提交 `ef753b8` 随本 report 推送。** 它记录的 FIX 裁定是正确的。你对上一个样本的裁定是「原样入库」，我照同样的口径处理；如果你不同意，可以 revert。
+
+8. **【第三版，新发现】progress 记录和 verdict.md 是按批次覆盖的，不是按运行累积。**
+   - 第 ④ 次运行把同一批次在 progress 块里的记录（第 ③ 次运行那条 PASS）替换掉了，`verdict.md` 也被覆盖了。
+   - 第一个真实样本仍然完整保存在 git 历史里（`8db55f7`：verdict.md 和 progress 记录都在），但 progress.md 里已经看不到它。
+   - 这是 v01-b04 的设计（「每个批次一条记录」）。如果你希望每次运行都保留在 progress 里，需要把记录改为按 run_id 累积，属于 SPEC 层面的改动。
+
+9. **【第三版，新发现，影响 2c】head_sha 可能永远没有自己的 CI 运行。**
+   - 本次 worker 把 `ebf8c94` 和 `fe8cf23` 一次推送上去，GitHub 只为推送的最新提交（`fe8cf23`）跑了 CI；`ebf8c94` 在 Actions 里查不到任何运行。
+   - `waitForCi` 把「这个 sha 还没有运行」当作「还没有结论」，所以即使 API 没有限流，它也会白白等满 1800 秒，最后记为 unknown。
+   - 第 ③ 次运行没出这个问题，是因为 `b75aa31` 恰好被单独推送过。
+   - 修正方向需要 R1 选：
+     - 承认 head_sha 在期望分支上的后代提交（比如 report 信封提交）的 CI 结论，但要说清楚这个结论覆盖的是哪个提交；
+     - 或者要求 worker 先单独推送代码提交，再推送信封。
+
+10. **【第三版】烟雾批次无法重复执行。** README 那一行在第 ③ 次运行时已经写入，之后再跑必然是「无事可做」，验收第 3 条（`HEAD~1..HEAD` 只改了 README）也必然失败，所以第 ④ 次运行的 FIX 是结构性结果。验收第 3 条还隐含假设 head_sha 的父提交就是 task 提交。批次一旦做成，就不能再拿来当烟雾测试。
+
 ## 下一步建议
 
-1. **先补规则缺口（第 1 条）**，再谈 b05 是否 PASS。按现在的规则，这次运行在形式上满足了验收（verdict.md 存在），但 PASS 本身不成立。
-2. 在仓库的 `.git/config` 配好推送地址，替代全局环境变量（第 2 条）；同时配一个只读的 `GITHUB_TOKEN`（第 3 条）。
-3. 在你决定 `2279a85` 怎么处理之后，如果要再跑一次烟雾批次验证修正结果，需要你明确同意。我不会自行重跑。
+1. **【第三版】规则缺口已经补上，b05 的 8 条验收在全新 clone 上全部通过。** 剩下要处理的是第 8 条（progress 按批次覆盖）和第 9 条（head_sha 没有自己的 CI 运行时白等 30 分钟），两条都需要 R1 先定方向。
+2. 推送配置已经改为写在 `.git/config` 里（第 2 条已解决）。**只读的 `GITHUB_TOKEN` 仍然缺**：第 ③、④ 次运行都因为限流各白等了 30 分钟。
+3. 如果还需要一个能重复执行的烟雾批次，建议 R1 另设一个每次都有事可做的批次（比如把一个计数文件加 1），而不是再跑 v01-b05-smoke。
 
 ```json
 {
   "schema_version": 1,
   "batch_id": "v01-b05",
-  "head_sha": "0fe1d6ed002499fc8ff7016cdf605cb840a64799",
+  "head_sha": "32eff85b782df01f78e3146386bbec277f2711a7",
   "claims": {
     "commits": [
       "e4555c8a20343bcb6fa2730a298ef865407aab74",
@@ -134,9 +201,10 @@ v01-b05 的验收命令，在本地 `2279a85` 上用 Collie 的 `verify.ts` 运�
       "14592992469e91d9cfd614be94d3d761f1a0295a",
       "0af10f5d06e91595613cc320b31ee5131df2d449",
       "54fa8decbee73d1f76ad336d53120fd39c4cf0e4",
-      "0fe1d6ed002499fc8ff7016cdf605cb840a64799"
+      "0fe1d6ed002499fc8ff7016cdf605cb840a64799",
+      "32eff85b782df01f78e3146386bbec277f2711a7"
     ],
-    "tests_passed": 500,
+    "tests_passed": 512,
     "tests_failed": 0,
     "pushed": true,
     "ci_passed": true,
@@ -144,10 +212,11 @@ v01-b05 的验收命令，在本地 `2279a85` 上用 Collie 的 `verify.ts` 运�
     "spec_touched": false
   },
   "open_questions": [
-    "Smoke run 3 ended PASS although R2 measured npm test exit 1 (434 passed / 66 failed): the worker reported the failures honestly, so no claim rule fired, and rule 8 adopted the reviewer's PASS. SPEC 4.3 has no rule that a failing acceptance command blocks a PASS. Add one?",
-    "The 66 failures were caused by my run harness: GIT_CONFIG_COUNT pushurl override (for the worker's SSH push) leaked into the tests' throwaway repos. Reproduced 66/66 with the env, 500/500 without. Configure the push URL in .git/config instead.",
-    "CI evidence was unknown: GitHub API rate-limited for the whole 1800s wait; ci.wait_timeout recorded. A read-only GITHUB_TOKEN is needed.",
-    "R2's commit 2279a85 (verdict.md + progress entry recording this PASS) is local and unpushed; push as-is or hold until the rule gap is fixed?"
+    "Smoke run 4 (r-20261020-081526) ended FIX, exit 10, correctly: the README line already existed from run 3, the worker made no code commit and said so, acceptance 3 failed (exit 1); the reviewer said FIX, so rule 8 did not need to fire.",
+    "progress.md and verdict.md are per batch, so run 4 replaced run 3's PASS entry; the first real sample survives only in git history (8db55f7). Keep entries per run instead?",
+    "waitForCi waits the full ci_wait_secs when head_sha never gets its own CI run (pushed together with the report commit, only the tip is built). Accept a descendant's run on the expected branch, or require the code commit to be pushed first?",
+    "GitHub API was rate-limited for the whole wait in runs 3 and 4 (30 min each). A read-only GITHUB_TOKEN is still missing.",
+    "R2's commit ef753b8 (verdict + progress for run 4) is pushed with this report, following the owner's ruling for the previous sample."
   ]
 }
 ```
