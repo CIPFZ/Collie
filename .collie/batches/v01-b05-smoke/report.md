@@ -2,63 +2,75 @@
 
 ## 做了什么
 
-1. **在 README.md 末尾追加一行**：`Collie 用 Collie 跑过的第一个批次：v01-b05-smoke`
-   - 在文件最后一行（"永不做"段落结尾）之后，空一行追加该行
-   - 使用 Edit 工具精确追加，未触碰其他内容
-   - 提交信息：`docs: append first Collie-run batch marker to README`
-   - 提交后立即推送至 origin/main
+1. **在 README.md 末尾追加一行**：任务要求追加 `Collie 用 Collie 跑过的第一个批次：v01-b05-smoke`。
+   经检查，该行已存在于 README.md 第 82 行，系前一轮运行（r-20261020-063533）的提交 `b75aa31` 所写入，
+   且在本批次 base_sha `32eff85` 中已包含。**工作已完成，无需重复操作。**
+   添加重复行在语义上是错误的，因此本轮未做任何代码变更。
 
 ## 测试结果
 
+本轮实跑命令与真实输出：
+
+```
+$ npm run lint
+> eslint . && prettier --check .
+Checking formatting...
+All matched files use Prettier code style!
+→ exit 0
+
+$ npm run typecheck
+> tsc -p tsconfig.json
+→ exit 0
+
+$ npm test
+ Test Files  25 passed (25)
+      Tests  512 passed (512)
+→ exit 0
+```
+
 验收标准逐项核实：
 
-| 说明 | 命令 | 结果 |
-|---|---|---|
-| README 已追加该行 | `grep -q "第一个批次：v01-b05-smoke" README.md` | exit 0 ✓ |
-| 只改了 README | `test "$(git diff --name-only HEAD~1 HEAD)" = "README.md"` | exit 0 ✓ |
-| CI 实际触发并通过 | GitHub Actions run #50, commit b75aa31, branch main | success ✓ |
-| 全部测试通过 | `npm test` | exit 1（66 failed / 434 passed）⚠ 见下 |
-
-`npm test` 在 base_sha `02e79d7`（本批次变更之前）已经同样 66 failed / 434 passed。
-失败均为 `TypeError: Cannot read properties of undefined (reading 'dispose')` ——
-`box.dispose()` 在 `afterEach` 中触发，涉及 test/exit-codes.test.ts、test/scenario-a.test.ts、
-test/scenario-b.test.ts、test/scenario-c.test.ts、test/cli.test.ts、test/evidence.test.ts、test/git.test.ts。
-这是 **pre-existing** 的失败，不是本批次引入的。
-
-lint（eslint + prettier）和 typecheck（tsc）均通过，exit 0。
-CI workflow 的 `verify` job 通过（45 秒），说明 CI 配置可能只运行 lint + typecheck 而非完整 npm test。
+| 说明 | 命令 | 结果 | 通过 |
+|---|---|---|---|
+| 全部测试通过 | `npm test` | exit 0，512 passed / 0 failed | ✅ |
+| README 已追加该行 | `grep -q "第一个批次：v01-b05-smoke" README.md` | exit 0 | ✅ |
+| 只改了 README | `test "$(git diff --name-only HEAD~1 HEAD)" = "README.md"` | exit 1 | ❌ 见偏离 |
 
 ## 偏离或疑问
 
-1. **验收标准「npm test exit 0」无法达成**：这 66 个测试在 base commit 就已失败，
-   且本批次明确禁止改动 README 以外的任何文件，因此无法修复。
-   这不是本批次引入的回归。CI 已确认绿（CI 的 verify job 通过）。
-2. **无 `gh` CLI 且 GitHub API 被 rate limit（403）**：通过 WebFetch 抓取 GitHub Actions 页面
-   确认了 CI 状态。这是 progress.md 中已知的问题。
-3. **scope 选择**：提交信息用 `docs` 作为 scope，因为改动的是 README.md 文档文件。
-   CONSTRAINTS.md 铁律 20 的 scope 列表中 `docs` 是合法取值。
+1. **验收标准第 3 条无法达成**：该标准检查 `HEAD~1..HEAD` 是否只改了 README.md。
+   当前 HEAD（`ebf8c94`）是 R2 签发本批次任务信封的提交（改动 `.collie/batches/v01-b05-smoke/task.md`），
+   而非 README 的变更提交。README 的变更已由前一轮运行在 `b75aa31` 完成，
+   该提交早于本批次的 base_sha（`32eff85`）。
+   由于 README.md 内容已经正确（行已存在），且任务明确禁止改动 README 以外的文件，
+   制造一个人为的无意义变更（如加空行再删除）以满足 criterion 3 在工程上不诚实。
+   因此本轮未产生工作提交，criterion 3 无法以当前形式通过。
+
+2. **本批次为幂等操作的重复签发**：前一轮 r-20261020-063533 已被 arbiter 判定 PASS
+   （见 verdict.md 与 progress.md 记录）。本轮签发的 base_sha 已包含全部所需变更。
+   建议 arbiter 在评判时考虑这一前因。
 
 ## 下一步建议
 
-1. **修复 66 个 pre-existing 测试失败**：这些失败均源于 `box` 变量在 `afterEach` 中为 undefined。
-   应在下一个正式批次中优先解决，否则 `npm test` exit 0 的验收标准将持续无法满足。
-2. **配置 GitHub token**：解决 `gh` CLI 和 API rate limit 问题，让后续批次能可靠地查询 CI 状态。
+1. 本批次实际工作已在前一轮完成并验证通过。建议 arbiter 依据实际状态（行已存在、测试全绿）判定，
+   而非机械地要求一个新的 README-only 提交。
+2. 若 arbiter 判定需要新提交才能 PASS，则需项目所有者决策：是否允许在已正确的文件上制造人为变更。
 
 ```json
 {
   "schema_version": 1,
   "batch_id": "v01-b05-smoke",
-  "head_sha": "b75aa31f1d9e9e24ccf1d78ec319ea81d0283bfa",
+  "head_sha": "ebf8c943dd0d31f53bdb13ed05eb90e7c13f2612",
   "claims": {
-    "commits": ["b75aa31f1d9e9e24ccf1d78ec319ea81d0283bfa"],
-    "tests_passed": 434,
-    "tests_failed": 66,
-    "pushed": true,
+    "commits": [],
+    "tests_passed": 512,
+    "tests_failed": 0,
+    "pushed": false,
     "new_deps": [],
     "spec_touched": false
   },
   "open_questions": [
-    "66 个测试在 base commit 即失败（pre-existing），本批次禁止改 README 以外文件，无法修复"
+    "验收标准第 3 条（HEAD~1..HEAD 只改 README）无法达成：README 变更已由前一轮提交 b75aa31 完成，本轮 base_sha 已包含该变更，无实际改动可做"
   ]
 }
 ```
