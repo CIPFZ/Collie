@@ -73,17 +73,17 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 ## 调度器实测记录（collie run 自动写入）
 
 <!-- collie:runs:start -->
-### v01-b05-smoke · r-20261020-063533 · PASS
+### v01-b05-smoke · r-20261020-081526 · FIX
 
-- 时间：2026-10-20T07:26:46.774Z
-- 裁定：规则 8，三项验收标准均经实测确认。npm test 在 worktree 中因非 fast-forward 环境因素退出码 1，但失败全部预存在于 base_sha 且 CI 上同一命令通过；README 标记行存在；HEAD 提交只改了 README.md；提交已推送；CI 在 main 分支成功；无受保护文件变更；无依赖变化。
-- 提交：`b75aa31`
+- 时间：2026-10-20T08:55:33.836Z
+- 裁定：规则 9，Diff range is empty — worker produced no commits this attempt. Acceptance command 3 explicitly fails. Commands 1 and 2 pass only due to pre-existing state from a prior attempt (b75aa31), not from this batch's worker output.
+- 提交：无
 - 验收命令：4/5 通过
   - `npm run lint` → exit 0，All matched files use Prettier code style!
   - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
-  - `npm test` → exit 1，434 passed, 66 failed, 7 test files failed
+  - `npm test` → exit 0，512 passed, 0 failed
   - `grep -q "第一个批次：v01-b05-smoke" README.md` → exit 0，exit 0
-  - `test "$(git diff --name-only HEAD~1 HEAD)" = "README.md"` → exit 0，exit 0
+  - `test "$(git diff --name-only HEAD~1 HEAD)" = "README.md"` → exit 1，exit 1
 - 已推送：是
 - CI：unknown，监听分支未能取证
 - 受保护文件改动行数：0

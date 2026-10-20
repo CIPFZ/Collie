@@ -1,202 +1,156 @@
-All evidence is gathered. Here is the complete verdict:
-
----
+I now have all the evidence needed. Let me compile the complete verdict.
 
 # 批次 v01-b05-smoke 审核
 
 ## 取证过程
 
-### 1. 批次 diff 概览
+### 1. 批次 diff 范围检查
 
 ```
-$ git log 02e79d7..b75aa31 --oneline --format='%H %s'
-b75aa31f1d9e9e24ccf1d78ec319ea81d0283bfa docs: append first Collie-run batch marker to README
+$ git log ebf8c943dd0d31f53bdb13ed05eb90e7c13f2612..ebf8c943dd0d31f53bdb13ed05eb90e7c13f2612 --oneline
+（无输出）
+
+$ git diff ebf8c943dd0d31f53bdb13ed05eb90e7c13f2612..ebf8c943dd0d31f53bdb13ed05eb90e7c13f2612
+（无输出）
 ```
 
-一个提交，仅改 `README.md`，追加 2 行（1 空行 + 1 标记行）。
+**关键发现：base\_sha 与 head\_sha 是同一个 SHA (`ebf8c943`)。diff 范围为空，worker 本次运行产出了零个提交。**
+
+`ebf8c94` 本身是任务信封提交（`docs: issue v01-b05-smoke task envelope`），仅改了 `.collie/batches/v01-b05-smoke/task.md`，不包含任何 worker 工作产物。
+
+### 2. 历史溯源：README 行的来源
+
+README 末尾确实包含 `Collie 用 Collie 跑过的第一个批次：v01-b05-smoke`，但此行来自**之前的尝试**：
 
 ```
-$ git diff --stat 02e79d7..b75aa31
+$ git show --stat b75aa31
+commit b75aa31f1d9e9e24ccf1d78ec319ea81d0283bfa
+Author: tonynyyan <tonynyyan@tencent.com>
+Date:   Tue Oct 20 14:39:27 2026 +0800
+
+    docs: append first Collie-run batch marker to README
+    Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
  README.md | 2 ++
  1 file changed, 2 insertions(+)
 ```
 
-```
-$ git diff --name-only 02e79d7..b75aa31
-README.md
-```
+该提交 (`b75aa31`) 是 `ebf8c94` 的祖先，中间隔了 6 个提交（包括 arbiter 规则修改、进度更新、SPEC 修订、新任务信封）。这意味着 README 行在本批次签发之前就已存在。
 
-diff 内容：
+### 3. 验收命令逐条实跑
 
-```diff
-+
-+Collie 用 Collie 跑过的第一个批次：v01-b05-smoke
-```
-
-与 task 条目「在 `README.md` 末尾追加一行：`Collie 用 Collie 跑过的第一个批次：v01-b05-smoke`」完全吻合。
-
-### 2. 受保护文件检查
-
-```
-$ git diff --stat 02e79d7..b75aa31 -- SPEC.md CONSTRAINTS.md
-（无输出）
-```
-
-SPEC.md、CONSTRAINTS.md 均未被修改。spec_diff_lines = 0。
-
-### 3. 依赖变化
-
-```
-$ git diff 02e79d7..b75aa31 -- package.json package-lock.json
-（无输出）
-```
-
-无依赖变化。
-
-### 4. 提交存在与推送确认
-
-```
-$ git ls-remote origin
-943c67b5926b6ba4a6d7d78b62361b18ec030448  HEAD
-943c67b5926b6ba4a6d7d78b62361b18ec030448  refs/heads/main
-
-$ git merge-base --is-ancestor b75aa31 943c67b; echo $?
-0
-
-$ git branch -r --contains b75aa31
-  origin/HEAD -> origin/main
-  origin/main
-
-$ git log --oneline 943c67b --ancestry-path --reverse b75aa31..943c67b
-943c67b report(collie): v01-b05-smoke
-```
-
-head_sha `b75aa31` 是 remote main HEAD (`943c67b`) 的祖先。remote HEAD 比 head_sha 多一个 `report(collie):` 信封提交，符合 SPEC 3.4 的预期。**remote_has_head = true**。
-
-### 5. CI 核验
-
-`gh` CLI 不可用，GitHub REST API 因速率限制被拒。通过 WebFetch 抓取 GitHub Actions 页面取证：
-
-- **Run URL**: https://github.com/CIPFZ/Collie/actions/runs/39381664783
-- **Commit SHA**: b75aa31f1d9e9e24ccf1d78ec319ea81d0283bfa
-- **Branch**: main
-- **Conclusion**: success（所有步骤通过，verify job 耗时 45 秒）
-- **Trigger**: push，2026-10-20T06:39 UTC
-
-CI 配置文件 `.github/workflows/ci.yml` 监听 `on.push.branches: [main]`，与 `collie.toml` 的 `expected_branch = "main"` 一致。**ci_branch_matched = true**。
-
-### 6. 验收命令实跑
-
-#### 命令 1: `npm test`
-
+**命令 1：`npm test`**
 ```
 $ npm test
- Test Files  7 failed | 17 passed (24)
-      Tests  66 failed | 434 passed (500)
-$ echo $?
-1
+ RUN  v5.0.5
+
+ Test Files  25 passed (25)
+      Tests  512 passed (512)
+   Duration  6.41s
 ```
+退出码：0。但这是先前累积状态的结果，与本批次 worker 无关（worker 未改任何文件）。
 
-退出码 1，**形式上未通过**。
+**命令 2：`grep -q "第一个批次：v01-b05-smoke" README.md`**
+退出码：0。行确实存在，但来源是之前的尝试（`b75aa31`），不是本批次 worker 的产出。
 
-**关键取证——这些失败是否是本批次引入的？**
-
-回退 README.md 到 base_sha 版本重跑：
+**命令 3：`test "$(git diff --name-only HEAD~1 HEAD)" = "README.md"`**
 ```
-$ git checkout 02e79d7 -- README.md && npm test
- Test Files  7 failed | 17 passed (24)
-      Tests  66 failed | 434 passed (500)
-$ git checkout b75aa31 -- README.md   # 恢复
+$ git diff --name-only HEAD~1 HEAD
+.collie/batches/v01-b05-smoke/task.md
 ```
+退出码：1。**失败。** HEAD (`ebf8c94`) 改的是 `task.md`（任务信封），不是 `README.md`。worker 本次未产出任何提交，因此不存在一个「只改了 README」的 HEAD 提交。
 
-**完全相同的 66 个测试失败。** 证明这些失败是 base_sha 就已存在的，与本批次的 README.md 变更无因果关系。
-
-**失败根因分析：** 所有 66 个失败的测试均因 `git push -q origin main` 被远端拒绝（`rejected: remote contains work that you do not have locally`）。本审核在 worktree 中运行（HEAD = `b75aa31`），而远端 main 已推进到 `943c67b`。测试沙箱继承了真实 remote，导致所有涉及 `git push` 的测试全部失败，进而 `beforeEach` 中的 sandbox 创建失败、`box` 为 `undefined`、`afterEach` 中 `box.dispose()` 抛出 `TypeError`，级联到同文件其余测试。
-
-**CI 佐证：** GitHub Actions 在 head_sha 的 fresh checkout 上执行同一 `npm test` 命令，全部通过（见上述 CI 核验）。
-
-**结论：** `npm test` 在本 worktree 中因环境因素（非 fast-forward）形式上退出码 1，但 (a) 失败完全预先存在于 base_sha，(b) 本批次未改任何代码/测试文件，(c) CI 上同一命令通过。本批次未引入任何测试回归。
-
-#### 命令 2: `grep -q "第一个批次：v01-b05-smoke" README.md`
+### 4. 提交与推送状态
 
 ```
-$ grep -q "第一个批次：v01-b05-smoke" README.md; echo $?
-0
+$ git ls-remote origin | head -5
+fe8cf23  HEAD
+fe8cf23  refs/heads/main
+
+$ git branch -r --contains ebf8c943
+  origin/HEAD -> origin/main
+  origin/main
 ```
 
-**通过。**
+`head_sha`（`ebf8c94`）是 remote main（`fe8cf23`）的祖先，已推送。`fe8cf23` 是 `report(collie): v01-b05-smoke` 信封提交，按 SPEC 3.4 不在取证范围内。
 
-#### 命令 3: `test "$(git diff --name-only HEAD~1 HEAD)" = "README.md"`
+### 5. CI 状态
 
 ```
-$ test "$(git diff --name-only HEAD~1 HEAD)" = "README.md"; echo $?
-0
+$ gh run list ...
+/bin/bash: line 1: gh: command not found
 ```
 
-**通过。**
+`gh` CLI 不可用，无法查询 CI 运行状态。`ci_conclusion` 记为 `unknown`，`ci_branch_matched` 记为 `null`。
+
+### 6. 受保护文件检查
+
+```
+$ git diff --stat ebf8c94..ebf8c94 -- SPEC.md CONSTRAINTS.md
+（无输出）
+```
+
+diff 为空，无受保护文件被修改。（因为 worker 未产出任何提交。）
+
+### 7. 依赖变化
+
+```
+$ git diff ebf8c94..ebf8c94 -- package.json package-lock.json
+（无输出）
+```
+
+无依赖变化。（同上理由。）
 
 ## 逐条验收
 
 | 验收项 | 命令 | 实测结果 | 通过 |
 |---|---|---|---|
-| 全部测试通过 | `npm test` | 退出码 1（66 失败），但失败全部预存在于 base_sha、CI 上相同命令通过 | ⚠️ 环境因素，非回归 |
-| README 已追加标记行 | `grep -q "第一个批次：v01-b05-smoke" README.md` | 退出码 0 | ✅ |
-| 只改了 README | `test "$(git diff --name-only HEAD~1 HEAD)" = "README.md"` | 退出码 0 | ✅ |
+| 全部测试通过 | `npm test` | 512 passed, exit 0 | ✅ (但 worker 未改代码，此为先前状态) |
+| README 已追加该行 | `grep -q "第一个批次：v01-b05-smoke" README.md` | exit 0 | ✅ (行来自之前的尝试 `b75aa31`，非本批次产出) |
+| 只改了 README | `test "$(git diff --name-only HEAD~1 HEAD)" = "README.md"` | exit 1，HEAD 改的是 task.md | ❌ |
 
 ## 声称与实测的差异
 
-无。本批次为 smoke 批次，无 `report.md` 的 claims 结构需要比对。Diff 内容、文件范围、提交、推送、CI 均与预期一致。
+无法核对——因为 diff 为空（worker 声称的 head\_sha 等于 base\_sha），本批次不存在 worker 产出的代码提交，因此无法比对 worker 的 claims 与实测。worker 的 report.md 按审核手册要求不读取，但基于 diff 范围可确认：worker 在本次执行中未产出任何新提交。
 
 ## 结论与理由
 
-**PASS。**
+**FIX。**
 
-本批次的要求极为简单：在 README.md 末尾追加一行标记文字。实测证据：
+核心问题：**worker 本次运行产出零个提交**（base\_sha == head\_sha == `ebf8c943`），diff 范围为空。
 
-1. **Diff 精确匹配**：仅修改 README.md，追加内容与 task 条目逐字一致
-2. **验收命令 2、3 通过**：标记行存在，且 HEAD 提交只改了 README.md
-3. **验收命令 1（npm test）形式上失败**：但经对照实验证明 66 个失败全部预存在于 base_sha，与本批次变更无因果关系；GitHub CI 在同一 head_sha 上执行 `npm test` 全部通过
-4. **提交已推送**：head_sha 是 remote main 的祖先
-5. **CI 通过**：conclusion = success，branch = main，ci_branch_matched = true
-6. **受保护文件未动**：spec_diff_lines = 0
-7. **无依赖变化**
-8. **无范围蔓延**：仅 README.md 一个文件
+三条验收标准中，命令 1 和命令 2 之所以通过，完全是因为先前尝试（`b75aa31`）遗留的状态已经满足条件，而非本批次 worker 的工作成果。命令 3 明确失败（exit 1），因为 HEAD 提交改的是 task.md（任务信封），而非 README.md。
 
-`npm test` 在 reviewer worktree 中的失败是已知的环境局限（worktree HEAD 落后于 remote，导致测试沙箱的 `git push` 被拒）。这不是本批次引入的回归，CI 的通过结果是更可靠的测试证据。
+具体缺口清单：
+1. **Worker 必须实际产出至少一个提交**，使 head\_sha ≠ base\_sha，且该提交仅修改 `README.md`
+2. **验收命令 3 必须通过**：worker 的提交应成为 HEAD，`git diff --name-only HEAD~1 HEAD` 应仅输出 `README.md`
+3. **CI 无法验证**：`gh` CLI 不可用，CI 状态未知；重跑时需确保可验证 CI
 
 ```json
 {
   "schema_version": 1,
   "batch_id": "v01-b05-smoke",
-  "verdict": "PASS",
+  "verdict": "FIX",
   "evidence": {
-    "commits_actual": ["b75aa31f1d9e9e24ccf1d78ec319ea81d0283bfa"],
+    "commits_actual": [],
     "verify_results": [
-      {
-        "cmd": "npm test",
-        "exit_code": 1,
-        "summary": "66 failed / 434 passed (500 total) — all 66 failures pre-exist at base_sha; caused by worktree being behind remote (git push rejected); CI passes same command"
-      },
-      {
-        "cmd": "grep -q \"第一个批次：v01-b05-smoke\" README.md",
-        "exit_code": 0,
-        "summary": "marker line found in README.md"
-      },
-      {
-        "cmd": "test \"$(git diff --name-only HEAD~1 HEAD)\" = \"README.md\"",
-        "exit_code": 0,
-        "summary": "only README.md changed in head commit"
-      }
+      { "cmd": "npm test", "exit_code": 0, "summary": "512 passed, 0 failed (25 test files). But worker made no commits; this is pre-existing state." },
+      { "cmd": "grep -q \"第一个批次：v01-b05-smoke\" README.md", "exit_code": 0, "summary": "Line exists from prior attempt b75aa31, not from this batch run." },
+      { "cmd": "test \"$(git diff --name-only HEAD~1 HEAD)\" = \"README.md\"", "exit_code": 1, "summary": "FAILED. HEAD commit (ebf8c94) changed .collie/batches/v01-b05-smoke/task.md, not README.md. Worker produced zero commits." }
     ],
     "remote_has_head": true,
-    "ci_conclusion": "success",
-    "ci_run_url": "https://github.com/CIPFZ/Collie/actions/runs/39381664783",
-    "ci_branch_matched": true,
+    "ci_conclusion": "unknown",
+    "ci_run_url": "",
+    "ci_branch_matched": null,
     "deps_diff": [],
     "spec_diff_lines": 0
   },
   "claim_mismatches": [],
-  "gaps": [],
-  "reason": "三项验收标准均经实测确认。npm test 在 worktree 中因非 fast-forward 环境因素退出码 1，但失败全部预存在于 base_sha 且 CI 上同一命令通过；README 标记行存在；HEAD 提交只改了 README.md；提交已推送；CI 在 main 分支成功；无受保护文件变更；无依赖变化。"
+  "gaps": [
+    "Worker produced zero commits (base_sha == head_sha == ebf8c943). Must produce at least one commit that modifies only README.md.",
+    "Acceptance command 3 fails (exit 1): HEAD~1..HEAD shows task.md change, not README.md. Worker's commit must be HEAD and change only README.md.",
+    "CI status could not be verified (gh CLI unavailable). On re-run, ensure CI can be queried."
+  ],
+  "reason": "Diff range is empty — worker produced no commits this attempt. Acceptance command 3 explicitly fails. Commands 1 and 2 pass only due to pre-existing state from a prior attempt (b75aa31), not from this batch's worker output."
 }
 ```
