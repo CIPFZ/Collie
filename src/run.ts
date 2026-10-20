@@ -1,7 +1,16 @@
 // R2's single-batch loop (SPEC 6): task -> worker -> report -> reviewer in a
 // head_sha worktree -> verdict -> own evidence -> arbiter -> progress.
 // Deterministic: no LLM decides anything here (ROLES 2 R2).
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { arbitrate, type ArbiterDecision } from './arbiter.js';
@@ -9,13 +18,14 @@ import { loadBacklog } from './backlog.js';
 import type { Clock, FetchLike } from './ci.js';
 import { loadConfig } from './config.js';
 import { collectEvidence } from './evidence.js';
-import { addWorktree, commit, isAncestor, removeWorktree, revParse } from './git.js';
-import { createJournal, type Journal } from './journal.js';
+import { addWorktree, commit, git, isAncestor, removeWorktree, revParse, status } from './git.js';
+import { checkHeartbeat, removeHeartbeat, touchHeartbeat, writeHeartbeat } from './heartbeat.js';
+import { createJournal, RUNS_RELATIVE_DIR, type Journal } from './journal.js';
 import { writeProgress } from './progress.js';
 import { readVerdict, runReviewer, verdictPath } from './roles/reviewer.js';
 import { buildTask, readReport, runWorker, taskPath, writeTask } from './roles/worker.js';
 import { CLAUDE_SDK_PACKAGE } from './runner/claude.js';
-import type { AgentRunner } from './runner/index.js';
+import type { AgentRunner, RunHandle } from './runner/index.js';
 import type {
   Acceptance,
   Batch,
@@ -41,6 +51,9 @@ const MS_PER_SECOND = 1000;
 /** SPEC 3.6: worker.finished.final_text is cut to this many characters (a format bound, not a tunable). */
 // eslint-disable-next-line no-restricted-syntax -- fixed by SPEC 3.6
 export const FINAL_TEXT_MAX = 2000;
+
+/** Raw event stream from the agent (SPEC 11.3), separate from Collie's own journal. */
+export const STREAM_FILE_NAME = 'stream.ndjson';
 
 /**
  * Dependencies approved by SPEC 2.2 and ADR-002, plus the platform SDK of the
@@ -172,12 +185,62 @@ function persistVerdict(
   }
 }
 
+/** Appends one raw event line to .collie/runs/<run_id>/stream.ndjson (SPEC 11.3). */
+function appendStream(root: string, runId: string, event: unknown): void {
+  const dir = join(root, RUNS_RELATIVE_DIR, runId);
+  mkdirSync(dir, { recursive: true });
+  // Raw dump: JSON.stringify never emits bare newlines, so each line is one event.
+  appendFileSync(join(dir, STREAM_FILE_NAME), JSON.stringify(event) + '\n');
+}
+
+/**
+ * Dirty-workspace rescue (SPEC 11.4): if the working tree is not clean after
+ * the worker exits, `git add -A && git commit -m "wip(collie): <batch_id> rescue"`.
+ * Returns the rescue sha and file list, or undefined when the tree was clean.
+ */
+async function rescueDirtyWorkspace(
+  root: string,
+  batchId: string,
+): Promise<{ sha: string; files: string[] } | undefined> {
+  const ws = await status(root);
+  if (ws.clean) return undefined;
+  const files = ws.entries.map((e) => e.path);
+  await git(root, ['add', '-A']);
+  await git(root, ['commit', '-m', `wip(collie): ${batchId} rescue`]);
+  const sha = await revParse(root, 'HEAD');
+  return { sha, files };
+}
+
 /** Runs one batch end to end. Never throws for agent misbehaviour; only for Collie's own failures. */
 export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   const { root, batchId, runId } = ctx;
   const config = loadConfig(root);
   const batch = findBatch(root, batchId);
-  const rec = new Recorder(createJournal(root), runId, batchId, ctx.now);
+  const journal = createJournal(root);
+  const rec = new Recorder(journal, runId, batchId, ctx.now);
+
+  // SPEC 11.3: orphan detection — if a heartbeat file exists and the pid is dead,
+  // the previous run was killed. If the pid is alive, refuse to start (铁律 7).
+  const hb = checkHeartbeat(root);
+  if (hb.status === 'alive') {
+    throw new Error(
+      `another Collie instance is running (pid ${String(hb.data.pid)}, run ${hb.data.run_id}); refusing to start`,
+    );
+  }
+  if (hb.status === 'orphan') {
+    rec.record('run.orphaned', {
+      orphaned_run_id: hb.data.run_id,
+      orphaned_batch_id: hb.data.batch_id,
+      updated_at: hb.data.updated_at,
+    });
+    // Execute rescue for the orphaned run's dirty workspace (SPEC 11.4).
+    const rescue = await rescueDirtyWorkspace(root, hb.data.batch_id);
+    if (rescue !== undefined) {
+      rec.record('worker.rescued', { sha: rescue.sha, files: rescue.files });
+    }
+    removeHeartbeat(root);
+  }
+
   rec.record('run.started');
 
   const finish = (final: VerdictValue, extra: Partial<RunOutcome> = {}): RunOutcome => {
@@ -207,20 +270,58 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   rec.record('worker.started');
   const signal =
     ctx.workerSignal ?? AbortSignal.timeout(config.limits.wallclock_secs * MS_PER_SECOND);
+
+  // SPEC 11.3: stream + heartbeat callbacks.
+  // workerHandle will be used by the signal ladder (v0.2 b03); kept for that wiring.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- wired by v02-b03 signal ladder
+  let workerHandle: RunHandle | undefined;
+  const onEvent = (event: unknown): void => {
+    appendStream(root, runId, event);
+    touchHeartbeat(root, ctx.now().toISOString());
+  };
+  const onStarted = (handle: RunHandle): void => {
+    workerHandle = handle;
+    writeHeartbeat(root, {
+      run_id: runId,
+      batch_id: batchId,
+      pid: handle.pid ?? process.pid,
+      started_at: ctx.now().toISOString(),
+      updated_at: ctx.now().toISOString(),
+    });
+  };
+
   try {
-    const result = await runWorker(ctx.runner, config, batch, root, { signal });
+    const result = await runWorker(ctx.runner, config, batch, root, {
+      signal,
+      onEvent,
+      onStarted,
+    });
     rec.record('worker.finished', {
       exit_code: result.exitCode,
       // SPEC 3.6: without it a zero-output exit cannot be explained (v01-b05-smoke).
       ...(result.finalText === undefined
         ? {}
         : { final_text: truncate(result.finalText, FINAL_TEXT_MAX) }),
+      ...(result.stopReason === undefined ? {} : { stop_reason: result.stopReason }),
     });
   } catch (error) {
     // v0.1: a timeout is recorded as a crash; the signal ladder is v0.2 (SPEC 3.3).
     rec.record('worker.crashed', { error: message(error), timed_out: signal.aborted });
+    // SPEC 11.4: rescue any uncommitted work even on crash.
+    const rescue = await rescueDirtyWorkspace(root, batchId);
+    if (rescue !== undefined) {
+      rec.record('worker.rescued', { sha: rescue.sha, files: rescue.files });
+    }
+    removeHeartbeat(root);
     return escalate(`worker crashed: ${message(error)}`);
   }
+
+  // SPEC 11.4: rescue uncommitted work left behind by the worker.
+  const rescue = await rescueDirtyWorkspace(root, batchId);
+  if (rescue !== undefined) {
+    rec.record('worker.rescued', { sha: rescue.sha, files: rescue.files });
+  }
+  removeHeartbeat(root);
 
   let report: Report;
   try {

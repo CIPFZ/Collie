@@ -3,7 +3,7 @@
 // Depends on the runner *interface* only (CONSTRAINTS 铁律 15).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { AgentRunner, RunResult } from '../runner/index.js';
+import type { AgentRunner, RunHandle, RunResult } from '../runner/index.js';
 import { EnvelopeError, lastJsonBlock, renderFrontmatter } from '../schema/envelope.js';
 import {
   BatchIdSchema,
@@ -161,13 +161,19 @@ function workerPrompt(batch: Batch): string {
 /**
  * Launches the worker through `runner` with the R3 manual and the configured tool whitelist.
  * `signal` is forwarded untouched; the wall-clock budget is R2's concern (SPEC 3.3).
+ * `onEvent` and `onStarted` are forwarded for stream/heartbeat (SPEC 11.2, 11.3).
  */
 export async function runWorker(
   runner: AgentRunner,
   cfg: CollieConfig,
   batch: Batch,
   root: string,
-  opts: { signal?: AbortSignal } = {},
+  opts: {
+    signal?: AbortSignal;
+    onEvent?: (event: unknown) => void;
+    onStarted?: (handle: RunHandle) => void;
+    resumeSessionId?: string;
+  } = {},
 ): Promise<RunResult> {
   const systemPrompt = readFileSync(join(root, WORKER_MANUAL), 'utf8');
   return runner.run({
@@ -178,6 +184,9 @@ export async function runWorker(
     cwd: root,
     maxTurns: cfg.agent.worker.max_turns,
     ...(opts.signal === undefined ? {} : { signal: opts.signal }),
+    ...(opts.onEvent === undefined ? {} : { onEvent: opts.onEvent }),
+    ...(opts.onStarted === undefined ? {} : { onStarted: opts.onStarted }),
+    ...(opts.resumeSessionId === undefined ? {} : { resumeSessionId: opts.resumeSessionId }),
   });
 }
 

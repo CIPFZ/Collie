@@ -51,7 +51,7 @@ describe('skeleton: .gitignore', () => {
     .split('\n')
     .map((l) => l.trim());
 
-  it.each(['node_modules/', 'dist/', '.collie/runs/', '.collie/heartbeat'])(
+  it.each(['node_modules/', 'dist/', '.collie/runs/', '.collie/heartbeat.json'])(
     'ignores %s',
     (entry) => {
       expect(lines).toContain(entry);

@@ -195,20 +195,20 @@ describe('schema: Event round-trip', () => {
     expect(EventSchema.safeParse({ ...validEvent, event }).success).toBe(true);
   });
 
-  it.each([
-    'worker.stalled',
-    'worker.idling',
-    'worker.signaled',
-    'worker.rescued',
-    'worker.resumed',
-  ])('rejects v0.2 event type %s', (event) => {
-    expect(issuePaths(EventSchema, { ...validEvent, event })).toEqual(['event']);
-  });
+  it.each(['worker.stalled', 'worker.idling', 'worker.signaled', 'worker.resumed'])(
+    'rejects event type %s (not yet added)',
+    (event) => {
+      expect(issuePaths(EventSchema, { ...validEvent, event })).toEqual(['event']);
+    },
+  );
 
-  it('defines the 12 v0.1 event types of SPEC 3.6 plus ci.wait_timeout and acceptance.failed', () => {
-    expect(EVENT_TYPES).toHaveLength(14);
+  it('defines the v0.1 event types plus v0.2 types added so far', () => {
+    expect(EVENT_TYPES).toHaveLength(16);
     expect(EVENT_TYPES).toContain('ci.wait_timeout');
     expect(EVENT_TYPES).toContain('acceptance.failed');
+    // v0.2 additions (SPEC 11.8)
+    expect(EVENT_TYPES).toContain('run.orphaned');
+    expect(EVENT_TYPES).toContain('worker.rescued');
   });
 
   it.each(['../escape', 'a/b', '', '.hidden', 'r 1'])('rejects unsafe run_id %j', (run_id) => {

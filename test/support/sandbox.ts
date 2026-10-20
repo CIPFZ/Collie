@@ -115,7 +115,7 @@ export class Sandbox {
       .replace('"{{repo}}"', '"https://github.com/example/sandbox"')
       .replace(/^commands = .*$/m, `commands = ["${TEST_CMD}"]`);
     box.write('.collie/collie.toml', toml);
-    box.write('.gitignore', '.collie/runs/\n.collie/heartbeat\n');
+    box.write('.gitignore', '.collie/runs/\n.collie/heartbeat.json\n');
     box.write('SPEC.md', '# SPEC\n\nThe feature must exist.\n');
     box.write('docs/backlog.md', BACKLOG);
     box.write('docs/progress.md', '# 进度\n\n人工维护的内容，Collie 不得改动。\n');
