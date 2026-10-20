@@ -78,3 +78,5 @@ TypeScript + Node 22 LTS + ESM。选型理由见 [ADR-001](./docs/decisions/ADR-
 
 并行写入、多项目共享状态、让 Agent 自判是否求助、自建编排框架、
 工具级审批交给人、可观测框架。理由见 [ROADMAP.md](./ROADMAP.md) 第 11 节。
+
+Collie 用 Collie 跑过的第一个批次：v01-b05-smoke
