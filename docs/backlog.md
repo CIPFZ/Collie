@@ -20,7 +20,7 @@
 | 5 | v01-b05 | 真实 runner | v01-b04 | passed |
 | 6 | v01-b05-smoke | 烟雾批次：README 改一行 | v01-b05 | passed |
 | 7 | v02-b01 | 真实运行暴露的两处修补 | v01-b05 | blocked |
-| 8 | v02-b02 | 落盘、心跳与救援 | v01-b05 | pending |
+| 8 | v02-b02 | 落盘、心跳与救援 | v01-b05 | passed |
 | 9 | v02-b03 | 活性检测与信号阶梯 | v02-b02 | pending |
 | 10 | v02-b04 | 中断标记与 resume | v02-b03 | pending |
 
@@ -302,6 +302,9 @@ v0.2 第一批。规格见 SPEC 第 11 章 11.1~11.4、11.8。
 记录：第 1 次运行 r-20261020-120837 BLOCK，worker 120 轮用满、未写 report，R2 未取证。
 worker 的 3 个提交存档于 tag `v02-b02-attempt1`，未审核不采用，main 重置后重跑；
 worker `max_turns` 上调为 200（SPEC 3.1）。
+第 2 次运行 r-20261020-124813 PASS（`00cd501`），8/8 验收实跑通过，R1 复核通过。
+已知缺口：soft 未按条目 1 用 `interrupt()`，reviewer 只核了「soft≠hard」字面即放行；
+PASS 维持（规则链无误），缺口转入 v02-b03 条目 2 并加两条验收。
 
 ## v02-b03 活性检测与信号阶梯
 
@@ -315,7 +318,10 @@ worker `max_turns` 上调为 200（SPEC 3.1）。
 2. 信号阶梯（11.6）：`limits.grace_secs` 加为可选字段默认 20；soft → grace → hard → grace → kill，
    每级记 `worker.signaled`；`wallclock_secs` 超时改走阶梯（reason=wallclock），
    原 `worker.crashed` 路径仅保留给 runner 自身异常；任何结束方式（含 crashed / escalated）
-   都追加一条 progress 运行记录（11.7 第二句）
+   都追加一条 progress 运行记录（11.7 第二句）。
+   **soft 改用 SDK 的 `Query.interrupt()`**（v02-b02 用的是「等下一条消息再 break」，worker 卡死时不起作用）：
+   `claude.ts` 的 `stop('soft')` 必须调用注入 `query()` 返回对象上的 `interrupt()`，
+   `test/runner-claude.test.ts` 断言该调用发生且 controller 未 abort
 3. 场景 G 及其「不响应 soft」变体：`test/scenario-g.test.ts`
 
 验收标准：
@@ -327,7 +333,9 @@ worker `max_turns` 上调为 200（SPEC 3.1）。
 | 全部测试通过 | `npm test` | exit 0 |
 | 场景 G 两个变体 | `npm test -- test/scenario-g.test.ts` | exit 0 |
 | 阶梯单元测试 | `npm test -- test/ladder.test.ts` | exit 0 |
-| v0.1 三场景与场景 D 不受影响 | `npm test -- test/scenario-a.test.ts test/scenario-b.test.ts test/scenario-c.test.ts test/scenario-d.test.ts` | exit 0 |
+| v0.1 三场景与场景 D 不受影响 | `npm test -- test/scenario-a.test.ts test/scenario-b.test.ts test/scenario-d.test.ts test/scenario-c.test.ts` | exit 0 |
+| soft 走 interrupt() | `grep -qE "interrupt\(\)" src/runner/claude.ts && grep -qE "interrupt" test/runner-claude.test.ts` | exit 0 |
+| soft 不再靠 break 等消息 | `! grep -qE "softStopRequested" src/runner/claude.ts` | exit 0 |
 
 额外禁止：
 - 改动任何受保护路径；`grace_secs` 不写入 toml，由 R1 事后补
