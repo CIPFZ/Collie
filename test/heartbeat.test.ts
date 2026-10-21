@@ -10,6 +10,7 @@ import {
   HeartbeatSchema,
   removeHeartbeat,
   touchHeartbeat,
+  updateHeartbeatPhase,
   writeHeartbeat,
   type HeartbeatData,
 } from '../src/heartbeat.js';
@@ -33,6 +34,7 @@ function validData(overrides: Partial<HeartbeatData> = {}): HeartbeatData {
     run_id: 'r-test',
     batch_id: 'v99-b01',
     pid: process.pid,
+    phase: 'worker',
     started_at: '2026-10-20T12:00:00Z',
     updated_at: '2026-10-20T12:00:00Z',
     ...overrides,
@@ -113,5 +115,51 @@ describe('heartbeat: checkHeartbeat', () => {
     writeFileSync(hbPath(), '{ not valid json');
     // Should not throw, just treat as missing.
     expect(checkHeartbeat(root).status).toBe('none');
+  });
+
+  it('returns "alive" when the worker_pid is alive even if pid is dead (SPEC 11.3)', () => {
+    // pid=999999 (dead), worker_pid=process.pid (alive) → "alive".
+    writeHeartbeat(root, validData({ pid: 999999, worker_pid: process.pid }));
+    const result = checkHeartbeat(root);
+    expect(result.status).toBe('alive');
+  });
+
+  it('returns "orphan" when both pid and worker_pid are dead (SPEC 11.3)', () => {
+    writeHeartbeat(root, validData({ pid: 999999, worker_pid: 999998 }));
+    const result = checkHeartbeat(root);
+    expect(result.status).toBe('orphan');
+  });
+});
+
+describe('heartbeat: updateHeartbeatPhase', () => {
+  it('advances phase and updated_at', () => {
+    writeHeartbeat(root, validData({ phase: 'worker' }));
+    updateHeartbeatPhase(root, 'reviewer', '2026-10-20T13:00:00Z');
+    const data = HeartbeatSchema.parse(JSON.parse(readFileSync(hbPath(), 'utf8')));
+    expect(data.phase).toBe('reviewer');
+    expect(data.updated_at).toBe('2026-10-20T13:00:00Z');
+    expect(data.started_at).toBe('2026-10-20T12:00:00Z');
+  });
+
+  it('is a no-op when the heartbeat file does not exist', () => {
+    expect(() => {
+      updateHeartbeatPhase(root, 'ci', '2026-10-20T14:00:00Z');
+    }).not.toThrow();
+  });
+});
+
+describe('heartbeat: reviewer-phase parallel startup rejected (SPEC 11.3)', () => {
+  it('refuses to start when heartbeat is in reviewer phase and pid is alive', () => {
+    writeHeartbeat(root, validData({ phase: 'reviewer', pid: process.pid }));
+    const result = checkHeartbeat(root);
+    expect(result.status).toBe('alive');
+    expect(result.status === 'alive' && result.data.phase).toBe('reviewer');
+  });
+
+  it('refuses to start when heartbeat is in reviewer phase and worker_pid is alive', () => {
+    // Simulates: main process (pid) dead, but worker_pid (agent process) still alive.
+    writeHeartbeat(root, validData({ phase: 'reviewer', pid: 999999, worker_pid: process.pid }));
+    const result = checkHeartbeat(root);
+    expect(result.status).toBe('alive');
   });
 });

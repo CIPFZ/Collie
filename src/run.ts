@@ -19,7 +19,13 @@ import type { Clock, FetchLike } from './ci.js';
 import { loadConfig } from './config.js';
 import { collectEvidence, type Evidence } from './evidence.js';
 import { addWorktree, commit, git, isAncestor, removeWorktree, revParse, status } from './git.js';
-import { checkHeartbeat, removeHeartbeat, touchHeartbeat, writeHeartbeat } from './heartbeat.js';
+import {
+  checkHeartbeat,
+  removeHeartbeat,
+  touchHeartbeat,
+  updateHeartbeatPhase,
+  writeHeartbeat,
+} from './heartbeat.js';
 import { createJournal, RUNS_RELATIVE_DIR, type Journal } from './journal.js';
 import { LivenessMonitor, runLadder, type LadderReason } from './ladder.js';
 import { writeProgress } from './progress.js';
@@ -264,14 +270,17 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   // the previous run was killed. If the pid is alive, refuse to start (铁律 7).
   const hb = checkHeartbeat(root);
   if (hb.status === 'alive') {
+    const alivePids = [hb.data.pid, hb.data.worker_pid].filter((p) => p !== undefined);
     throw new Error(
-      `another Collie instance is running (pid ${String(hb.data.pid)}, run ${hb.data.run_id}); refusing to start`,
+      `another Collie instance is running (pid ${alivePids.join('/')}, run ${hb.data.run_id}); refusing to start`,
     );
   }
   if (hb.status === 'orphan') {
     rec.record('run.orphaned', {
       orphaned_run_id: hb.data.run_id,
       orphaned_batch_id: hb.data.batch_id,
+      // SPEC 11.3: orphan event carries phase and updated_at.
+      ...(hb.data.phase === undefined ? {} : { phase: hb.data.phase }),
       updated_at: hb.data.updated_at,
     });
     // Execute rescue for the orphaned run's dirty workspace (SPEC 11.4).
@@ -286,6 +295,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
 
   const finish = (final: VerdictValue, extra: Partial<RunOutcome> = {}): RunOutcome => {
     rec.record('run.finished', { verdict: final, exit_code: EXIT_CODES[final] });
+    // SPEC 11.3: heartbeat is removed only after run.finished — covers entire run.
+    removeHeartbeat(root);
     return { final, exitCode: EXIT_CODES[final], ...extra };
   };
   const escalate = async (reason: string): Promise<RunOutcome> => {
@@ -386,7 +397,10 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     writeHeartbeat(root, {
       run_id: runId,
       batch_id: batchId,
-      pid: handle.pid ?? process.pid,
+      pid: process.pid,
+      // SPEC 11.3: worker_pid is the RunHandle.pid from the agent process.
+      ...(handle.pid === undefined ? {} : { worker_pid: handle.pid }),
+      phase: 'worker',
       started_at: ctx.now().toISOString(),
       updated_at: ctx.now().toISOString(),
     });
@@ -427,7 +441,6 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     if (rescue !== undefined) {
       rec.record('worker.rescued', { sha: rescue.sha, files: rescue.files });
     }
-    removeHeartbeat(root);
     return await escalate(`worker crashed: ${message(error)}`);
   }
 
@@ -436,7 +449,6 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   if (rescue !== undefined) {
     rec.record('worker.rescued', { sha: rescue.sha, files: rescue.files });
   }
-  removeHeartbeat(root);
 
   let report: Report;
   try {
@@ -455,6 +467,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   const outcome = await withHeadWorktree(root, batchId, report.head_sha, async (tree) => {
     // E5: the reviewer works in the head_sha worktree, where report.md does not exist (SPEC 3.5).
     let finalText: string | undefined;
+    // SPEC 11.3: heartbeat phase transition — reviewer stage.
+    updateHeartbeatPhase(root, 'reviewer', ctx.now().toISOString());
     rec.record('reviewer.started', { head_sha: report.head_sha });
     try {
       const reviewer = await runReviewer(
@@ -482,6 +496,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     );
 
     // R2's own measurements, also on the committed head_sha tree.
+    // SPEC 11.3: heartbeat phase transition — CI/evidence collection.
+    updateHeartbeatPhase(root, 'ci', ctx.now().toISOString());
     const collected = await collectEvidence({
       root,
       verifyCwd: tree,
@@ -507,6 +523,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
 
   // The arbiter judges claims against R2's measurements; the reviewer contributes its verdict
   // value and its own mismatches, and its evidence stays on record in verdict.md.
+  // SPEC 11.3: heartbeat phase transition — arbiter stage.
+  updateHeartbeatPhase(root, 'arbiter', ctx.now().toISOString());
   const decision = arbitrate({
     claims: report.claims,
     verdict: verdict.ok

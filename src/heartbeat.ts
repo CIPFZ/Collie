@@ -12,6 +12,10 @@ export const HeartbeatSchema = z.strictObject({
   run_id: z.string().min(1),
   batch_id: z.string().min(1),
   pid: z.number().int().positive(),
+  /** SPEC 11.3: worker_pid is the RunHandle.pid from the agent process. */
+  worker_pid: z.number().int().positive().optional(),
+  /** SPEC 11.3: phase tracks where the run is in the pipeline. */
+  phase: z.enum(['worker', 'reviewer', 'ci', 'arbiter']).optional(),
   started_at: z.iso.datetime({ offset: true }),
   updated_at: z.iso.datetime({ offset: true }),
 });
@@ -48,6 +52,26 @@ export function touchHeartbeat(root: string, updatedAt: string): void {
 /** Removes the heartbeat file (called when a run finishes normally). */
 export function removeHeartbeat(root: string): void {
   rmSync(heartbeatPath(root), { force: true });
+}
+
+/** Updates the phase and updated_at of the heartbeat file (SPEC 11.3: covers entire run). */
+export function updateHeartbeatPhase(
+  root: string,
+  phase: HeartbeatData['phase'],
+  updatedAt: string,
+): void {
+  const path = heartbeatPath(root);
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    return;
+  }
+  const data = HeartbeatSchema.parse(JSON.parse(raw));
+  writeFileSync(
+    path,
+    JSON.stringify({ ...data, phase, updated_at: updatedAt }, null, JSON_INDENT) + '\n',
+  );
 }
 
 /** Checks whether a process with the given pid is alive. */
@@ -95,5 +119,8 @@ export function checkHeartbeat(root: string): HeartbeatCheck {
     return { status: 'none' };
   }
   const data = parsed.data;
-  return isProcessAlive(data.pid) ? { status: 'alive', data } : { status: 'orphan', data };
+  // SPEC 11.3: either pid or worker_pid being alive means the run is still active.
+  const anyAlive =
+    isProcessAlive(data.pid) || (data.worker_pid !== undefined && isProcessAlive(data.worker_pid));
+  return anyAlive ? { status: 'alive', data } : { status: 'orphan', data };
 }
