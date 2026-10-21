@@ -50,6 +50,13 @@
 不一致，导致连续六个里程碑的「CI 全绿」其实从未真正触发过。
 请始终核对 `ci_branch_matched`，不要只看 conclusion 字段。
 
+JSON 字段的允许值（arbiter 用 schema 严格校验，写了别的值就是规则 1 BLOCK，v02-b04-tests 因此被判了一次）：
+- `ci_conclusion`：只能是 `success` / `failure` / `cancelled` / `unknown`。查不到、没权限、被限流，一律 `unknown`，
+  不要自己造 `cannot_verify` 之类的值；原因写进 `reason`
+- `ci_branch_matched`：`true` / `false` / `null`。没查到 CI 就写 `null`，不要写 `true`
+- `verdict`：`PASS` / `FIX` / `BLOCK`
+你没有实测到的东西不要填成实测到了。arbiter 不采信你的 evidence，但会检查它的格式和它与 R2 实测的差异。
+
 ## 3. 三种结论的判据
 
 **PASS** — 同时满足：
@@ -123,9 +130,9 @@
       { "cmd": "", "exit_code": 0, "summary": "" }
     ],
     "remote_has_head": false,
-    "ci_conclusion": "",
+    "ci_conclusion": "unknown",
     "ci_run_url": "",
-    "ci_branch_matched": false,
+    "ci_branch_matched": null,
     "deps_diff": [],
     "spec_diff_lines": 0
   },

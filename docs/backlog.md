@@ -23,8 +23,9 @@
 | 8 | v02-b02 | 落盘、心跳与救援 | v01-b05 | passed |
 | 9 | v02-b03 | 活性检测与信号阶梯 | v02-b02 | passed |
 | 10 | v02-b04 | b02/b03 遗留修补 | v02-b03 | passed |
-| 11 | v02-b04-tests | 测试去真实定时器 | v02-b04 | pending |
-| 12 | v02-b05 | 中断标记与 resume | v02-b04-tests | pending |
+| 11 | v02-b04-tests | 测试去真实定时器 | v02-b04 | blocked |
+| 12 | v02-b04-fix | 指纹注入、限流不等待、worker_pid | v02-b04 | pending |
+| 13 | v02-b05 | 中断标记与 resume | v02-b04-fix | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -422,9 +423,53 @@ v02-b04 第 2 次运行后 main 的 CI 是红的（Run 81），原因是两个�
 - 改动任何受保护路径
 - 为了让测试过而删除或跳过（`skip` / `todo`）任何测试
 
+记录：第 1 次运行 r-20261021-112601 BLOCK，规则 1：reviewer 在 verdict JSON 里把 `ci_conclusion` 写成
+`cannot_verify_no_gh_auth`（schema 外的值），并在没查到 CI 的情况下写了 `ci_branch_matched: true`。
+这是 reviewer 的输出错误，不是 worker 的问题；规则 1 维持原样（reviewer 产不出合法输出就该上报）。
+worker 的 `2661d0e` 只改两个测试文件，R2 验收 8/8 通过、R1 复核 574 全过、CI 绿，予以采纳；
+`reviewer-isolation` 的随机超时已修好。场景 G 在单核加压下仍 3 次挂 2 次：测试里已无真实定时器，
+剩余不确定性在 `src/ladder.ts` 每次采样都起真实 `git` 子进程取指纹，本批次禁止改 `src/`，修不到。
+判 blocked，不重跑；缺口进 v02-b04-fix。
+
+## v02-b04-fix 指纹注入、限流不等待、worker_pid
+
+优先级：12　依赖：v02-b04
+
+三处都是真实运行里暴露、规格已写但没有批次实现的。规格见 SPEC 3.1、11.2、11.5。
+
+条目：
+1. `LivenessMonitor` 的产出指纹函数可注入（11.5）：`LivenessConfig.fingerprint?: () => Promise<string>`，
+   默认实现才调 git。`test/scenario-g.test.ts` 注入同步返回的假指纹，fake worker 发事件、推进假时钟、
+   改变假指纹三者全部由测试代码顺序控制，不依赖任何真实子进程或事件循环时序。
+   `test/ladder.test.ts` 同样处理
+2. `ci.ts` 实现 SPEC 3.1 的「限流不等待」：环境无 `GITHUB_TOKEN` 且首次轮询即 `rate_limited` 时，
+   立即返回 unknown、记 `ci.wait_timeout`（`waited_secs: 0`、`last_state: rate_limited`），不再等 `ci_wait_secs`。
+   有 token 时行为不变。测试用注入的 fetch 替身覆盖两种情况
+3. `ClaudeRunner` 提供 `worker_pid`（11.2）：通过 SDK 的 `spawnClaudeCodeProcess` 钩子用 `node:child_process.spawn`
+   自行拉起并记下 `pid`，`RunHandle.pid` 返回它；`kill` 级对该 pid 发 `SIGKILL`。
+   `test/runner-claude.test.ts` 断言注入 `query()` 收到的选项含该钩子，且钩子返回对象的 `pid` 流到 `RunHandle`
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 场景 G 连跑 5 次 | `for i in 1 2 3 4 5; do npx vitest run test/scenario-g.test.ts \|\| exit 1; done` | exit 0 |
+| 指纹已注入 | `grep -qE "fingerprint" test/scenario-g.test.ts && grep -qE "fingerprint\?:" src/ladder.ts` | exit 0 |
+| 限流不等待有测试 | `grep -qE "rate_limited" test/ci.test.ts && grep -qE "waited_secs: 0\|waitedMs: 0" test/ci.test.ts` | exit 0 |
+| pid 经钩子流到 RunHandle | `grep -qE "spawnClaudeCodeProcess" src/runner/claude.ts && grep -qE "spawnClaudeCodeProcess" test/runner-claude.test.ts` | exit 0 |
+| SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai\|spawnClaudeCodeProcess" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 条目 3 不得改变 soft / hard 的现有实现（`interrupt()` / abort）
+
 ## v02-b05 中断标记与 resume
 
-优先级：12　依赖：v02-b04-tests
+优先级：13　依赖：v02-b04-fix
 
 规格见 SPEC 11.7、11.9。
 

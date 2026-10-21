@@ -607,7 +607,7 @@ interface RunOptions {
   onStarted?: (handle: RunHandle) => void;
 }
 interface RunHandle {
-  /** 若 runner 有子进程则给出其 pid，用于 heartbeat 与 kill 级 */
+  /** runner 能拿到子进程 pid 时**必须**提供（v02-b04-fix 后）；Claude SDK 经 spawnClaudeCodeProcess 钩子可拿到。用于 heartbeat 的 worker_pid 与 kill 级 */
   pid?: number;
   /**
    * soft：让当前轮次结束后停下，session 完整可续接
@@ -666,7 +666,9 @@ R2 在 worker 运行期间按两条独立计时判定：
 所以 `stall_secs` 必须大于单次最长输出的时长；report.md 的 Write 调用就是最长的一次
 （v02-b04 第 1 次运行：推送后 90.5 秒无事件被判卡死，实为正在写 report）。
 300 秒是权宜值；根治靠 runner 开启 SDK 的逐片输出事件作为事件来源（Q6）。
-计时器与时钟必须注入（`now()` 与 `setTimer()`），默认实现才用 `Date.now` / `setTimeout`；
+计时器、时钟、产出指纹函数三者都必须注入（`now()` / `setTimer()` / `fingerprint()`），
+默认实现才用 `Date.now` / `setTimeout` / 真实 git（v02-b04-tests 证明只注入前两者不够：
+取指纹的 git 子进程仍是真实时序，单核加压下场景 G 3 次挂 2 次）；
 测试用假时钟推进，不得断言真实耗时（v02-b03 的场景 G 用真实时钟，全量并发下 2.8~3.1 秒，随机失败）。
 
 ### 11.6 信号阶梯
