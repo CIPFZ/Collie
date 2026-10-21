@@ -37,12 +37,12 @@ export type ClaudeQuery = (params: ClaudeQueryParams) => ClaudeQueryIterable;
 /**
  * The async iterable returned by the SDK's query(). It may expose `interrupt()`
  * (SPEC 11.2, v02-b03): calling it ends the current turn gracefully, keeping the
- * session resumable. Test doubles that do not provide it are still valid — the
- * runner calls `interrupt?.()` defensively.
+ * session resumable. When present, stop('soft') calls and awaits it; when absent,
+ * stop('soft') throws (SPEC 11.2: interrupt() is required, not optional-chained).
  */
 export interface ClaudeQueryIterable extends AsyncIterable<unknown> {
   /** SDK-level interrupt: finishes the current turn, session stays complete (SPEC 11.2). */
-  interrupt?: () => void;
+  interrupt?: () => void | Promise<void>;
 }
 
 export interface ClaudeRunnerOptions {
@@ -114,7 +114,10 @@ const lazySdkQuery: ClaudeQuery = (params) => {
       };
     },
     interrupt(): void {
-      resolvedIterable?.interrupt?.();
+      // SPEC 11.2: forward interrupt to the resolved SDK iterable; the lazy
+      // wrapper may be called before the SDK loads (resolvedIterable undefined).
+      const fn = resolvedIterable?.interrupt;
+      if (fn !== undefined) void fn();
     },
   };
 };
@@ -212,13 +215,19 @@ export class ClaudeRunner implements AgentRunner {
     // SPEC 11.2: the RunHandle gives R2 control over the run.
     // The SDK does not expose a child-process pid, so pid is omitted.
     const handle: RunHandle = {
-      // eslint-disable-next-line @typescript-eslint/require-await -- interface requires Promise<void>
       async stop(level: 'soft' | 'hard' | 'kill'): Promise<void> {
         switch (level) {
-          case 'soft':
+          case 'soft': {
             interrupted = true;
-            queryIterable.interrupt?.();
+            // SPEC 11.2: interrupt() is required for soft stop. If the query
+            // iterable does not expose it, throw — never silently skip.
+            const interruptFn = queryIterable.interrupt;
+            if (interruptFn === undefined) {
+              throw new Error('soft stop requires interrupt() on the query iterable (SPEC 11.2)');
+            }
+            await interruptFn();
             break;
+          }
           case 'hard':
             controller.abort(new Error('hard stop'));
             break;

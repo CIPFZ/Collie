@@ -8,10 +8,18 @@ import { z } from 'zod';
 /** Relative path of the heartbeat file inside the repository root. */
 export const HEARTBEAT_RELATIVE_PATH = join('.collie', 'heartbeat.json');
 
+/** SPEC 11.3: phase of the current run, updated as the pipeline progresses. */
+export const HeartbeatPhaseSchema = z.enum(['worker', 'reviewer', 'ci', 'arbiter']);
+export type HeartbeatPhase = z.infer<typeof HeartbeatPhaseSchema>;
+
 export const HeartbeatSchema = z.strictObject({
   run_id: z.string().min(1),
   batch_id: z.string().min(1),
   pid: z.number().int().positive(),
+  /** SPEC 11.3: RunHandle.pid of the worker subprocess, if available. */
+  worker_pid: z.number().int().positive().optional(),
+  /** SPEC 11.3: current pipeline phase (worker | reviewer | ci | arbiter). */
+  phase: HeartbeatPhaseSchema,
   started_at: z.iso.datetime({ offset: true }),
   updated_at: z.iso.datetime({ offset: true }),
 });
@@ -43,6 +51,38 @@ export function touchHeartbeat(root: string, updatedAt: string): void {
   }
   const data = HeartbeatSchema.parse(JSON.parse(raw));
   writeFileSync(path, JSON.stringify({ ...data, updated_at: updatedAt }, null, JSON_INDENT) + '\n');
+}
+
+/**
+ * Updates selected fields of the heartbeat (SPEC 11.3): used for phase
+ * transitions and adding worker_pid after the runner starts.
+ */
+export function updateHeartbeat(
+  root: string,
+  updates: { phase?: HeartbeatPhase; worker_pid?: number; updated_at: string },
+): void {
+  const path = heartbeatPath(root);
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    // Heartbeat was already cleaned up. Nothing to update.
+    return;
+  }
+  const data = HeartbeatSchema.parse(JSON.parse(raw));
+  writeFileSync(
+    path,
+    JSON.stringify(
+      {
+        ...data,
+        ...(updates.phase !== undefined ? { phase: updates.phase } : {}),
+        ...(updates.worker_pid !== undefined ? { worker_pid: updates.worker_pid } : {}),
+        updated_at: updates.updated_at,
+      },
+      null,
+      JSON_INDENT,
+    ) + '\n',
+  );
 }
 
 /** Removes the heartbeat file (called when a run finishes normally). */
@@ -95,5 +135,9 @@ export function checkHeartbeat(root: string): HeartbeatCheck {
     return { status: 'none' };
   }
   const data = parsed.data;
-  return isProcessAlive(data.pid) ? { status: 'alive', data } : { status: 'orphan', data };
+  // SPEC 11.3: if either the R2 pid or the worker subprocess pid is alive,
+  // another instance is running — refuse to start.
+  const pidAlive = isProcessAlive(data.pid);
+  const workerPidAlive = data.worker_pid !== undefined && isProcessAlive(data.worker_pid);
+  return pidAlive || workerPidAlive ? { status: 'alive', data } : { status: 'orphan', data };
 }

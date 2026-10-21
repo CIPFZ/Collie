@@ -41,6 +41,10 @@ export interface CliDeps {
   ladderDelay?: (ms: number) => Promise<void>;
   /** Test hook: override liveness monitor check interval (ms). */
   livenessIntervalMs?: number;
+  /** Test hook: injected monotonic clock for the liveness monitor (SPEC 11.5). */
+  livenessNow?: () => number;
+  /** Test hook: injected timer for the liveness monitor (SPEC 11.5). */
+  livenessSetTimer?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>;
 }
 
 const TEMPLATE = join(import.meta.dirname, '..', 'templates', 'collie.toml');
@@ -149,6 +153,8 @@ async function run(
     ...(deps.livenessIntervalMs === undefined
       ? {}
       : { livenessIntervalMs: deps.livenessIntervalMs }),
+    ...(deps.livenessNow === undefined ? {} : { livenessNow: deps.livenessNow }),
+    ...(deps.livenessSetTimer === undefined ? {} : { livenessSetTimer: deps.livenessSetTimer }),
   });
   const how =
     outcome.decision === undefined

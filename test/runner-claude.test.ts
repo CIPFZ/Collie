@@ -334,6 +334,27 @@ describe('runner-claude: RunHandle and stop levels (SPEC 11.2)', () => {
     expect(calls[0]?.options?.abortController?.signal.aborted).toBe(false);
   });
 
+  it('soft stop throws when interrupt() is missing on the query iterable (SPEC 11.2)', async () => {
+    // A query using async function* — its iterable does NOT expose interrupt().
+    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery requires AsyncIterable
+    const query: ClaudeQuery = async function* () {
+      yield assistant('working');
+      yield success('done');
+    };
+    let stopError: Error | undefined;
+    await new ClaudeRunner(config, { query }).run(
+      opts({
+        onStarted: (h) => {
+          void h.stop('soft').catch((e: unknown) => {
+            stopError = e instanceof Error ? e : new Error(String(e));
+          });
+        },
+      }),
+    );
+    expect(stopError).toBeDefined();
+    expect(stopError?.message).toMatch(/requires interrupt\(\)/i);
+  });
+
   it('hard stop aborts the controller', async () => {
     const { query, calls } = abortable();
     let handle: RunHandle | undefined;

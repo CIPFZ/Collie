@@ -19,7 +19,13 @@ import type { Clock, FetchLike } from './ci.js';
 import { loadConfig } from './config.js';
 import { collectEvidence, type Evidence } from './evidence.js';
 import { addWorktree, commit, git, isAncestor, removeWorktree, revParse, status } from './git.js';
-import { checkHeartbeat, removeHeartbeat, touchHeartbeat, writeHeartbeat } from './heartbeat.js';
+import {
+  checkHeartbeat,
+  removeHeartbeat,
+  touchHeartbeat,
+  updateHeartbeat,
+  writeHeartbeat,
+} from './heartbeat.js';
 import { createJournal, RUNS_RELATIVE_DIR, type Journal } from './journal.js';
 import { LivenessMonitor, runLadder, type LadderReason } from './ladder.js';
 import { writeProgress } from './progress.js';
@@ -95,6 +101,10 @@ export interface RunContext {
   ladderDelay?: (ms: number) => Promise<void>;
   /** Override the liveness monitor check interval (ms) for tests. */
   livenessIntervalMs?: number;
+  /** Injected monotonic clock for the liveness monitor (SPEC 11.5); defaults to Date.now. */
+  livenessNow?: () => number;
+  /** Injected timer for the liveness monitor (SPEC 11.5); defaults to setTimeout. */
+  livenessSetTimer?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>;
 }
 
 export interface RunOutcome {
@@ -284,8 +294,31 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
 
   rec.record('run.started');
 
+  // SPEC 11.3: heartbeat covers the entire run (worker → reviewer → ci → arbiter),
+  // written at run.started, removed after run.finished.
+  writeHeartbeat(root, {
+    run_id: runId,
+    batch_id: batchId,
+    pid: process.pid,
+    phase: 'worker',
+    started_at: ctx.now().toISOString(),
+    updated_at: ctx.now().toISOString(),
+  });
+
+  // Track the worker's exit info for run.finished and progress (SPEC 11.7).
+  let workerExitCode: number | undefined;
+  let workerStopReason: string | undefined;
+
   const finish = (final: VerdictValue, extra: Partial<RunOutcome> = {}): RunOutcome => {
-    rec.record('run.finished', { verdict: final, exit_code: EXIT_CODES[final] });
+    rec.record('run.finished', {
+      verdict: final,
+      exit_code: EXIT_CODES[final],
+      // SPEC 11.7: run.finished always carries the worker's exit info.
+      ...(workerExitCode !== undefined ? { worker_exit_code: workerExitCode } : {}),
+      ...(workerStopReason !== undefined ? { worker_stop_reason: workerStopReason } : {}),
+    });
+    // SPEC 11.3: heartbeat removed only after run.finished is written.
+    removeHeartbeat(root);
     return { final, exitCode: EXIT_CODES[final], ...extra };
   };
   const escalate = async (reason: string): Promise<RunOutcome> => {
@@ -299,6 +332,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       at: ctx.now().toISOString(),
       decision,
       evidence: emptyEvidence(),
+      workerExitCode,
+      workerStopReason,
     });
     await commit(root, `progress: ${batchId} ${decision.final}`, [relative(root, progressPath)]);
     return finish('BLOCK', { escalation: reason, decision });
@@ -373,6 +408,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       startLadder('idling');
     },
     ...(ctx.livenessIntervalMs === undefined ? {} : { checkIntervalMs: ctx.livenessIntervalMs }),
+    ...(ctx.livenessNow === undefined ? {} : { now: ctx.livenessNow }),
+    ...(ctx.livenessSetTimer === undefined ? {} : { setTimer: ctx.livenessSetTimer }),
   });
 
   // SPEC 11.3: stream + heartbeat callbacks.
@@ -383,13 +420,10 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   };
   const onStarted = (handle: RunHandle): void => {
     workerHandle = handle;
-    writeHeartbeat(root, {
-      run_id: runId,
-      batch_id: batchId,
-      pid: handle.pid ?? process.pid,
-      started_at: ctx.now().toISOString(),
-      updated_at: ctx.now().toISOString(),
-    });
+    // SPEC 11.3: add worker_pid to the already-written heartbeat when the runner provides one.
+    if (handle.pid !== undefined) {
+      updateHeartbeat(root, { worker_pid: handle.pid, updated_at: ctx.now().toISOString() });
+    }
     monitor.start();
   };
 
@@ -407,6 +441,9 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       onStarted,
     });
     cleanupTimers();
+    // SPEC 11.7: track worker exit info for run.finished and progress.
+    workerExitCode = result.exitCode;
+    workerStopReason = result.stopReason;
     rec.record('worker.finished', {
       exit_code: result.exitCode,
       // SPEC 3.6: without it a zero-output exit cannot be explained (v01-b05-smoke).
@@ -417,6 +454,9 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     });
   } catch (error) {
     cleanupTimers();
+    // SPEC 11.7: crashed worker has no RunResult, record what we know.
+    workerExitCode = EXIT_CODES.ERROR;
+    workerStopReason = 'error';
     // SPEC 11.6: worker.crashed only for runner self-exceptions, not ladder-induced stops.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by startLadder() during async worker
     if (!ladderRunning) {
@@ -427,7 +467,6 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     if (rescue !== undefined) {
       rec.record('worker.rescued', { sha: rescue.sha, files: rescue.files });
     }
-    removeHeartbeat(root);
     return await escalate(`worker crashed: ${message(error)}`);
   }
 
@@ -436,7 +475,6 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   if (rescue !== undefined) {
     rec.record('worker.rescued', { sha: rescue.sha, files: rescue.files });
   }
-  removeHeartbeat(root);
 
   let report: Report;
   try {
@@ -453,6 +491,9 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
 
   // Worker output is taskSha..head_sha: the task commit is R2's, not the worker's (SPEC 3.3).
   const outcome = await withHeadWorktree(root, batchId, report.head_sha, async (tree) => {
+    // SPEC 11.3: heartbeat transitions to reviewer phase.
+    updateHeartbeat(root, { phase: 'reviewer', updated_at: ctx.now().toISOString() });
+
     // E5: the reviewer works in the head_sha worktree, where report.md does not exist (SPEC 3.5).
     let finalText: string | undefined;
     rec.record('reviewer.started', { head_sha: report.head_sha });
@@ -481,6 +522,9 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       verdict.ok ? { verdict: verdict.value.verdict } : { error: verdict.error },
     );
 
+    // SPEC 11.3: heartbeat transitions to ci phase (evidence collection includes CI polling).
+    updateHeartbeat(root, { phase: 'ci', updated_at: ctx.now().toISOString() });
+
     // R2's own measurements, also on the committed head_sha tree.
     const collected = await collectEvidence({
       root,
@@ -504,6 +548,9 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     return { verdict, collected };
   });
   const { verdict, collected } = outcome;
+
+  // SPEC 11.3: heartbeat transitions to arbiter phase.
+  updateHeartbeat(root, { phase: 'arbiter', updated_at: ctx.now().toISOString() });
 
   // The arbiter judges claims against R2's measurements; the reviewer contributes its verdict
   // value and its own mismatches, and its evidence stays on record in verdict.md.
@@ -553,6 +600,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     at: ctx.now().toISOString(),
     decision,
     evidence: collected.evidence,
+    workerExitCode,
+    workerStopReason,
   });
   // R2 commits its envelopes only after the worker has exited (CONSTRAINTS 铁律 19).
   const envelopes = [relative(root, progressPath)];

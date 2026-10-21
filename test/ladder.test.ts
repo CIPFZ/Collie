@@ -169,7 +169,6 @@ describe('ladder: runLadder walks soft -> hard -> kill', () => {
     const { handle, exited, exitPromise } = fakeHandle();
     const { delay, durations } = instantDelay();
 
-    const before = Date.now();
     await runLadder({
       handle,
       graceSecs: 3600,
@@ -183,10 +182,10 @@ describe('ladder: runLadder walks soft -> hard -> kill', () => {
       exitPromise,
       delay,
     });
-    const elapsed = Date.now() - before;
 
-    // Despite grace_secs=3600 (1 hour), real time should be <2s.
-    expect(elapsed).toBeLessThan(2000);
+    // Despite grace_secs=3600 (1 hour), the ladder completes instantly with the
+    // injected delay. Real wall-clock time is not asserted (SPEC 11.5: no real
+    // time assertions).
     expect(durations).toEqual([3_600_000, 3_600_000]);
   });
 });

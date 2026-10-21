@@ -1,4 +1,4 @@
-// Heartbeat lifecycle: write, touch, remove, orphan detection, parallel rejection.
+// Heartbeat lifecycle: write, touch, update, remove, orphan detection, parallel rejection.
 // No network, no real runner (CONSTRAINTS 铁律 16).
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,6 +10,7 @@ import {
   HeartbeatSchema,
   removeHeartbeat,
   touchHeartbeat,
+  updateHeartbeat,
   writeHeartbeat,
   type HeartbeatData,
 } from '../src/heartbeat.js';
@@ -33,6 +34,7 @@ function validData(overrides: Partial<HeartbeatData> = {}): HeartbeatData {
     run_id: 'r-test',
     batch_id: 'v99-b01',
     pid: process.pid,
+    phase: 'worker',
     started_at: '2026-10-20T12:00:00Z',
     updated_at: '2026-10-20T12:00:00Z',
     ...overrides,
@@ -113,5 +115,67 @@ describe('heartbeat: checkHeartbeat', () => {
     writeFileSync(hbPath(), '{ not valid json');
     // Should not throw, just treat as missing.
     expect(checkHeartbeat(root).status).toBe('none');
+  });
+
+  it('returns "alive" when the worker_pid is alive even if pid is dead (dual-pid check, SPEC 11.3)', () => {
+    writeHeartbeat(root, validData({ pid: 999999, worker_pid: process.pid }));
+    const result = checkHeartbeat(root);
+    expect(result.status).toBe('alive');
+  });
+
+  it('returns "orphan" when both pid and worker_pid are dead', () => {
+    writeHeartbeat(root, validData({ pid: 999999, worker_pid: 999998 }));
+    const result = checkHeartbeat(root);
+    expect(result.status).toBe('orphan');
+  });
+});
+
+describe('heartbeat: updateHeartbeat changes phase and worker_pid', () => {
+  it('updates the phase without changing other fields', () => {
+    writeHeartbeat(root, validData({ phase: 'worker' }));
+    updateHeartbeat(root, { phase: 'reviewer', updated_at: '2026-10-20T12:10:00Z' });
+    const data = HeartbeatSchema.parse(JSON.parse(readFileSync(hbPath(), 'utf8')));
+    expect(data.phase).toBe('reviewer');
+    expect(data.updated_at).toBe('2026-10-20T12:10:00Z');
+    expect(data.run_id).toBe('r-test');
+    expect(data.pid).toBe(process.pid);
+  });
+
+  it('adds worker_pid to an existing heartbeat', () => {
+    writeHeartbeat(root, validData());
+    updateHeartbeat(root, { worker_pid: 42, updated_at: '2026-10-20T12:05:00Z' });
+    const data = HeartbeatSchema.parse(JSON.parse(readFileSync(hbPath(), 'utf8')));
+    expect(data.worker_pid).toBe(42);
+    expect(data.updated_at).toBe('2026-10-20T12:05:00Z');
+  });
+
+  it('is a no-op when the heartbeat file does not exist', () => {
+    expect(() => {
+      updateHeartbeat(root, { phase: 'ci', updated_at: '2026-10-20T12:10:00Z' });
+    }).not.toThrow();
+  });
+});
+
+describe('heartbeat: reviewer phase parallel start rejected (SPEC 11.3)', () => {
+  it('refuses to start when heartbeat is in reviewer phase and pid is alive', () => {
+    writeHeartbeat(root, validData({ phase: 'reviewer', pid: process.pid }));
+    const result = checkHeartbeat(root);
+    expect(result.status).toBe('alive');
+    // R2 would throw: "another Collie instance is running"
+    expect(result.status === 'alive' && result.data.phase).toBe('reviewer');
+  });
+
+  it('refuses to start when heartbeat is in ci phase and pid is alive', () => {
+    writeHeartbeat(root, validData({ phase: 'ci', pid: process.pid }));
+    const result = checkHeartbeat(root);
+    expect(result.status).toBe('alive');
+    expect(result.status === 'alive' && result.data.phase).toBe('ci');
+  });
+
+  it('refuses to start when heartbeat is in arbiter phase and pid is alive', () => {
+    writeHeartbeat(root, validData({ phase: 'arbiter', pid: process.pid }));
+    const result = checkHeartbeat(root);
+    expect(result.status).toBe('alive');
+    expect(result.status === 'alive' && result.data.phase).toBe('arbiter');
   });
 });
