@@ -125,7 +125,7 @@ max_turns = 60
 permission_mode = "bypassPermissions"
 
 [limits]
-stall_secs = 90          # 事件流静默判定卡死（v0.2 生效）
+stall_secs = 300         # 事件流静默判定卡死；v02-b04 第 1 次运行 90 秒把「正在写 report」误判为卡死，上调
 progress_secs = 900      # 有事件但无产出判定空转（v0.2 生效）
 wallclock_secs = 2700    # 单批次墙钟硬顶
 resume_max = 2           # resume 上限（v0.2 生效）
@@ -447,6 +447,13 @@ reviewer 的 prompt 由 `roles/reviewer.ts` 从零组装，只允许包含：
 9. 否则采用 verdict 原值
 ```
 
+**上报（无 report）**：worker 退出后没有可解析的 report.md 时不进入规则链，直接 BLOCK + `escalated`。
+这不是「规则 0」，progress 与 `collie show` 一律写「上报：无 report」。
+上报路径仍须用 git 实测 `base_sha..HEAD` 的提交清单与推送状态写入 progress（v02-b04 第 1 次运行
+写成了「提交：无、已推送：否」，而 3 个提交已在 origin 上）。
+**同一批次的后续 attempt 沿用第 1 次的 `base_sha`**，上一轮已推送的提交因此留在审核范围内；
+在这条实现之前（v02-b05），上报后已推送的未审核提交由所有者决定存档重置或人工复核。
+
 规则 8 的来源：v01-b05-smoke 第二次真实运行（2026-10-20）。worker 如实报了 66 个测试失败，
 规则 5~7 因「声称与实测一致」全部不触发，reviewer 以「失败早已存在」为由判 PASS，规则 9 照单采用。
 三场景只覆盖了 worker 说谎的情况，没覆盖「worker 诚实但验收确实没过」。
@@ -567,6 +574,7 @@ v0.1 不做下列内容，防止范围蔓延：
 | Q3 | `collie.toml` 放 `.collie/` 下还是仓库根？ | 暂定 `.collie/` 下，与运行时文件同域 |
 | Q4 | 完成判定的四种判据，最终选哪个？ | 按用户要求保留全部，v0.5 起记录对比数据后再定 |
 | Q5 | `stream.ndjson` 原样落盘工具输出，环境里配了 token 后会以明文留在 `.collie/runs/` | 目录已 gitignore；配 token 前先定是否在落盘时屏蔽已知环境变量的值。属 v1.0 安全议题 |
+| Q6 | 卡死检测以 SDK 事件为心跳，而 SDK 生成长输出时不发事件 | 权宜：`stall_secs=300`。候选：runner 开启 SDK 逐片输出（partial messages）并转成事件，让心跳粒度与输出无关。v0.2 收口后定 |
 
 
 ## 11. v0.2 失败检测与恢复
@@ -577,7 +585,7 @@ v0.1 不做下列内容，防止范围蔓延：
 ### 11.1 新增配置（`[limits]`）
 
 ```toml
-stall_secs = 90          # 事件流静默判定卡死（v0.1 已占位）
+stall_secs = 300         # 事件流静默判定卡死（v0.1 占位 90，v02-b04 后 300）
 progress_secs = 900      # 有事件但无产出判定空转（v0.1 已占位）
 grace_secs = 20          # 信号阶梯每级之间的宽限
 resume_max = 2           # 同一批次 resume 上限（v0.1 已占位）
@@ -653,6 +661,10 @@ R2 在 worker 运行期间按两条独立计时判定：
   产出指纹 = `HEAD` sha + `git status --porcelain` 输出的哈希，每收到一条事件采样一次。
 
 两者都以事件为驱动，没有事件时只有 stall 计时在走。
+卡死只认「完全没有事件」。SDK 在模型生成一段长输出（正文或工具参数）期间不发任何事件，
+所以 `stall_secs` 必须大于单次最长输出的时长；report.md 的 Write 调用就是最长的一次
+（v02-b04 第 1 次运行：推送后 90.5 秒无事件被判卡死，实为正在写 report）。
+300 秒是权宜值；根治靠 runner 开启 SDK 的逐片输出事件作为事件来源（Q6）。
 计时器与时钟必须注入（`now()` 与 `setTimer()`），默认实现才用 `Date.now` / `setTimeout`；
 测试用假时钟推进，不得断言真实耗时（v02-b03 的场景 G 用真实时钟，全量并发下 2.8~3.1 秒，随机失败）。
 

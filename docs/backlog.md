@@ -372,6 +372,11 @@ PASS 维持（规则链无误），缺口转入 v02-b03 条目 2 并加两条验
 - 改动任何受保护路径
 - 实现任何 resume / 中断标记注入（那是 v02-b05）
 
+记录：第 1 次运行 r-20261021-025435 BLOCK（上报：无 report）。worker 推送 3 个提交后 90.5 秒无事件，
+被 b03 的卡死检测误判（实为正在写 report），soft 停止后退出。这 3 个提交未经审核已在 origin：
+存档于 tag `v02-b04-attempt1`，main 重置到 `35ed1cd` 强推一次，第 2 次运行从头做；
+`stall_secs` 上调为 300（SPEC 3.1、11.5）。第 2 次运行的 task 正文可提示 worker 存档 tag 的位置。
+
 记录：v02-b03 第 1 次运行 r-20261020-145024 PASS（`3da03b9`），8/8 验收在 R2 处通过；
 R1 复核时 `npm test` 在全新 clone 上 2 个失败（场景 G 真实耗时 2.8~3.1 秒 > 2 秒），单跑 3 次全过，
 属时序脆弱。PASS 维持（R2 取证当时属实），缺口全部进本批次。
@@ -384,7 +389,9 @@ R1 复核时 `npm test` 在全新 clone 上 2 个失败（场景 G 真实耗时 
 
 条目：
 1. 中断判定与 `task.md` 注入（11.7）：`attempt` 递增、`interrupted_at`、`rescue_sha`、正文「上一轮中断」一节；
-   `TaskFrontmatterSchema` 加可选 `rescue_sha`，不升版本
+   `TaskFrontmatterSchema` 加可选 `rescue_sha`，不升版本。
+   同一批次后续 attempt 沿用第 1 次的 `base_sha`（4.3「上报」段）；
+   上报路径用 git 实测 `base_sha..HEAD` 与推送状态写入 progress，措辞「上报：无 report」，不再出现「规则 0」
 2. resume 策略（11.7）：按 `resume_max` 决定是否传 `resumeSessionId`；新增事件 `worker.resumed`；
    仲裁 PASS 的运行不算中断、`attempt` 不递增（11.7 第一段）；
    `claude.ts` 的 `turns_exhausted` 映射已在 b03 提前落地，本批次只需测试覆盖

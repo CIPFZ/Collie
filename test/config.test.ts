@@ -27,7 +27,7 @@ max_turns = 60
 permission_mode = "bypassPermissions"
 
 [limits]
-stall_secs = 90
+stall_secs = 300
 progress_secs = 900
 wallclock_secs = 2700
 resume_max = 2
@@ -88,7 +88,7 @@ describe('config: the repository .collie/collie.toml', () => {
 
   it('has the limits of SPEC 3.1', () => {
     expect(config.limits).toEqual({
-      stall_secs: 90,
+      stall_secs: 300,
       progress_secs: 900,
       wallclock_secs: 2700,
       resume_max: 2,
@@ -112,7 +112,7 @@ describe('config: the repository .collie/collie.toml', () => {
 
 describe('config: validation errors carry field paths', () => {
   it('reports a missing field', () => {
-    const err = configError(replaceLine(VALID_TOML, 'stall_secs = 90\n', ''));
+    const err = configError(replaceLine(VALID_TOML, 'stall_secs = 300\n', ''));
     expect(err.issues.map((i) => i.path)).toEqual(['limits.stall_secs']);
     expect(err.message).toContain('limits.stall_secs');
     expect(err.message).toContain('inline.toml');
@@ -126,7 +126,7 @@ describe('config: validation errors carry field paths', () => {
   });
 
   it('reports a type error', () => {
-    const err = configError(replaceLine(VALID_TOML, 'stall_secs = 90', 'stall_secs = "90"'));
+    const err = configError(replaceLine(VALID_TOML, 'stall_secs = 300', 'stall_secs = "300"'));
     expect(err.issues).toHaveLength(1);
     expect(err.issues[0]?.path).toBe('limits.stall_secs');
     expect(err.message).toMatch(/limits\.stall_secs: .*number/);
@@ -183,14 +183,14 @@ describe('config: validation errors carry field paths', () => {
   });
 
   it('reports every issue at once, not only the first', () => {
-    let text = replaceLine(VALID_TOML, 'stall_secs = 90', 'stall_secs = -1');
+    let text = replaceLine(VALID_TOML, 'stall_secs = 300', 'stall_secs = -1');
     text = replaceLine(text, 'expected_branch = "main"', 'expected_branch = ""');
     const err = configError(text);
     expect(err.issues.map((i) => i.path)).toEqual(['limits.stall_secs', 'ci.expected_branch']);
   });
 
   it('reports TOML syntax errors with the line number', () => {
-    const err = configError('schema_version = 1\n[limits\nstall_secs = 90\n');
+    const err = configError('schema_version = 1\n[limits\nstall_secs = 300\n');
     expect(err.issues).toHaveLength(1);
     expect(err.issues[0]?.path).toBe('');
     expect(err.message).toMatch(/line 2/);
