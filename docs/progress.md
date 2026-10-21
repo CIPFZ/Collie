@@ -189,4 +189,22 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - CI：unknown，监听分支未能取证
 - 受保护文件改动行数：0
 - 依赖变化：无
+
+### v02-b04 · r-20261021-060149 · PASS
+
+- 时间：2026-10-21T07:04:20.440Z
+- 裁定：规则 9，七条验收命令全部实跑通过，三次连跑稳定；三个条目逐条代码审查确认；无受保护文件、无依赖变化、无范围蔓延、无越界实现。CI 无法查询（无 GH_TOKEN）。
+- 提交：`ff0f057`
+- 验收命令：7/7 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，572 passed, 0 failed
+  - `npm test && npm test && npm test` → exit 0，572 passed, 0 failed
+  - `! grep -qE "toBeLessThan\(2000\)|Date.now" test/scenario-g.test.ts` → exit 0，exit 0
+  - `! grep -qE "interrupt\?\." src/runner/claude.ts` → exit 0，exit 0
+  - `grep -qE "reviewer" test/heartbeat.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：unknown，监听分支未能取证
+- 受保护文件改动行数：0
+- 依赖变化：无
 <!-- collie:runs:end -->
