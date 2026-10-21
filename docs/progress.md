@@ -207,4 +207,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - CI：unknown，监听分支未能取证
 - 受保护文件改动行数：0
 - 依赖变化：无
+
+### v02-b04-tests · r-20261021-112601 · BLOCK
+
+- 时间：2026-10-21T12:18:08.904Z
+- 裁定：规则 1，verdict unparseable: /data/workspace/Collie/.collie/batches/v02-b04-tests/verdict.md: json block at line 163 fails the verdict schema: evidence.ci_conclusion: Invalid option: expected one of "success"|"failure"|"cancelled"|"unknown"
+- 提交：`2661d0e`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，574 passed, 0 failed
+  - `! grep -qE "setInterval|setTimeout\(" test/scenario-g.test.ts` → exit 0，exit 0
+  - `! grep -qE "setInterval|setTimeout\(" test/ladder.test.ts` → exit 0，exit 0
+  - `grep -qE "livenessSetTimer" test/scenario-g.test.ts` → exit 0，exit 0
+  - `grep -qE "beforeAll" test/reviewer-isolation.test.ts` → exit 0，exit 0
+  - `test -z "$(git log --format=%H -n 1 --grep='issue v02-b04-tests' -- .collie/batches/v02-b04-tests/task.md)" || git diff --quiet "$(git log --format=%H -n 1 --grep='issue v02-b04-tests' -- .collie/batches/v02-b04-tests/task.md)"..HEAD -- src/` → exit 0，exit 0
+- 已推送：是
+- CI：unknown，监听分支未能取证
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
