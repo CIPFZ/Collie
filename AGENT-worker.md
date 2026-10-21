@@ -71,8 +71,10 @@ npm run lint && npm run typecheck && npm test
 直接提交 `main`，不开分支、不开 PR。小步提交，每个提交独立可构建。
 提交信息格式 `<scope>: <summary>`（英文），scope 取值见 `CONSTRAINTS.md` 铁律 20。
 
-推送后**必须确认 GitHub Actions 实际触发并通过**。不得仅凭本地测试结果
-声称 CI 绿——这是本项目有明确教训的失败模式。
+推送之后**不要等 CI、不要查 CI、不要探测 token**。CI 的结论由 R2 用自己的取证核对（SPEC 4.2），
+你的 report 里 `ci_passed` 一律省略或填 `false`；填 `true` 只会在 R2 取不到证据时被判 FIX。
+v02-b02 / b03 两次都有 worker 把最后的轮次花在等 CI 和 `echo $GITHUB_TOKEN` 上，直到轮数用满。
+同样，不要打印任何环境变量的值：事件流会原样落盘。
 
 ### 4.4 必须停下来问的情况
 

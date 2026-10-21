@@ -21,8 +21,9 @@
 | 6 | v01-b05-smoke | 烟雾批次：README 改一行 | v01-b05 | passed |
 | 7 | v02-b01 | 真实运行暴露的两处修补 | v01-b05 | blocked |
 | 8 | v02-b02 | 落盘、心跳与救援 | v01-b05 | passed |
-| 9 | v02-b03 | 活性检测与信号阶梯 | v02-b02 | pending |
-| 10 | v02-b04 | 中断标记与 resume | v02-b03 | pending |
+| 9 | v02-b03 | 活性检测与信号阶梯 | v02-b02 | passed |
+| 10 | v02-b04 | b02/b03 遗留修补 | v02-b03 | pending |
+| 11 | v02-b05 | 中断标记与 resume | v02-b04 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -280,7 +281,7 @@ v0.2 第一批。规格见 SPEC 第 11 章 11.1~11.4、11.8。
    把 `.collie/heartbeat` 改为 `.collie/heartbeat.json`，否则救援提交会把心跳文件带进仓库
 3. 脏工作区救援（11.4）：worker 退出后由 R2 执行 wip 提交并记事件；救援提交不推送。
    场景 E 前半段 `test/scenario-e.test.ts`：断言 kill 后救援提交与事件存在
-   （`attempt=2` / `interrupted_at` 的断言留给 v02-b04）
+   （`attempt=2` / `interrupted_at` 的断言留给 v02-b05）
 
 验收标准：
 
@@ -341,9 +342,43 @@ PASS 维持（规则链无误），缺口转入 v02-b03 条目 2 并加两条验
 - 改动任何受保护路径；`grace_secs` 不写入 toml，由 R1 事后补
 - 阶梯计时用注入的时钟，测试不得真实等待超过 2 秒
 
-## v02-b04 中断标记与 resume
+## v02-b04 b02/b03 遗留修补
 
 优先级：10　依赖：v02-b03
+
+两次真实运行暴露、验收命令没抓住的三处。规格见 SPEC 11.2、11.3、11.5。
+
+条目：
+1. 心跳覆盖整个 run（11.3）：`run.finished` 之后才删除；加 `phase` 与 `worker_pid`；
+   孤儿检测同时看两个 pid。`test/heartbeat.test.ts` 补「reviewer 阶段并行启动被拒绝」用例
+2. `claude.ts` 的 `stop('soft')` 必调并 `await` `interrupt()`，缺失即抛错（11.2）；
+   `run.finished` 与 progress 运行记录带 worker 的 `exit_code` / `stop_reason`（11.7）
+3. `LivenessMonitor` 注入 `now()` / `setTimer()`（11.5）；`test/scenario-g.test.ts` 与 `test/ladder.test.ts`
+   改用假时钟，删除所有真实耗时断言
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 全量连跑 3 次稳定 | `npm test && npm test && npm test` | exit 0 |
+| 场景 G 不再断言真实耗时 | `! grep -qE "toBeLessThan\(2000\)\|Date.now" test/scenario-g.test.ts` | exit 0 |
+| interrupt 不再可选 | `! grep -qE "interrupt\?\." src/runner/claude.ts` | exit 0 |
+| 心跳并行拒绝覆盖 reviewer 阶段 | `grep -qE "reviewer" test/heartbeat.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 实现任何 resume / 中断标记注入（那是 v02-b05）
+
+记录：v02-b03 第 1 次运行 r-20261020-145024 PASS（`3da03b9`），8/8 验收在 R2 处通过；
+R1 复核时 `npm test` 在全新 clone 上 2 个失败（场景 G 真实耗时 2.8~3.1 秒 > 2 秒），单跑 3 次全过，
+属时序脆弱。PASS 维持（R2 取证当时属实），缺口全部进本批次。
+
+## v02-b05 中断标记与 resume
+
+优先级：11　依赖：v02-b04
 
 规格见 SPEC 11.7、11.9。
 
@@ -351,7 +386,8 @@ PASS 维持（规则链无误），缺口转入 v02-b03 条目 2 并加两条验
 1. 中断判定与 `task.md` 注入（11.7）：`attempt` 递增、`interrupted_at`、`rescue_sha`、正文「上一轮中断」一节；
    `TaskFrontmatterSchema` 加可选 `rescue_sha`，不升版本
 2. resume 策略（11.7）：按 `resume_max` 决定是否传 `resumeSessionId`；新增事件 `worker.resumed`；
-   `claude.ts` 在 SDK 轮数用满时返回带 `sessionId` 与 `stopReason: 'turns_exhausted'` 的 `RunResult`（11.2）
+   仲裁 PASS 的运行不算中断、`attempt` 不递增（11.7 第一段）；
+   `claude.ts` 的 `turns_exhausted` 映射已在 b03 提前落地，本批次只需测试覆盖
 3. 场景 E 后半段（attempt / interrupted_at / rescue_sha）与场景 F：
    `test/scenario-e.test.ts` 补全，`test/scenario-f.test.ts` 新增；
    `collie show` 按顺序还原 E / F / G 的事件链

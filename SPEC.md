@@ -566,6 +566,7 @@ v0.1 不做下列内容，防止范围蔓延：
 | Q2 | `docs/backlog.md` 用 Markdown 表格是否足够？是否需要独立的结构化文件？ | 先用 Markdown（R1 与人都要读写）。若解析脆弱则改为 frontmatter 承载结构 |
 | Q3 | `collie.toml` 放 `.collie/` 下还是仓库根？ | 暂定 `.collie/` 下，与运行时文件同域 |
 | Q4 | 完成判定的四种判据，最终选哪个？ | 按用户要求保留全部，v0.5 起记录对比数据后再定 |
+| Q5 | `stream.ndjson` 原样落盘工具输出，环境里配了 token 后会以明文留在 `.collie/runs/` | 目录已 gitignore；配 token 前先定是否在落盘时屏蔽已知环境变量的值。属 v1.0 安全议题 |
 
 
 ## 11. v0.2 失败检测与恢复
@@ -615,7 +616,7 @@ interface RunResult {
 
 约束（v02-b02 第 1 次运行暴露）：
 - `soft` 与 `hard` 不得实现为同一个调用。`soft` 必须是「本轮结束后停、session 可续接」的 SDK 级中断；
-  `hard` 才是 abort。
+  `hard` 才是 abort。`interrupt()` 是必调且 `await` 的：SDK 对象上没有它就抛错，不得写成 `interrupt?.()`。
 - SDK 因轮数用满等原因中止时，runner 须捕获并返回 `RunResult`（`exitCode` 非零、`stopReason`、
   以及已从事件流里拿到的 `sessionId`），不得让 `sessionId` 随异常丢失。
 - runner 的测试须断言注入的 `query()` 实际收到的选项：`resumeSessionId` 落到 SDK 认的续接字段上。
@@ -628,11 +629,14 @@ ROADMAP 写的 SIGINT → SIGTERM → SIGKILL 是子进程语义；Collie 只认
 
 - `.collie/runs/<run_id>/stream.ndjson`：worker 的原始事件流，`onEvent` 每收一条追加一行，不做任何解析。
   与 `events.ndjson`（Collie 自己的 journal）分开。
-- `.collie/heartbeat.json`：`{ run_id, batch_id, pid, started_at, updated_at }`。
-  run 开始时写入，每收到一条事件更新 `updated_at`，run 正常结束时删除。
-  下一次 `collie run` 启动时若文件存在且 `pid` 不存活，判定「上一次被 kill」：
-  记 `run.orphaned` 事件（字段 run_id / batch_id / updated_at），执行 11.4 的救援，再删除该文件。
-  若 `pid` 存活则拒绝启动（铁律 1：永不并行写入），退出码 1。
+- `.collie/heartbeat.json`：`{ run_id, batch_id, pid, worker_pid?, phase, started_at, updated_at }`。
+  run 开始时写入，`run.finished` 写完之后才删除——覆盖 worker、reviewer、等 CI、仲裁的全程，
+  不是只覆盖 worker（v02-b03 实测只覆盖了 worker，reviewer 与等 CI 的 36 分钟里并行启动不会被拒绝）。
+  `phase` 取 `worker | reviewer | ci | arbiter`；worker 阶段每收到一条事件更新 `updated_at`，
+  其他阶段每 `ci_poll_secs` 更新一次。`worker_pid` 为 `RunHandle.pid`，拿得到就记。
+  下一次 `collie run` 启动时若文件存在：`pid` 或 `worker_pid` 任一存活则拒绝启动（铁律 1），退出码 1；
+  两者都不存活判定「上一次被 kill」：记 `run.orphaned`（字段 run_id / batch_id / phase / updated_at），
+  执行 11.4 的救援，再删除该文件。
 
 ### 11.4 脏工作区救援
 
@@ -649,6 +653,8 @@ R2 在 worker 运行期间按两条独立计时判定：
   产出指纹 = `HEAD` sha + `git status --porcelain` 输出的哈希，每收到一条事件采样一次。
 
 两者都以事件为驱动，没有事件时只有 stall 计时在走。
+计时器与时钟必须注入（`now()` 与 `setTimer()`），默认实现才用 `Date.now` / `setTimeout`；
+测试用假时钟推进，不得断言真实耗时（v02-b03 的场景 G 用真实时钟，全量并发下 2.8~3.1 秒，随机失败）。
 
 ### 11.6 信号阶梯
 
@@ -662,8 +668,11 @@ v0.1 的 `wallclock_secs` 超时从「直接 abort + 记 crashed」改为走本�
 
 ### 11.7 中断标记与 resume
 
-一次运行若以 stalled / idling / wallclock / orphaned / turns_exhausted / 非零退出结束，称为**中断**。
-任何结束方式（含 crashed / escalated）都要在 `docs/progress.md` 追加一条运行记录（2.3）。
+一次运行若以 stalled / idling / wallclock / orphaned / turns_exhausted / 非零退出结束，
+**且仲裁结论不是 PASS**，称为**中断**。worker 非零退出但 report 已提交、仲裁按证据判 PASS 的运行
+（v02-b03 第 1 次：200 轮用满，但交付在前）不算中断，下一轮 `attempt` 不递增。
+无论哪种结束方式，`run.finished` 事件与 `docs/progress.md` 的运行记录都带 worker 的
+`exit_code` 与 `stop_reason`，让人看得出它是怎么结束的（2.3）。
 下一次对同一批次 `collie run` 时：
 
 - `task.md` frontmatter：`attempt` 递增；`interrupted_at` 填
