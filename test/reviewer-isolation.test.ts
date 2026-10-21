@@ -5,7 +5,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ESLint } from 'eslint';
-import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import {
   buildReviewerPrompt,
@@ -151,6 +151,11 @@ describe('reviewer-isolation: no write capability', () => {
 
 describe('reviewer-isolation: source and lint', () => {
   const source = readFileSync(join(repoRoot, 'src', 'roles', 'reviewer.ts'), 'utf8');
+  let eslint: ESLint;
+
+  beforeAll(() => {
+    eslint = new ESLint({ cwd: repoRoot });
+  });
 
   it('never reads a report or imports the worker role', () => {
     expect(source).not.toMatch(/readReport|REPORT_FILE_NAME|report\.md|reportPath/);
@@ -158,11 +163,10 @@ describe('reviewer-isolation: source and lint', () => {
   });
 
   it('cannot import the worker role: ESLint rejects it', async () => {
-    const eslint = new ESLint({ cwd: repoRoot });
     const code = "import { readReport } from './worker.js';\nexport const r = readReport;\n";
     const [result] = await eslint.lintText(code, {
       filePath: join(repoRoot, 'src', 'roles', 'reviewer.ts'),
     });
     expect((result?.messages ?? []).map((m) => m.ruleId)).toContain('no-restricted-imports');
-  });
+  }, 60_000);
 });

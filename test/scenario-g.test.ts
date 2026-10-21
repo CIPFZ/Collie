@@ -41,7 +41,7 @@ function fakeClock(stepMs = 200): { now: () => number } {
   };
 }
 
-/** Near-instant delay that yields to the event loop, letting the worker effect
+/** Near-instant delay that yields via microtasks, letting the worker effect
  *  react to stop() before the ladder escalates. Records requested durations. */
 function instantDelay(): {
   delay: (ms: number) => Promise<void>;
@@ -53,13 +53,25 @@ function instantDelay(): {
       durations.push(ms);
       // Yield several times so the worker's stopped promise and cleanup can run.
       for (let i = 0; i < 5; i++) {
-        await new Promise<void>((r) => {
-          setTimeout(r, 0);
-        });
+        await Promise.resolve();
       }
     },
     durations,
   };
+}
+
+/**
+ * A fake setTimer for the liveness monitor that fires callbacks via the microtask
+ * queue instead of real timers (SPEC 11.5). The returned handle is inert
+ * (clearTimeout on it is a no-op), but the monitor's own `stopped` flag
+ * prevents stale callbacks from doing work.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- ms is intentionally unused; the fake fires immediately
+function fakeSetTimer(cb: () => void, _ms: number): ReturnType<typeof setTimeout> {
+  void Promise.resolve().then(() => {
+    cb();
+  });
+  return undefined as unknown as ReturnType<typeof setTimeout>;
 }
 
 /**
@@ -110,18 +122,16 @@ function idleWorkerScene(opts: { ignoreSoft?: boolean } = {}): FakeRunner {
         await git(ctx.cwd, ['add', '-A']);
         await git(ctx.cwd, ['commit', '-q', '-m', `report(collie): ${BATCH}`]);
 
-        // Now enter the "idle" phase: emit events continuously but don't change files.
+        // Now enter the "idle" phase: emit events but don't change files.
         // The liveness monitor will detect the frozen fingerprint.
-        const interval = setInterval(() => {
+        // Events are emitted synchronously; the fake clock in the liveness
+        // monitor advances fast enough to detect idle without real timers.
+        for (let i = 0; i < 10; i++) {
           ctx.opts.onEvent?.({ type: 'assistant', message: 'still thinking...' });
-        }, 50);
-
-        try {
-          // Wait for the ladder to stop us.
-          await ctx.stopped;
-        } finally {
-          clearInterval(interval);
         }
+
+        // Wait for the ladder to stop us.
+        await ctx.stopped;
       },
       result: { exitCode: 0 },
     },
@@ -137,6 +147,7 @@ describe('scenario G: idle worker detected by liveness monitor (SPEC 11.5, 11.6)
       ladderDelay: delay,
       livenessIntervalMs: 50,
       livenessNow: clock.now,
+      livenessSetTimer: fakeSetTimer,
     });
 
     // Exit code 20 (BLOCK) because the escalation path fires.
@@ -169,6 +180,7 @@ describe('scenario G: idle worker detected by liveness monitor (SPEC 11.5, 11.6)
       ladderDelay: delay,
       livenessIntervalMs: 50,
       livenessNow: clock.now,
+      livenessSetTimer: fakeSetTimer,
     });
 
     expect(exitCode).toBe(20);
