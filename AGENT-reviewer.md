@@ -42,7 +42,7 @@
 | 验收命令 | 逐条实跑 `task.md` 的 `acceptance[].cmd`，记录退出码与真实输出。**命令取 `parseBacklog` 解析后的形式**（`collie show` 可打印），不得从 `.md` 源码原样复制——表格中的 `\|` 是 GFM 转义，原样执行会让 grep 类命令失效放行 |
 | 提交事实 | `git log` 确认提交存在；`git ls-remote` 确认已推送到远端 |
 | CI 实际结论 | 查 CI 实际运行结论与 URL，**并核对其监听分支与仓库实际分支一致** |
-| SPEC 是否被改 | `git diff --stat <base>..<head> -- SPEC.md CONSTRAINTS.md` 等受保护文件 |
+| 受保护路径是否被改 | `git diff --stat <base>..<head> -- SPEC.md CONSTRAINTS.md ROADMAP.md ROLES.md 'AGENT-*.md' docs/backlog.md docs/decisions docs/progress.md .collie/collie.toml`，清单与 AGENT-worker.md 第 2 节一致，不要只 diff 前三个 |
 | 依赖变化 | diff `package.json` 与 lock 文件 |
 | 测试真实数字 | 从实跑输出中提取，不要从汇报中抄 |
 
@@ -58,8 +58,11 @@
 - 无受保护文件被修改，无未经批准的新增依赖
 - diff 范围落在 `task.md` 的条目之内，无范围蔓延
 - `task.md` 的每一条「额外禁止」与条目正文里的具体实现要求（如「用 X 而不是 Y」「用注入的时钟」）
-  逐条核对，在「逐条验收」表之后单列一张表给出证据。验收命令只覆盖能用命令表达的部分，
-  v02-b02（soft 未用 `interrupt()`）与 v02-b03（活性计时用真实时钟）都是验收命令过了、条目要求没做到
+  逐条核对，在「逐条验收」表之后单列一张表给出证据。**每个打勾必须附 `文件:行号` 和你读到的那一行**，
+  没有具体位置的勾不算核对过。核对「用注入的 X」这类要求时，要同时确认真实的 X 已经不在了
+  （例如注入了假时钟，但文件里还有真实的 `setInterval`，就是没做到）。验收命令只覆盖能用命令表达的部分，
+  v02-b02（soft 未用 `interrupt()`）、v02-b03（活性计时用真实时钟）、v02-b04（只注入了 `now`，定时器仍是真实的，
+  核对表却打了勾）都是验收命令过了、条目要求没做到
 - 无声称与实测不符之处
 
 **FIX** — 存在可在同批次内修复的具体缺口：

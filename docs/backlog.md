@@ -3,7 +3,7 @@
 > 唯一可修改者：R1 方案设计 Agent（须用户批准）。其他角色只读。
 > 优先级在方案确定阶段一次排定，批次随之固定，**不做滚动重新拆解**。
 
-更新时间：2026-10-20
+更新时间：2026-10-21
 当前版本：v0.2
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
@@ -22,8 +22,9 @@
 | 7 | v02-b01 | 真实运行暴露的两处修补 | v01-b05 | blocked |
 | 8 | v02-b02 | 落盘、心跳与救援 | v01-b05 | passed |
 | 9 | v02-b03 | 活性检测与信号阶梯 | v02-b02 | passed |
-| 10 | v02-b04 | b02/b03 遗留修补 | v02-b03 | pending |
-| 11 | v02-b05 | 中断标记与 resume | v02-b04 | pending |
+| 10 | v02-b04 | b02/b03 遗留修补 | v02-b03 | passed |
+| 11 | v02-b04-tests | 测试去真实定时器 | v02-b04 | pending |
+| 12 | v02-b05 | 中断标记与 resume | v02-b04-tests | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -381,9 +382,49 @@ PASS 维持（规则链无误），缺口转入 v02-b03 条目 2 并加两条验
 R1 复核时 `npm test` 在全新 clone 上 2 个失败（场景 G 真实耗时 2.8~3.1 秒 > 2 秒），单跑 3 次全过，
 属时序脆弱。PASS 维持（R2 取证当时属实），缺口全部进本批次。
 
-## v02-b05 中断标记与 resume
+记录：第 2 次运行 r-20261021-060149 PASS（裁定 `6f3f5f3`），7/7 验收在 R2 处通过，claims 与实测全部一致。
+但条目 3 只做了一半：`test/scenario-g.test.ts` 只注入了 `livenessNow`，定时器（fake worker 的 `setInterval`、
+监视器检查间隔）仍是真实的；reviewer 的逐条核对表对这一项打了勾。裁定提交的 CI（Run 81）在 `npm test` 失败，
+单核加压复现：场景 G「不响应 soft」2/5 失败，`reviewer-isolation` 的 ESLint 用例 3/5 超时。
+PASS 维持（规则按当时证据判是对的），缺口进 v02-b04-tests。这是第三次「验收命令过了、条目要求没做到」。
+
+## v02-b04-tests 测试去真实定时器
 
 优先级：11　依赖：v02-b04
+
+v02-b04 第 2 次运行后 main 的 CI 是红的（Run 81），原因是两个随机失败的测试。本批次只修测试，不碰 `src/`。
+规格见 SPEC 11.5。
+
+条目：
+1. `test/scenario-g.test.ts` 与 `test/ladder.test.ts` 全部改用注入的假时钟：同时注入 `livenessNow` 与 `livenessSetTimer`，
+   fake worker 发事件改为由假时钟驱动，文件内不再出现任何真实的 `setInterval` / `setTimeout`（包括用于让出事件循环的 `setTimeout(r, 0)`，
+   改用 `await Promise.resolve()` 或 vitest 的假定时器推进）。断言只看事件序列，不看耗时
+2. `test/reviewer-isolation.test.ts` 的 ESLint 用例：`ESLint` 实例移到 `beforeAll` 只建一次，并给该用例显式 `timeout`（60 秒）。
+   不改测试的断言内容
+
+自检（不是验收，只是提醒）：在 1 核并额外起 3 个占满 CPU 的空转进程的条件下连跑 `npm test` 3 次。做不到这个环境也不影响交付。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 场景 G 无真实定时器 | `! grep -qE "setInterval\|setTimeout\(" test/scenario-g.test.ts` | exit 0 |
+| ladder 无真实定时器 | `! grep -qE "setInterval\|setTimeout\(" test/ladder.test.ts` | exit 0 |
+| 场景 G 注入了定时器 | `grep -qE "livenessSetTimer" test/scenario-g.test.ts` | exit 0 |
+| ESLint 只建一次 | `grep -qE "beforeAll" test/reviewer-isolation.test.ts` | exit 0 |
+| 未改动 src | `test -z "$(git log --format=%H -n 1 --grep='issue v02-b04-tests' -- .collie/batches/v02-b04-tests/task.md)" \|\| git diff --quiet "$(git log --format=%H -n 1 --grep='issue v02-b04-tests' -- .collie/batches/v02-b04-tests/task.md)"..HEAD -- src/` | exit 0 |
+
+额外禁止：
+- 改动 `src/` 下任何文件（需要改源码就停下来在 report 里说明，不要动手）
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过（`skip` / `todo`）任何测试
+
+## v02-b05 中断标记与 resume
+
+优先级：12　依赖：v02-b04-tests
 
 规格见 SPEC 11.7、11.9。
 
