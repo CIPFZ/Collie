@@ -74,19 +74,38 @@ export interface LivenessConfig {
    * Tests may use a shorter interval.
    */
   checkIntervalMs?: number;
+  /**
+   * Injected clock (SPEC 11.5 v02-b04): returns epoch ms.
+   * Defaults to Date.now. Tests pass a fake clock.
+   */
+  now?: () => number;
+  /**
+   * Injected timer (SPEC 11.5 v02-b04): schedules a callback after `ms` milliseconds.
+   * Returns a handle that can be passed to the corresponding clear function.
+   * Defaults to setTimeout. Tests pass a fake timer.
+   */
+  setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  /**
+   * Injected timer cancellation (SPEC 11.5 v02-b04): cancels a timer created by setTimer.
+   * Defaults to clearTimeout.
+   */
+  clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
 }
 
 // eslint-disable-next-line no-restricted-syntax -- monitor default interval, not a threshold
 const DEFAULT_CHECK_INTERVAL_MS = 500;
 
 /**
- * Runs alongside the worker. Uses real wall-clock time (Date.now()) for stall/idle
- * measurement. Each event resets the stall timer; each fingerprint sample updates
- * the progress timer.
+ * Runs alongside the worker. Uses injected clock (now()) and timer (setTimer())
+ * for stall/idle measurement (SPEC 11.5 v02-b04). Defaults to Date.now / setTimeout.
+ * Tests inject fake implementations so no real time passes.
  */
 export class LivenessMonitor {
   private readonly config: LivenessConfig;
   private readonly checkIntervalMs: number;
+  private readonly now: () => number;
+  private readonly setTimer: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  private readonly clearTimer: (handle: ReturnType<typeof setTimeout>) => void;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private lastEventMs: number;
   private lastProgressMs: number;
@@ -97,14 +116,17 @@ export class LivenessMonitor {
   constructor(config: LivenessConfig) {
     this.config = config;
     this.checkIntervalMs = config.checkIntervalMs ?? DEFAULT_CHECK_INTERVAL_MS;
-    const now = Date.now();
+    this.now = config.now ?? Date.now;
+    this.setTimer = config.setTimer ?? setTimeout;
+    this.clearTimer = config.clearTimer ?? clearTimeout;
+    const now = this.now();
     this.lastEventMs = now;
     this.lastProgressMs = now;
   }
 
   /** Called on each event from the worker stream (sync). Resets the stall timer. */
   onEvent(): void {
-    this.lastEventMs = Date.now();
+    this.lastEventMs = this.now();
   }
 
   /** Starts the periodic liveness check loop. */
@@ -116,21 +138,21 @@ export class LivenessMonitor {
   stop(): void {
     this.stopped = true;
     if (this.timer !== undefined) {
-      clearTimeout(this.timer);
+      this.clearTimer(this.timer);
       this.timer = undefined;
     }
   }
 
   private scheduleCheck(): void {
     if (this.stopped || this.triggered) return;
-    this.timer = setTimeout(() => {
+    this.timer = this.setTimer(() => {
       void this.check();
     }, this.checkIntervalMs);
   }
 
   private async check(): Promise<void> {
     if (this.stopped || this.triggered) return;
-    const now = Date.now();
+    const now = this.now();
 
     // Stall: no events for stall_secs.
     const sinceLastEvent = (now - this.lastEventMs) / MS_PER_SECOND;
@@ -147,9 +169,9 @@ export class LivenessMonitor {
       if (this.stopped || this.triggered) return; // May have been stopped while awaiting.
       if (this.lastFingerprint === undefined || fp !== this.lastFingerprint) {
         this.lastFingerprint = fp;
-        this.lastProgressMs = Date.now();
+        this.lastProgressMs = this.now();
       } else {
-        const sinceProgress = (Date.now() - this.lastProgressMs) / MS_PER_SECOND;
+        const sinceProgress = (this.now() - this.lastProgressMs) / MS_PER_SECOND;
         if (sinceProgress >= this.config.progressSecs) {
           this.triggered = true;
           this.config.onIdling();

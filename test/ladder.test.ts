@@ -169,7 +169,6 @@ describe('ladder: runLadder walks soft -> hard -> kill', () => {
     const { handle, exited, exitPromise } = fakeHandle();
     const { delay, durations } = instantDelay();
 
-    const before = Date.now();
     await runLadder({
       handle,
       graceSecs: 3600,
@@ -183,10 +182,9 @@ describe('ladder: runLadder walks soft -> hard -> kill', () => {
       exitPromise,
       delay,
     });
-    const elapsed = Date.now() - before;
 
-    // Despite grace_secs=3600 (1 hour), real time should be <2s.
-    expect(elapsed).toBeLessThan(2000);
+    // The injected delay recorded the right durations; no real time assertion needed
+    // (SPEC 11.5 v02-b04: tests must not assert real elapsed time).
     expect(durations).toEqual([3_600_000, 3_600_000]);
   });
 });

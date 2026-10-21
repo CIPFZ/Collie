@@ -1,7 +1,9 @@
 // Scenario G (SPEC 11.9): idle worker — sends events but never changes files.
 // The liveness monitor detects idle (fingerprint unchanged for progress_secs)
-// and the signal ladder escalates. Tests use injected ladder delay so grace
-// periods are instant, and progress_secs=1 so idle is detected within ~1s real.
+// and the signal ladder escalates. Tests inject a fake clock via livenessNow
+// (SPEC 11.5 v02-b04) so idle is detected deterministically without real-time
+// assertions. The real setTimeout is used for scheduling; only the time source
+// is faked.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -43,6 +45,23 @@ function instantDelay(): {
       }
     },
     durations,
+  };
+}
+
+const FAKE_TIME_STEP_MS = 2000;
+
+/**
+ * A fake now() for the liveness monitor (SPEC 11.5 v02-b04).
+ * Each call advances by FAKE_TIME_STEP_MS, so the idle check sees enough
+ * elapsed time on the very first check cycle after the fingerprint freezes.
+ * No real time assertions needed.
+ */
+function fakeNow(): () => number {
+  let time = 0;
+  return () => {
+    const t = time;
+    time += FAKE_TIME_STEP_MS;
+    return t;
   };
 }
 
@@ -116,15 +135,11 @@ describe('scenario G: idle worker detected by liveness monitor (SPEC 11.5, 11.6)
   it('detects idle, sends soft, worker responds → no rescue needed', async () => {
     const runner = idleWorkerScene();
     const { delay } = instantDelay();
-    const before = Date.now();
     const exitCode = await box.run(runner, {
       ladderDelay: delay,
       livenessIntervalMs: 50,
+      livenessNow: fakeNow(),
     });
-    const elapsed = Date.now() - before;
-
-    // The test must not take >2s real time.
-    expect(elapsed).toBeLessThan(2000);
 
     // Exit code 20 (BLOCK) because the escalation path fires.
     expect(exitCode).toBe(20);
@@ -151,14 +166,12 @@ describe('scenario G: idle worker detected by liveness monitor (SPEC 11.5, 11.6)
   it('does not respond to soft → ladder escalates to hard and kill', async () => {
     const runner = idleWorkerScene({ ignoreSoft: true });
     const { delay } = instantDelay();
-    const before = Date.now();
     const exitCode = await box.run(runner, {
       ladderDelay: delay,
       livenessIntervalMs: 50,
+      livenessNow: fakeNow(),
     });
-    const elapsed = Date.now() - before;
 
-    expect(elapsed).toBeLessThan(2000);
     expect(exitCode).toBe(20);
 
     const events = box.events();

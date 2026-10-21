@@ -101,6 +101,12 @@ export interface RunContext {
   ladderDelay?: (ms: number) => Promise<void>;
   /** Override the liveness monitor check interval (ms) for tests. */
   livenessIntervalMs?: number;
+  /** Injected clock for liveness monitor (SPEC 11.5 v02-b04); defaults to Date.now. */
+  livenessNow?: () => number;
+  /** Injected timer for liveness monitor (SPEC 11.5 v02-b04); defaults to setTimeout. */
+  livenessSetTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  /** Injected timer cancellation for liveness monitor (SPEC 11.5 v02-b04); defaults to clearTimeout. */
+  livenessClearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
 }
 
 export interface RunOutcome {
@@ -397,6 +403,10 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       startLadder('idling');
     },
     ...(ctx.livenessIntervalMs === undefined ? {} : { checkIntervalMs: ctx.livenessIntervalMs }),
+    // SPEC 11.5 v02-b04: injected clock and timer for tests.
+    ...(ctx.livenessNow === undefined ? {} : { now: ctx.livenessNow }),
+    ...(ctx.livenessSetTimer === undefined ? {} : { setTimer: ctx.livenessSetTimer }),
+    ...(ctx.livenessClearTimer === undefined ? {} : { clearTimer: ctx.livenessClearTimer }),
   });
 
   // SPEC 11.3: stream + heartbeat callbacks.
