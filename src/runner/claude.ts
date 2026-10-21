@@ -35,14 +35,14 @@ export interface ClaudeQueryParams {
 export type ClaudeQuery = (params: ClaudeQueryParams) => ClaudeQueryIterable;
 
 /**
- * The async iterable returned by the SDK's query(). It may expose `interrupt()`
- * (SPEC 11.2, v02-b03): calling it ends the current turn gracefully, keeping the
- * session resumable. Test doubles that do not provide it are still valid — the
- * runner calls `interrupt?.()` defensively.
+ * The async iterable returned by the SDK's query(). It must expose `interrupt()`
+ * (SPEC 11.2, v02-b04): calling it ends the current turn gracefully, keeping the
+ * session resumable. The runner calls `interrupt()` unconditionally on soft stop;
+ * an SDK or test double that omits it will cause an immediate throw.
  */
 export interface ClaudeQueryIterable extends AsyncIterable<unknown> {
   /** SDK-level interrupt: finishes the current turn, session stays complete (SPEC 11.2). */
-  interrupt?: () => void;
+  interrupt: () => void;
 }
 
 export interface ClaudeRunnerOptions {
@@ -114,7 +114,10 @@ const lazySdkQuery: ClaudeQuery = (params) => {
       };
     },
     interrupt(): void {
-      resolvedIterable?.interrupt?.();
+      if (resolvedIterable === undefined) {
+        throw new Error('interrupt() called before the SDK query was resolved');
+      }
+      resolvedIterable.interrupt();
     },
   };
 };
@@ -217,7 +220,8 @@ export class ClaudeRunner implements AgentRunner {
         switch (level) {
           case 'soft':
             interrupted = true;
-            queryIterable.interrupt?.();
+            // SPEC 11.2 v02-b04: interrupt() is mandatory, not optional.
+            queryIterable.interrupt();
             break;
           case 'hard':
             controller.abort(new Error('hard stop'));

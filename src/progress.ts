@@ -20,6 +20,10 @@ export interface ProgressEntry {
   at: string;
   decision: ArbiterDecision;
   evidence: Evidence;
+  /** SPEC 11.7: worker's own exit code, if available. */
+  workerExitCode?: number;
+  /** SPEC 11.7: worker's stop reason, if available. */
+  workerStopReason?: string;
 }
 
 export class ProgressError extends Error {
@@ -57,6 +61,12 @@ export function renderEntry(entry: ProgressEntry): string {
     `- 依赖变化：${evidence.deps_diff.length > 0 ? evidence.deps_diff.join('、') : '无'}`,
     ...(decision.mismatches.length > 0
       ? [`- 声称与实测不符：${decision.mismatches.map((m) => m.field).join('、')}`]
+      : []),
+    // SPEC 11.7: worker exit info in progress record.
+    ...(entry.workerExitCode !== undefined
+      ? [
+          `- Worker 退出码：${String(entry.workerExitCode)}${entry.workerStopReason !== undefined ? `（${entry.workerStopReason}）` : ''}`,
+        ]
       : []),
   ];
   return lines.join('\n');

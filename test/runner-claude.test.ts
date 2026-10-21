@@ -45,10 +45,23 @@ const success = (result = '# verdict'): unknown => ({
 /** A query double that records its params and yields a script. */
 function scripted(messages: unknown[]): { query: ClaudeQuery; calls: ClaudeQueryParams[] } {
   const calls: ClaudeQueryParams[] = [];
-  const query: ClaudeQuery = async function* (params) {
+  const query: ClaudeQuery = (params: ClaudeQueryParams): ClaudeQueryIterable => {
     calls.push(params);
-    await Promise.resolve();
-    for (const message of messages) yield message;
+    let index = 0;
+    return {
+      [Symbol.asyncIterator](): AsyncIterator<unknown> {
+        return {
+          async next(): Promise<IteratorResult<unknown>> {
+            await Promise.resolve();
+            if (index >= messages.length) return { done: true, value: undefined };
+            return { done: false, value: messages[index++] };
+          },
+        };
+      },
+      interrupt(): void {
+        /* no-op for non-interruptable scripts */
+      },
+    };
   };
   return { query, calls };
 }
@@ -56,15 +69,36 @@ function scripted(messages: unknown[]): { query: ClaudeQuery; calls: ClaudeQuery
 /** A query double that yields until the caller aborts, then rejects like the SDK does. */
 function abortable(): { query: ClaudeQuery; calls: ClaudeQueryParams[] } {
   const calls: ClaudeQueryParams[] = [];
-  const query: ClaudeQuery = async function* (params) {
+  const query: ClaudeQuery = (params: ClaudeQueryParams): ClaudeQueryIterable => {
     calls.push(params);
-    yield assistant('working');
-    await new Promise<void>((resolve) => {
-      params.options?.abortController?.signal.addEventListener('abort', () => {
-        resolve();
-      });
+    let abortResolve: (() => void) | undefined;
+    const abortPromise = new Promise<void>((r) => {
+      abortResolve = r;
     });
-    throw new Error('aborted');
+    let yieldedFirst = false;
+    let threw = false;
+    return {
+      [Symbol.asyncIterator](): AsyncIterator<unknown> {
+        return {
+          async next(): Promise<IteratorResult<unknown>> {
+            if (threw) return { done: true, value: undefined };
+            if (!yieldedFirst) {
+              yieldedFirst = true;
+              return { done: false, value: assistant('working') };
+            }
+            params.options?.abortController?.signal.addEventListener('abort', () => {
+              abortResolve?.();
+            });
+            await abortPromise;
+            threw = true;
+            throw new Error('aborted');
+          },
+        };
+      },
+      interrupt(): void {
+        /* no-op: abortable tests use hard/kill, not soft */
+      },
+    };
   };
   return { query, calls };
 }
@@ -289,6 +323,9 @@ describe('runner-claude: events and cancellation', () => {
   it('propagates a query failure unchanged', async () => {
     const query: ClaudeQuery = () => ({
       [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(new Error('SDK exploded')) }),
+      interrupt: () => {
+        /* no-op */
+      },
     });
     await expect(new ClaudeRunner(config, { query }).run(opts())).rejects.toThrow('SDK exploded');
   });
@@ -353,11 +390,26 @@ describe('runner-claude: RunHandle and stop levels (SPEC 11.2)', () => {
   });
 
   it('preserves sessionId when the SDK throws an error (SPEC 11.2)', async () => {
-    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery demands AsyncIterable
-    const query: ClaudeQuery = async function* () {
-      yield { type: 'system', subtype: 'init', session_id: 'rescued-session' };
-      yield assistant('working');
-      throw new Error('connection lost');
+    const query: ClaudeQuery = (): ClaudeQueryIterable => {
+      let index = 0;
+      const messages: unknown[] = [
+        { type: 'system', subtype: 'init', session_id: 'rescued-session' },
+        assistant('working'),
+      ];
+      return {
+        [Symbol.asyncIterator](): AsyncIterator<unknown> {
+          return {
+            async next(): Promise<IteratorResult<unknown>> {
+              await Promise.resolve();
+              if (index >= messages.length) throw new Error('connection lost');
+              return { done: false, value: messages[index++] };
+            },
+          };
+        },
+        interrupt(): void {
+          /* no-op */
+        },
+      };
     };
     const result = await new ClaudeRunner(config, { query }).run(opts());
     expect(result.sessionId).toBe('rescued-session');

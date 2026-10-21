@@ -293,8 +293,18 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
 
   rec.record('run.started');
 
+  // SPEC 11.7: worker exit info threaded to run.finished and progress.
+  let workerExitCode: number | undefined;
+  let workerStopReason: string | undefined;
+
   const finish = (final: VerdictValue, extra: Partial<RunOutcome> = {}): RunOutcome => {
-    rec.record('run.finished', { verdict: final, exit_code: EXIT_CODES[final] });
+    rec.record('run.finished', {
+      verdict: final,
+      exit_code: EXIT_CODES[final],
+      // SPEC 11.7: worker's own exit info so humans can see how it ended.
+      ...(workerExitCode === undefined ? {} : { worker_exit_code: workerExitCode }),
+      ...(workerStopReason === undefined ? {} : { worker_stop_reason: workerStopReason }),
+    });
     // SPEC 11.3: heartbeat is removed only after run.finished — covers entire run.
     removeHeartbeat(root);
     return { final, exitCode: EXIT_CODES[final], ...extra };
@@ -310,6 +320,9 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       at: ctx.now().toISOString(),
       decision,
       evidence: emptyEvidence(),
+      // SPEC 11.7: worker exit info in progress record.
+      workerExitCode,
+      workerStopReason,
     });
     await commit(root, `progress: ${batchId} ${decision.final}`, [relative(root, progressPath)]);
     return finish('BLOCK', { escalation: reason, decision });
@@ -421,6 +434,9 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       onStarted,
     });
     cleanupTimers();
+    // SPEC 11.7: capture worker exit info for run.finished and progress.
+    workerExitCode = result.exitCode;
+    workerStopReason = result.stopReason;
     rec.record('worker.finished', {
       exit_code: result.exitCode,
       // SPEC 3.6: without it a zero-output exit cannot be explained (v01-b05-smoke).
@@ -431,6 +447,9 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     });
   } catch (error) {
     cleanupTimers();
+    // SPEC 11.7: crash → record exit info for run.finished.
+    workerExitCode = EXIT_CODES.ERROR;
+    workerStopReason = 'error';
     // SPEC 11.6: worker.crashed only for runner self-exceptions, not ladder-induced stops.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by startLadder() during async worker
     if (!ladderRunning) {
@@ -571,6 +590,9 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     at: ctx.now().toISOString(),
     decision,
     evidence: collected.evidence,
+    // SPEC 11.7: worker exit info in progress record.
+    workerExitCode,
+    workerStopReason,
   });
   // R2 commits its envelopes only after the worker has exited (CONSTRAINTS 铁律 19).
   const envelopes = [relative(root, progressPath)];
