@@ -292,4 +292,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v02-b04-fix3 · r-20261022-102856 · PASS
+
+- 时间：2026-10-22T10:57:15.423Z
+- 裁定：规则 9，All 8 acceptance commands pass. Three items verified at code level: spawnClaudeCodeProcess hook captures pid, lazy interrupt throws when SDK has no interrupt, heartbeat uses atomic writes. No protected files changed, no dependency changes, no tests removed. CI not verifiable (no GH_TOKEN).
+- 提交：`ab4752b`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，610 passed, 0 failed
+  - `grep -qE "renameSync" src/heartbeat.ts && ! grep -qE "writeFileSync\(path," src/heartbeat.ts` → exit 0，exit 0
+  - `grep -ciE "no interrupt|without interrupt|missing interrupt" test/runner-claude.test.ts | grep -qvE "^0$"` → exit 0，exit 0
+  - `grep -qE "spawnClaudeCodeProcess" src/runner/claude.ts && grep -qE "spawnClaudeCodeProcess" test/runner-claude.test.ts` → exit 0，exit 0
+  - `grep -qE "renameSync|spawnClaudeCodeProcess" test/invariants.test.ts` → exit 0，exit 0
+  - `! grep -rlE "@anthropic-ai|spawnClaudeCodeProcess" src --include='*.ts' | grep -v '^src/runner/'` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/39765258578
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
