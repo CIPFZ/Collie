@@ -3,7 +3,7 @@
 // against this, not against the reviewer's account of the same facts.
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, isAbsolute } from 'node:path';
 import {
   isEnvelopeOnlyDiff,
   queryCi,
@@ -171,7 +171,11 @@ export async function collectEvidence(input: EvidenceInput): Promise<CollectedEv
   let ciToken: string | undefined;
   if (config.ci.token_file !== undefined) {
     const raw = config.ci.token_file;
-    const tokenPath = raw.startsWith('~') ? join(homedir(), raw.slice(1)) : raw;
+    const tokenPath = raw.startsWith('~')
+      ? join(homedir(), raw.slice(1))
+      : isAbsolute(raw)
+        ? raw
+        : join(root, raw);
     try {
       const content = readFileSync(tokenPath, 'utf8').trim();
       if (content !== '') ciToken = content;

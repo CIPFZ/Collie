@@ -1,7 +1,7 @@
 // Heartbeat file management (SPEC 11.3): write, update, cleanup, orphan
 // detection and parallel-write rejection. The heartbeat lives at
 // .collie/heartbeat.json, gitignored (it is ephemeral process state).
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 
@@ -32,25 +32,36 @@ function heartbeatPath(root: string): string {
 // eslint-disable-next-line no-restricted-syntax -- JSON indentation, not a threshold
 const JSON_INDENT = 2;
 
+/**
+ * Writes content atomically: write to a temp file in the same directory,
+ * then rename. rename() on the same filesystem is atomic on POSIX, so a
+ * concurrent reader never sees a partial/empty file (SPEC 11.3 v02-b04-fix3).
+ */
+function atomicWrite(filePath: string, content: string): void {
+  const tmpPath = filePath + '.tmp';
+  writeFileSync(tmpPath, content);
+  renameSync(tmpPath, filePath);
+}
+
 /** Writes the heartbeat file at the start of a run (SPEC 11.3). */
 export function writeHeartbeat(root: string, data: HeartbeatData): void {
-  const path = heartbeatPath(root);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(data, null, JSON_INDENT) + '\n');
+  const hbFile = heartbeatPath(root);
+  mkdirSync(dirname(hbFile), { recursive: true });
+  atomicWrite(hbFile, JSON.stringify(data, null, JSON_INDENT) + '\n');
 }
 
 /** Updates only the `updated_at` timestamp (called on every event). */
 export function touchHeartbeat(root: string, updatedAt: string): void {
-  const path = heartbeatPath(root);
+  const hbFile = heartbeatPath(root);
   let raw: string;
   try {
-    raw = readFileSync(path, 'utf8');
+    raw = readFileSync(hbFile, 'utf8');
   } catch {
     // Heartbeat was already cleaned up (race with normal exit). Nothing to touch.
     return;
   }
   const data = HeartbeatSchema.parse(JSON.parse(raw));
-  writeFileSync(path, JSON.stringify({ ...data, updated_at: updatedAt }, null, JSON_INDENT) + '\n');
+  atomicWrite(hbFile, JSON.stringify({ ...data, updated_at: updatedAt }, null, JSON_INDENT) + '\n');
 }
 
 /**
@@ -61,17 +72,17 @@ export function updateHeartbeat(
   root: string,
   updates: { phase?: HeartbeatPhase; worker_pid?: number; updated_at: string },
 ): void {
-  const path = heartbeatPath(root);
+  const hbFile = heartbeatPath(root);
   let raw: string;
   try {
-    raw = readFileSync(path, 'utf8');
+    raw = readFileSync(hbFile, 'utf8');
   } catch {
     // Heartbeat was already cleaned up. Nothing to update.
     return;
   }
   const data = HeartbeatSchema.parse(JSON.parse(raw));
-  writeFileSync(
-    path,
+  atomicWrite(
+    hbFile,
     JSON.stringify(
       {
         ...data,

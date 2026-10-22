@@ -117,6 +117,23 @@ describe('heartbeat: checkHeartbeat', () => {
     expect(checkHeartbeat(root).status).toBe('none');
   });
 
+  it('returns "none" for an empty heartbeat file without throwing (atomic write race, SPEC 11.3)', () => {
+    mkdirSync(join(root, '.collie'), { recursive: true });
+    writeFileSync(hbPath(), '');
+    // An empty file can occur if a crash interrupts between create and rename.
+    // checkHeartbeat must handle it gracefully (SPEC 11.3 v02-b04-fix3).
+    expect(() => checkHeartbeat(root)).not.toThrow();
+    expect(checkHeartbeat(root).status).toBe('none');
+  });
+
+  it('returns "none" for a half-truncated JSON heartbeat file without throwing (SPEC 11.3)', () => {
+    mkdirSync(join(root, '.collie'), { recursive: true });
+    writeFileSync(hbPath(), '{ "run_id": "r-test", "batch_id"');
+    // Truncated JSON from a crash mid-write. Must not throw (SPEC 11.3 v02-b04-fix3).
+    expect(() => checkHeartbeat(root)).not.toThrow();
+    expect(checkHeartbeat(root).status).toBe('none');
+  });
+
   it('returns "alive" when the worker_pid is alive even if pid is dead (dual-pid check, SPEC 11.3)', () => {
     writeHeartbeat(root, validData({ pid: 999999, worker_pid: process.pid }));
     const result = checkHeartbeat(root);

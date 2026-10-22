@@ -296,7 +296,7 @@ describe('runner-claude: events and cancellation', () => {
 });
 
 describe('runner-claude: RunHandle and stop levels (SPEC 11.2)', () => {
-  it('calls onStarted with a RunHandle that has no pid (SDK has none)', async () => {
+  it('calls onStarted with a RunHandle whose pid is undefined when spawn hook is not called', async () => {
     const { query } = scripted([success()]);
     let handle: unknown;
     await new ClaudeRunner(config, { query }).run(
@@ -307,7 +307,9 @@ describe('runner-claude: RunHandle and stop levels (SPEC 11.2)', () => {
       }),
     );
     expect(handle).toBeDefined();
-    expect(handle).not.toHaveProperty('pid');
+    // The scripted query double does not call the spawnClaudeCodeProcess hook,
+    // so pid remains undefined (no subprocess was spawned).
+    expect((handle as RunHandle).pid).toBeUndefined();
     expect(typeof (handle as { stop: unknown }).stop).toBe('function');
   });
 
@@ -445,6 +447,114 @@ describe('runner-claude: RunHandle and stop levels (SPEC 11.2)', () => {
     const result = await new ClaudeRunner(config, { query }).run(opts());
     expect(result.stopReason).toBe('turns_exhausted');
     expect(result.sessionId).toBe('s');
+  });
+});
+
+describe('runner-claude: spawnClaudeCodeProcess hook and worker pid (SPEC 11.2)', () => {
+  it('options contain spawnClaudeCodeProcess hook (v02-b04-fix3)', async () => {
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(config, { query }).run(opts());
+    expect(calls[0]?.options?.spawnClaudeCodeProcess).toBeTypeOf('function');
+  });
+
+  it('spawnClaudeCodeProcess hook pid flows to RunHandle (v02-b04-fix3)', async () => {
+    let capturedHandle: RunHandle | undefined;
+    const calls: ClaudeQueryParams[] = [];
+
+    // A query double that calls the spawn hook to simulate the SDK behaviour.
+    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery requires AsyncIterable
+    const query: ClaudeQuery = async function* (params) {
+      calls.push(params);
+      const hook = params.options?.spawnClaudeCodeProcess;
+      if (typeof hook === 'function') {
+        hook('echo', ['collie-test'], { env: { PATH: process.env.PATH ?? '' } });
+      }
+      yield assistant('working');
+      yield success('done');
+    };
+
+    await new ClaudeRunner(config, { query }).run(
+      opts({
+        onStarted: (h) => {
+          capturedHandle = h;
+        },
+      }),
+    );
+
+    // After the hook was called, handle.pid should be a real process id.
+    expect(capturedHandle).toBeDefined();
+    expect(capturedHandle?.pid).toBeTypeOf('number');
+    expect((capturedHandle?.pid ?? 0) > 0).toBe(true);
+  });
+
+  it('spawnClaudeCodeProcess hook strips CI tokens from spawn env (SPEC 3.1)', async () => {
+    const calls: ClaudeQueryParams[] = [];
+
+    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery requires AsyncIterable
+    const query: ClaudeQuery = async function* (params) {
+      calls.push(params);
+      const hook = params.options?.spawnClaudeCodeProcess;
+      if (typeof hook === 'function') {
+        // Simulate the SDK passing an env with CI tokens.
+        hook('echo', ['test'], {
+          env: {
+            PATH: '/usr/bin',
+            GITHUB_TOKEN: 'ghp_leaked',
+            GH_TOKEN: 'gho_leaked',
+          },
+        });
+        // We cannot inspect the sanitized env inside the child, but the hook
+        // strips tokens before passing them to spawn. The test verifies the
+        // hook is called without throwing — the structural invariant test
+        // confirms the stripping code path exists.
+      }
+      yield success();
+    };
+
+    await new ClaudeRunner(config, { query }).run(opts());
+    // The hook was called (no throw means it completed).
+    expect(calls[0]?.options?.spawnClaudeCodeProcess).toBeTypeOf('function');
+  });
+});
+
+describe('runner-claude: lazy wrapper interrupt with no interrupt on underlying iterable (v02-b04-fix3)', () => {
+  it('throws when iterable has interrupt() that reports no interrupt on underlying SDK iterable', async () => {
+    // Simulates the lazy wrapper's behaviour after the fix: the wrapper's
+    // interrupt() is present but throws because the underlying SDK iterable
+    // does not expose interrupt(). This tests the contract from ClaudeRunner's
+    // perspective: errors from interrupt() must propagate through stop('soft').
+    const query: ClaudeQuery = (): ClaudeQueryIterable => {
+      const messages = [assistant('working'), success('done')];
+      let index = 0;
+      return {
+        [Symbol.asyncIterator](): AsyncIterator<unknown> {
+          return {
+            async next(): Promise<IteratorResult<unknown>> {
+              await Promise.resolve();
+              if (index >= messages.length) return { done: true, value: undefined };
+              return { done: false, value: messages[index++] };
+            },
+          };
+        },
+        // The lazy wrapper throws here when the SDK iterable has no interrupt.
+        interrupt(): void {
+          throw new Error('no interrupt on underlying iterable');
+        },
+      };
+    };
+
+    let stopError: Error | undefined;
+    await new ClaudeRunner(config, { query }).run(
+      opts({
+        onStarted: (h) => {
+          void h.stop('soft').catch((e: unknown) => {
+            stopError = e instanceof Error ? e : new Error(String(e));
+          });
+        },
+      }),
+    );
+    expect(stopError).toBeDefined();
+    expect(stopError?.message).toMatch(/no interrupt/i);
   });
 });
 

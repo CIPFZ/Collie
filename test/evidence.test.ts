@@ -342,4 +342,35 @@ token_file = ${JSON.stringify(tokenPath)}
     const cfg = configWithTokenFile('~/.config/collie/github-token');
     expect(cfg.ci.token_file).toBe('~/.config/collie/github-token');
   });
+
+  it('resolves relative token_file path against the repository root (SPEC 3.1 v02-b04-fix3)', async () => {
+    // Place the token file inside the test repo at a relative path.
+    const relPath = '.collie/github-token';
+    write(relPath, 'relative-token\n');
+    const cfg = configWithTokenFile(relPath);
+
+    write('src.ts', 'x\n');
+    const head = await commitAll('code');
+    await git(repo, ['push', '-q', 'origin', 'main']);
+
+    const calls: { headers: Record<string, string> }[] = [];
+    const capturingFetch: FetchLike = (url, init) => {
+      calls.push({ headers: init.headers });
+      return ciFetch('main')(url, init);
+    };
+
+    await collectEvidence({
+      root: repo,
+      remote: 'origin',
+      baseSha: base,
+      headSha: head,
+      commands: [{ desc: 'true', cmd: 'true', expect: 'exit_zero' }],
+      config: cfg,
+      fetch: capturingFetch,
+    });
+
+    // The token was read from the relative path resolved against root (repo).
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0]?.headers.Authorization).toBe('Bearer relative-token');
+  });
 });

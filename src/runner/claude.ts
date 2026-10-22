@@ -3,6 +3,7 @@
 //
 // query() is injected (defaulting to the SDK's) so tests exercise this adapter
 // with a scripted double and never reach the network (CONSTRAINTS 铁律 16).
+import { spawn } from 'node:child_process';
 import type { CollieConfig } from '../schema/index.js';
 import type { AgentRunner, RunHandle, RunOptions, RunResult, Usage } from './index.js';
 
@@ -26,6 +27,26 @@ export interface ClaudeQueryOptions {
   resume?: string;
   /** Subprocess environment; R2 strips CI tokens here (SPEC 3.1 token_file). */
   env?: Record<string, string>;
+  /**
+   * SDK hook: custom subprocess spawner (SPEC 11.2). Collie supplies its own
+   * so it can capture the worker pid for heartbeat and kill-level SIGKILL.
+   */
+  spawnClaudeCodeProcess?: (
+    command: string,
+    args: readonly string[],
+    options: SpawnHookOptions,
+  ) => SpawnHookResult;
+}
+
+/** Options the SDK passes through to the spawnClaudeCodeProcess hook. */
+export interface SpawnHookOptions {
+  env?: Record<string, string | undefined>;
+  [key: string]: unknown;
+}
+
+/** Minimal shape returned by the spawn hook; ChildProcess satisfies this. */
+export interface SpawnHookResult {
+  pid?: number;
 }
 
 export interface ClaudeQueryParams {
@@ -116,12 +137,19 @@ const lazySdkQuery: ClaudeQuery = (params) => {
       };
     },
     async interrupt(): Promise<void> {
+      // SPEC 11.2 (v02-b04-fix3): three cases for the lazy wrapper.
+      if (resolvedIterable === undefined) {
+        // SDK not yet loaded: interrupt is a no-op, but log to stderr.
+        process.stderr.write('lazySdkQuery.interrupt(): SDK not yet loaded, ignoring\n');
+        return;
+      }
+      if (resolvedIterable.interrupt === undefined) {
+        // SDK loaded but iterable has no interrupt(): must throw, not silently return.
+        throw new Error('soft stop requires interrupt() on the query iterable (SPEC 11.2)');
+      }
       // SPEC 11.2: forward interrupt to the resolved SDK iterable directly on
       // the object — never extract the method, which loses `this` (v02-b04-fix).
-      // The lazy wrapper may be called before the SDK loads (resolvedIterable undefined).
-      if (resolvedIterable?.interrupt !== undefined) {
-        await resolvedIterable.interrupt();
-      }
+      await resolvedIterable.interrupt();
     },
   };
 };
@@ -201,6 +229,31 @@ export class ClaudeRunner implements AgentRunner {
       }
     }
 
+    // SPEC 11.2 (v02-b04-fix3): capture the worker subprocess pid via the
+    // spawnClaudeCodeProcess hook. The hook wraps child_process.spawn, records
+    // the pid, and also strips CI tokens from the spawn env (SPEC 3.1).
+    let workerPid: number | undefined;
+    const spawnHook: NonNullable<ClaudeQueryOptions['spawnClaudeCodeProcess']> = (
+      command,
+      args,
+      spawnOpts,
+    ) => {
+      const rawEnv = spawnOpts.env ?? {};
+      const cleanEnv: Record<string, string> = {};
+      for (const [key, value] of Object.entries(rawEnv)) {
+        if (!STRIPPED_ENV_KEYS.includes(key) && value !== undefined) {
+          cleanEnv[key] = value;
+        }
+      }
+      const child = spawn(command, [...args], {
+        cwd: spawnOpts.cwd as string | undefined,
+        env: cleanEnv,
+        ...(spawnOpts.stdio !== undefined ? { stdio: spawnOpts.stdio as 'pipe' } : {}),
+      });
+      workerPid = child.pid;
+      return child;
+    };
+
     const queryOptions: ClaudeQueryOptions = {
       // SDK isolation mode: no CLAUDE.md, settings files or hooks from the machine.
       settingSources: [],
@@ -220,6 +273,8 @@ export class ClaudeRunner implements AgentRunner {
       ...(opts.resumeSessionId === undefined ? {} : { resume: opts.resumeSessionId }),
       // SPEC 3.1 (token_file): sanitized subprocess env without CI tokens.
       env: sanitizedEnv,
+      // SPEC 11.2 (v02-b04-fix3): custom subprocess spawner to capture worker pid.
+      spawnClaudeCodeProcess: spawnHook,
     };
 
     // Soft stop calls interrupt() on the query iterable (SPEC 11.2 v02-b03: SDK-level
@@ -229,8 +284,11 @@ export class ClaudeRunner implements AgentRunner {
     let interrupted = false;
 
     // SPEC 11.2: the RunHandle gives R2 control over the run.
-    // The SDK does not expose a child-process pid, so pid is omitted.
+    // pid is set by the spawnClaudeCodeProcess hook when the SDK spawns the subprocess.
     const handle: RunHandle = {
+      get pid(): number | undefined {
+        return workerPid;
+      },
       async stop(level: 'soft' | 'hard' | 'kill'): Promise<void> {
         switch (level) {
           case 'soft': {
@@ -248,6 +306,14 @@ export class ClaudeRunner implements AgentRunner {
             controller.abort(new Error('hard stop'));
             break;
           case 'kill':
+            // SPEC 11.2 (v02-b04-fix3): SIGKILL the worker subprocess if we have its pid.
+            if (workerPid !== undefined) {
+              try {
+                process.kill(workerPid, 'SIGKILL');
+              } catch {
+                // Process already dead — expected after normal exit.
+              }
+            }
             controller.abort(new Error('kill'));
             break;
         }

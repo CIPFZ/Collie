@@ -60,4 +60,17 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/ladder.ts'), 'utf8');
     expect(content).toMatch(/fingerprint\?:/);
   });
+
+  it('heartbeat.ts uses atomic renameSync, not direct writeFileSync to path (b04-fix3)', () => {
+    const content = readFileSync(join(ROOT, 'src/heartbeat.ts'), 'utf8');
+    expect(content).toMatch(/renameSync/);
+    // writeFileSync(path, ...) must not appear — all writes go through atomicWrite.
+    // The temp-file write uses writeFileSync(tmpPath, ...) which is fine.
+    expect(content).not.toMatch(/writeFileSync\(path,/);
+  });
+
+  it('runner/claude.ts uses spawnClaudeCodeProcess hook for worker pid (b04-fix3)', () => {
+    const content = readFileSync(join(ROOT, 'src/runner/claude.ts'), 'utf8');
+    expect(content).toMatch(/spawnClaudeCodeProcess/);
+  });
 });
