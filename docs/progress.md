@@ -324,4 +324,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：1（error）
+
+### v02-b04-fix4 · r-20261022-114309 · BLOCK
+
+- 时间：2026-10-22T12:35:36.726Z
+- 裁定：规则 1，verdict unparseable: /data/workspace/Collie/.collie/batches/v02-b04-fix4/verdict.md: json block at line 218 fails the verdict schema: evidence.commits_actual.0: invalid git sha; evidence.commits_actual.1: invalid git sha
+- 提交：`8170a3d` `1bd1ac5`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，616 passed, 0 failed
+  - `! grep -qE "spawnClaudeCodeProcess\?: \($" src/runner/claude.ts && ! grep -qE "command: string,$" src/runner/claude.ts` → exit 0，exit 0
+  - `grep -qE "import type .* from '@anthropic-ai/claude-agent-sdk'" src/runner/claude.ts && ! grep -qE "interface SpawnHook" src/runner/claude.ts` → exit 0，exit 0
+  - `grep -qE "claude-agent-sdk" test/invariants.test.ts` → exit 0，exit 0
+  - `grep -qE "spawnClaudeCodeProcess\(\{" test/runner-claude.test.ts || grep -qE "spawnClaudeCodeProcess\?\.\(\{" test/runner-claude.test.ts` → exit 0，exit 0
+  - `grep -qE "'smoke'" src/cli.ts && grep -qE "smoke" test/cli.test.ts` → exit 0，exit 0
+  - `! grep -rlE "@anthropic-ai|spawnClaudeCodeProcess" src --include='*.ts' | grep -v '^src/runner/'` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/39774870884
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
