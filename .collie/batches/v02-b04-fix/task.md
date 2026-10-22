@@ -1,9 +1,9 @@
 ---
 schema_version: 1
-run_id: r-20261022-044520
+run_id: r-20261022-062718
 batch_id: v02-b04-fix
-base_sha: ba33606be4e2b819207a611599410aa5dae76620
-created_at: 2026-10-22T04:45:20.933Z
+base_sha: 34a3b23edc400cecc6a274d7d842fb1d18b49c28
+created_at: 2026-10-22T06:27:18.996Z
 attempt: 1
 interrupted_at: null
 issued_by: collie
@@ -42,6 +42,7 @@ issued_by: collie
 | this 绑定有回归测试 | `grep -qE "binds this" test/runner-claude.test.ts` | exit 0 |
 | 未处理拒绝有兜底 | `grep -qE "unhandledRejection" src/run.ts src/cli.ts` | exit 0 |
 | 指纹已注入且看内容 | `grep -qE "fingerprint\?:" src/ladder.ts && grep -qE "diff" src/ladder.ts` | exit 0 |
+| 场景 G 两个用例都注入了假指纹 | `test "$(grep -cE "livenessFingerprint" test/scenario-g.test.ts)" -ge 2` | exit 0 |
 | SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
 
 ## 本批次额外禁止
