@@ -29,7 +29,7 @@
 | 11 | v02-b04-tests | 测试去真实定时器 | v02-b04 | blocked |
 | 12 | v02-b04-fix | R2 不再崩：interrupt this、异常兜底、内容指纹 | v02-b04 | passed |
 | 13 | v02-b04-fix2 | CI 证据与结构回归 | v02-b04-fix | passed |
-| 14 | v02-b04-fix3 | worker_pid、包装层 interrupt、原子心跳 | v02-b04-fix2 | pending |
+| 14 | v02-b04-fix3 | worker_pid、包装层 interrupt、原子心跳 | v02-b04-fix2 | passed |
 | 15 | v02-b05 | 中断标记与 resume | v02-b04-fix3 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
@@ -578,6 +578,11 @@ claims `pushed=false` 而实际已推送，第二次出现（b03 亦然），无
 - 为了让测试过而删除或跳过任何测试
 - 条目 1 不得改变 soft / hard 的现有实现（`interrupt()` / abort）
 
+记录：第 1 次运行 r-20261022-102856 PASS（裁定 `f821742`），8/8 验收通过，610 全过。
+fix2 的两项第一次真实生效：R2 用 token 取到 head_sha 自己的 CI（success、监听分支一致），未等待；
+子进程环境无密钥（/proc 实读）、stream.ndjson 无 token 字样。阈值恢复 900 / 2700。
+遗留：CI 取证成功时 journal 无事件（只有超时才写），进 b05 条目 2。
+
 ## v02-b05 中断标记与 resume
 
 优先级：15　依赖：v02-b04-fix3
@@ -591,7 +596,8 @@ claims `pushed=false` 而实际已推送，第二次出现（b03 亦然），无
    上报路径用 git 实测 `base_sha..HEAD` 与推送状态写入 progress，措辞「上报：无 report」，不再出现「规则 0」
 2. resume 策略（11.7）：按 `resume_max` 决定是否传 `resumeSessionId`；新增事件 `worker.resumed`；
    仲裁 PASS 的运行不算中断、`attempt` 不递增（11.7 第一段）；
-   `claude.ts` 的 `turns_exhausted` 映射已在 b03 提前落地，本批次只需测试覆盖
+   `claude.ts` 的 `turns_exhausted` 映射已在 b03 提前落地，本批次只需测试覆盖。
+   顺带：CI 取证成功时记 `ci.resolved` 事件（3.6 字段），`collie show` 能据此还原 R2 等了多久
 3. 场景 E 后半段（attempt / interrupted_at / rescue_sha）与场景 F：
    `test/scenario-e.test.ts` 补全，`test/scenario-f.test.ts` 新增；
    `collie show` 按顺序还原 E / F / G 的事件链
@@ -606,7 +612,11 @@ claims `pushed=false` 而实际已推送，第二次出现（b03 亦然），无
 | 场景 E 完整 | `npm test -- test/scenario-e.test.ts` | exit 0 |
 | 场景 F | `npm test -- test/scenario-f.test.ts` | exit 0 |
 | show 还原事件链 | `npm test -- test/show.test.ts` | exit 0 |
+| ci.resolved 进 schema 与 R2 | `grep -qE "ci\.resolved" src/schema/index.ts && grep -qE "ci\.resolved" src/run.ts && grep -qE "ci\.resolved" test/invariants.test.ts` | exit 0 |
+| 场景 F 覆盖 resume 上限 | `grep -qE "resume_max" test/scenario-f.test.ts` | exit 0 |
+| 后续 attempt 沿用首次 base_sha 有测试 | `grep -qE "base_sha" test/scenario-e.test.ts` | exit 0 |
 
 额外禁止：
 - 改动任何受保护路径
 - resume 的 session 内容进入 journal（只记 session_id）
+- 为了让测试过而删除或跳过任何测试

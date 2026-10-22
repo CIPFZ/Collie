@@ -126,8 +126,8 @@ permission_mode = "bypassPermissions"
 
 [limits]
 stall_secs = 300         # 事件流静默判定卡死；v02-b04 第 1 次运行 90 秒把「正在写 report」误判为卡死，上调
-progress_secs = 3600     # 有事件但无产出判定空转。临时值：v02-b04-fix 修好 soft 崩溃前任何 soft 都会让 R2 退出，先让空转实际不触发；b04-fix 通过后 R1 恢复 900
-wallclock_secs = 5400    # 单批次墙钟硬顶。临时值，同上；b04-fix 通过后恢复 2700
+progress_secs = 900      # 有事件但无产出判定空转（b04-fix 期间临时 3600，fix3 通过后恢复）
+wallclock_secs = 2700    # 单批次墙钟硬顶（同上，临时 5400 已恢复）
 resume_max = 2           # resume 上限（v0.2 生效）
 fix_max = 2              # 同批次 FIX 上限（v0.3 生效）
 dry_k = 2                # 连续 dry 轮数（v0.5 生效）
@@ -366,6 +366,7 @@ type EventType =
   | 'claim.mismatch' | 'verdict.downgraded'
   | 'escalated'
   | 'ci.wait_timeout'    // 等 CI 超过 ci_wait_secs 仍无结论；字段 head_sha / waited_secs / last_state
+  | 'ci.resolved'        // 取到 CI 结论；字段 head_sha / conclusion / branch_matched / run_url / waited_secs / polls / attributed_sha（采信后代时）
   | 'acceptance.failed'   // 规则 8：实测验收未满足；字段 cmd / exit_code / expect
   | 'run.orphaned' | 'worker.stalled' | 'worker.idling'
   | 'worker.signaled' | 'worker.rescued' | 'worker.resumed';  // v0.2，见第 11 章
