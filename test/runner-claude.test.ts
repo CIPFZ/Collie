@@ -373,6 +373,57 @@ describe('runner-claude: RunHandle and stop levels (SPEC 11.2)', () => {
     expect(calls[0]?.options?.abortController?.signal.aborted).toBe(true);
   });
 
+  it('soft stop binds this: interrupt() that reads this.state works (v02-b04-fix regression)', async () => {
+    // A test double whose interrupt() accesses `this` — if the caller extracts
+    // the method (`const fn = q.interrupt; fn()`), `this` is undefined and the
+    // call throws TypeError. This is the exact failure from v02-b04-fix attempt 1.
+    let _interrupted = false;
+    const calls: ClaudeQueryParams[] = [];
+    const query: ClaudeQuery = (params: ClaudeQueryParams): ClaudeQueryIterable => {
+      calls.push(params);
+      let index = 0;
+      const messages = [assistant('working'), assistant('more'), success('done')];
+      const iterable: ClaudeQueryIterable = {
+        // A field that interrupt() reads via `this`.
+        state: 'running',
+        [Symbol.asyncIterator](): AsyncIterator<unknown> {
+          return {
+            async next(): Promise<IteratorResult<unknown>> {
+              await Promise.resolve();
+              if (_interrupted || index >= messages.length) {
+                return { done: true, value: undefined };
+              }
+              return { done: false, value: messages[index++] };
+            },
+          };
+        },
+        interrupt(): void {
+          // `this` must be the iterable object. When `this` is undefined
+          // (method was extracted), accessing .state throws TypeError.
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any -- intentional this-check
+          if ((this as any).state !== 'running') {
+            throw new TypeError('interrupt() lost this — state is unreachable');
+          }
+          _interrupted = true;
+        },
+      } as ClaudeQueryIterable & { state: string };
+      return iterable;
+    };
+
+    let handle: RunHandle | undefined;
+    const result = await new ClaudeRunner(config, { query }).run(
+      opts({
+        onStarted: (h) => {
+          handle = h;
+          void h.stop('soft');
+        },
+      }),
+    );
+    expect(handle).toBeDefined();
+    expect(_interrupted).toBe(true);
+    expect(result.stopReason).toBe('stopped');
+  });
+
   it('preserves sessionId when the SDK throws an error (SPEC 11.2)', async () => {
     // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery demands AsyncIterable
     const query: ClaudeQuery = async function* () {

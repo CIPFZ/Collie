@@ -113,11 +113,13 @@ const lazySdkQuery: ClaudeQuery = (params) => {
         },
       };
     },
-    interrupt(): void {
-      // SPEC 11.2: forward interrupt to the resolved SDK iterable; the lazy
-      // wrapper may be called before the SDK loads (resolvedIterable undefined).
-      const fn = resolvedIterable?.interrupt;
-      if (fn !== undefined) void fn();
+    async interrupt(): Promise<void> {
+      // SPEC 11.2: forward interrupt to the resolved SDK iterable directly on
+      // the object — never extract the method, which loses `this` (v02-b04-fix).
+      // The lazy wrapper may be called before the SDK loads (resolvedIterable undefined).
+      if (resolvedIterable?.interrupt !== undefined) {
+        await resolvedIterable.interrupt();
+      }
     },
   };
 };
@@ -221,11 +223,11 @@ export class ClaudeRunner implements AgentRunner {
             interrupted = true;
             // SPEC 11.2: interrupt() is required for soft stop. If the query
             // iterable does not expose it, throw — never silently skip.
-            const interruptFn = queryIterable.interrupt;
-            if (interruptFn === undefined) {
+            // Call directly on the object to preserve `this` (v02-b04-fix).
+            if (queryIterable.interrupt === undefined) {
               throw new Error('soft stop requires interrupt() on the query iterable (SPEC 11.2)');
             }
-            await interruptFn();
+            await queryIterable.interrupt();
             break;
           }
           case 'hard':
