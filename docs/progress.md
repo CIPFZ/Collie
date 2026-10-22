@@ -248,4 +248,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v02-b04-fix · r-20261022-062718 · PASS
+
+- 时间：2026-10-22T07:41:51.655Z
+- 裁定：规则 9，全部 10 条验收命令实跑通过，三个条目的具体实现要求逐条核对均有代码证据，head_sha 已在 origin/main，无受保护文件改动，无依赖变化，diff 范围在条目 3 之内
+- 提交：`6fe4d74`
+- 验收命令：10/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，583 passed, 0 failed
+  - `for i in 1 2 3 4 5; do npx vitest run test/scenario-g.test.ts || exit 1; done` → exit 0，3 passed, 0 failed
+  - `! grep -qE "= *(resolvedIterable|queryIterable)\??\.interrupt;" src/runner/claude.ts` → exit 0，exit 0
+  - `grep -qE "binds this" test/runner-claude.test.ts` → exit 0，exit 0
+  - `grep -qE "unhandledRejection" src/run.ts src/cli.ts` → exit 0，exit 0
+  - `grep -qE "fingerprint\?:" src/ladder.ts && grep -qE "diff" src/ladder.ts` → exit 0，exit 0
+  - `test "$(grep -cE "livenessFingerprint" test/scenario-g.test.ts)" -ge 2` → exit 0，exit 0
+  - `! grep -rlE "@anthropic-ai" src --include='*.ts' | grep -v '^src/runner/'` → exit 0，exit 0
+- 已推送：是
+- CI：unknown，监听分支未能取证
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
