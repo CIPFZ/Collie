@@ -105,6 +105,8 @@ export interface RunContext {
   livenessNow?: () => number;
   /** Injected timer for the liveness monitor (SPEC 11.5); defaults to setTimeout. */
   livenessSetTimer?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  /** Injected fingerprint function for the liveness monitor (SPEC 11.5, v02-b04-fix). */
+  livenessFingerprint?: (root: string) => Promise<string>;
 }
 
 export interface RunOutcome {
@@ -427,6 +429,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       ...(ctx.livenessIntervalMs === undefined ? {} : { checkIntervalMs: ctx.livenessIntervalMs }),
       ...(ctx.livenessNow === undefined ? {} : { now: ctx.livenessNow }),
       ...(ctx.livenessSetTimer === undefined ? {} : { setTimer: ctx.livenessSetTimer }),
+      ...(ctx.livenessFingerprint === undefined ? {} : { fingerprint: ctx.livenessFingerprint }),
     });
 
     // SPEC 11.3: stream + heartbeat callbacks.

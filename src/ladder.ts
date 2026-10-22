@@ -3,7 +3,9 @@
 // worker.signaled. Liveness detection fires the ladder when the worker stalls
 // (no events) or idles (events but no progress).
 import { createHash } from 'node:crypto';
-import { revParse, status } from './git.js';
+import { lstatSync } from 'node:fs';
+import { join } from 'node:path';
+import { git, revParse, status } from './git.js';
 import type { RunHandle } from './runner/index.js';
 
 // eslint-disable-next-line no-restricted-syntax -- unit conversion, not a threshold
@@ -64,12 +66,33 @@ export async function runLadder(opts: LadderOptions): Promise<void> {
 // Liveness monitor (SPEC 11.5)
 // ---------------------------------------------------------------------------
 
-/** Computes the output fingerprint: HEAD sha + git status hash (SPEC 11.5). */
+/**
+ * Computes the output fingerprint (SPEC 11.5): HEAD sha + hash of `git diff HEAD`
+ * output + hash of untracked files (path, size, mtime). This fingerprint changes
+ * when file content changes, unlike `git status --porcelain` which only reports
+ * that a file is dirty without reflecting further edits (v02-b04-fix motivation).
+ */
 export async function computeFingerprint(root: string): Promise<string> {
   const head = await revParse(root, 'HEAD');
+  // `git diff HEAD` shows tracked-file content changes (staged + unstaged vs HEAD).
+  const diff = await git(root, ['diff', 'HEAD']);
+  const diffHash = createHash('sha256').update(diff).digest('hex');
+  // Untracked files: (path, size, mtime) — captures new/changed untracked content.
   const ws = await status(root);
-  const raw = head + '\n' + ws.entries.map((e) => `${e.code} ${e.path}`).join('\n');
-  return createHash('sha256').update(raw).digest('hex');
+  const untracked = ws.entries
+    .filter((e) => e.code === '??')
+    .map((e) => {
+      try {
+        const st = lstatSync(join(root, e.path));
+        return `${e.path}\t${String(st.size)}\t${String(st.mtimeMs)}`;
+      } catch {
+        return `${e.path}\t0\t0`;
+      }
+    })
+    .sort()
+    .join('\n');
+  const untrackedHash = createHash('sha256').update(untracked).digest('hex');
+  return createHash('sha256').update(`${head}\n${diffHash}\n${untrackedHash}`).digest('hex');
 }
 
 export interface LivenessConfig {
@@ -92,6 +115,12 @@ export interface LivenessConfig {
    * Tests pass a fake to avoid real delays.
    */
   setTimer?: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  /**
+   * Injected fingerprint function (SPEC 11.5, v02-b04-fix). Defaults to
+   * computeFingerprint (HEAD + git diff HEAD hash + untracked files hash).
+   * Tests inject a fake to avoid real git subprocess timing issues.
+   */
+  fingerprint?: (root: string) => Promise<string>;
 }
 
 // eslint-disable-next-line no-restricted-syntax -- monitor default interval, not a threshold
@@ -107,6 +136,7 @@ export class LivenessMonitor {
   private readonly checkIntervalMs: number;
   private readonly nowFn: () => number;
   private readonly setTimerFn: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  private readonly fingerprintFn: (root: string) => Promise<string>;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private lastEventMs: number;
   private lastProgressMs: number;
@@ -119,6 +149,7 @@ export class LivenessMonitor {
     this.checkIntervalMs = config.checkIntervalMs ?? DEFAULT_CHECK_INTERVAL_MS;
     this.nowFn = config.now ?? (() => Date.now());
     this.setTimerFn = config.setTimer ?? ((cb, ms) => setTimeout(cb, ms));
+    this.fingerprintFn = config.fingerprint ?? computeFingerprint;
     const now = this.nowFn();
     this.lastEventMs = now;
     this.lastProgressMs = now;
@@ -164,7 +195,7 @@ export class LivenessMonitor {
 
     // Idle: events arriving but fingerprint unchanged for progress_secs.
     try {
-      const fp = await computeFingerprint(this.config.root);
+      const fp = await this.fingerprintFn(this.config.root);
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by stop()/check() during await
       if (this.stopped || this.triggered) return; // May have been stopped while awaiting.
       if (this.lastFingerprint === undefined || fp !== this.lastFingerprint) {

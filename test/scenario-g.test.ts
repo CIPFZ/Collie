@@ -197,3 +197,24 @@ describe('scenario G: idle worker detected by liveness monitor (SPEC 11.5, 11.6)
     expect(signaled[1]).toMatchObject({ level: 'hard', reason: 'idling' });
   });
 });
+
+describe('computeFingerprint: content-sensitive (SPEC 11.5, v02-b04-fix)', () => {
+  it('same file modified twice produces different fingerprints', async () => {
+    const { computeFingerprint } = await import('../src/ladder.js');
+
+    // Write a tracked file and commit it.
+    box.write('tracked.txt', 'version 1\n');
+    await git(box.root, ['add', 'tracked.txt']);
+    await git(box.root, ['commit', '-q', '-m', 'add tracked']);
+
+    // Modify the tracked file → first fingerprint.
+    box.write('tracked.txt', 'version 2\n');
+    const fp1 = await computeFingerprint(box.root);
+
+    // Modify the same tracked file again → second fingerprint must differ.
+    box.write('tracked.txt', 'version 3\n');
+    const fp2 = await computeFingerprint(box.root);
+
+    expect(fp1).not.toBe(fp2);
+  });
+});

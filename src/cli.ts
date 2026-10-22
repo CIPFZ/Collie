@@ -45,6 +45,8 @@ export interface CliDeps {
   livenessNow?: () => number;
   /** Test hook: injected timer for the liveness monitor (SPEC 11.5). */
   livenessSetTimer?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  /** Test hook: injected fingerprint function for the liveness monitor (SPEC 11.5, v02-b04-fix). */
+  livenessFingerprint?: (root: string) => Promise<string>;
 }
 
 const TEMPLATE = join(import.meta.dirname, '..', 'templates', 'collie.toml');
@@ -155,6 +157,9 @@ async function run(
       : { livenessIntervalMs: deps.livenessIntervalMs }),
     ...(deps.livenessNow === undefined ? {} : { livenessNow: deps.livenessNow }),
     ...(deps.livenessSetTimer === undefined ? {} : { livenessSetTimer: deps.livenessSetTimer }),
+    ...(deps.livenessFingerprint === undefined
+      ? {}
+      : { livenessFingerprint: deps.livenessFingerprint }),
   });
   const how =
     outcome.decision === undefined
