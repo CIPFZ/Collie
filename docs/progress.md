@@ -345,4 +345,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v02-b05 · r-20261022-161827 · PASS
+
+- 时间：2026-10-22T16:56:26.047Z
+- 裁定：规则 9，全部 10 条验收命令退出码 0；635 测试全绿；三条目实现完整并有测试覆盖；受保护路径零改动；无新增依赖。CI 以 R2 取证为准。
+- 提交：`d6c824a` `527f880`
+- 验收命令：10/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，635 passed, 0 failed
+  - `npm test -- test/scenario-e.test.ts` → exit 0，8 passed, 0 failed
+  - `npm test -- test/scenario-f.test.ts` → exit 0，4 passed, 0 failed
+  - `npm test -- test/show.test.ts` → exit 0，5 passed, 0 failed
+  - `grep -qE "ci\.resolved" src/schema/index.ts && grep -qE "ci\.resolved" src/run.ts && grep -qE "ci\.resolved" test/invariants.test.ts` → exit 0，exit 0
+  - `grep -qE "resume_max" test/scenario-f.test.ts` → exit 0，exit 0
+  - `grep -qE "base_sha" test/scenario-e.test.ts` → exit 0，exit 0
+  - `grep -qE "rev-parse|revParse" src/evidence.ts && grep -qE "no_runs" test/ci.test.ts && grep -qiE "short sha|expands" test/ci.test.ts test/evidence.test.ts` → exit 0，exit 0
+- 已推送：否
+- CI：unknown，监听分支不一致
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
