@@ -119,4 +119,30 @@ describe('cli: init, show and the R2 commits', () => {
     expect(await box.cli(['run', BATCH, '--runner', 'gpt'], undefined)).toBe(1);
     expect(box.output.join('')).toContain('unknown runner "gpt"');
   });
+
+  it('smoke succeeds with a fake runner that returns a RunResult', async () => {
+    const r = new FakeRunner([
+      {
+        result: {
+          exitCode: 0,
+          sessionId: 'smoke-session',
+          usage: { inputTokens: 100, outputTokens: 50 },
+        },
+      },
+    ]);
+    expect(await box.cli(['smoke'], r)).toBe(0);
+    const output = box.output.join('');
+    expect(output).toContain('smoke ok');
+    expect(output).toContain('exitCode=0');
+    expect(output).toContain('sessionId=smoke-session');
+    expect(output).toContain('usage=');
+  });
+
+  it('smoke returns exit 1 when the runner throws', async () => {
+    const r = new FakeRunner([{ error: new Error('cannot connect') }]);
+    expect(await box.cli(['smoke'], r)).toBe(1);
+    const output = box.output.join('');
+    expect(output).toContain('smoke failed');
+    expect(output).toContain('cannot connect');
+  });
 });

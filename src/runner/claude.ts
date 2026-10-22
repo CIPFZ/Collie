@@ -7,11 +7,8 @@
 // SPEC 11.2: types passed to the SDK are `import type` from the SDK package
 // and derived with Pick / indexed access. Hand-written copies drift silently.
 import { spawn } from 'node:child_process';
-import type {
-  Options as SdkOptions,
-  SpawnOptions as SdkSpawnOptions,
-  SpawnedProcess as SdkSpawnedProcess,
-} from '@anthropic-ai/claude-agent-sdk';
+// prettier-ignore
+import type { Options as SdkOptions, SpawnOptions as SdkSpawnOptions, SpawnedProcess as SdkSpawnedProcess } from '@anthropic-ai/claude-agent-sdk';
 import type { CollieConfig } from '../schema/index.js';
 import type { AgentRunner, RunHandle, RunOptions, RunResult, Usage } from './index.js';
 

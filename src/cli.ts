@@ -244,6 +244,39 @@ function show(deps: CliDeps, batchId: string): number {
   return EXIT_CODES.PASS;
 }
 
+const SMOKE_PROMPT = 'Reply with the single word ok.';
+const SMOKE_MAX_TURNS = 1;
+
+/**
+ * Smoke-test the configured runner (SPEC v02-b04-fix4). Fires a single turn
+ * with no tools and a trivial prompt. Does NOT write journal or touch batches.
+ */
+async function smoke(deps: CliDeps, runnerChoice?: RunnerChoice): Promise<number> {
+  const runner = resolveRunner(runnerChoice ?? deps.runner, deps.cwd);
+  if (runner === undefined) {
+    deps.err('no agent runner is available\n');
+    return EXIT_CODES.ERROR;
+  }
+  try {
+    const result = await runner.run({
+      role: 'worker',
+      prompt: SMOKE_PROMPT,
+      systemPrompt: '',
+      allowedTools: [],
+      cwd: deps.cwd,
+      maxTurns: SMOKE_MAX_TURNS,
+    });
+    const parts = [`smoke ok: exitCode=${String(result.exitCode)}`];
+    if (result.sessionId !== undefined) parts.push(`sessionId=${result.sessionId}`);
+    if (result.usage !== undefined) parts.push(`usage=${JSON.stringify(result.usage)}`);
+    deps.out(`${parts.join(' ')}\n`);
+    return EXIT_CODES.PASS;
+  } catch (error) {
+    deps.err(`smoke failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    return EXIT_CODES.ERROR;
+  }
+}
+
 /** Parses argv (without node and script) and runs one command; resolves with the exit code. */
 export async function main(argv: readonly string[], deps: CliDeps): Promise<number> {
   let code: number = EXIT_CODES.ERROR;
@@ -284,6 +317,21 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
     .argument('<batch_id>')
     .action((batchId: string) => {
       code = show(deps, batchId);
+    });
+  program
+    .command('smoke')
+    .description(
+      'smoke-test the configured runner: maxTurns 1, no tools, prompt "Reply with the single word ok."',
+    )
+    .option('--runner <kind>', 'agent runner: claude (default) or fake')
+    .action(async (opts: { runner?: string }) => {
+      const kind = opts.runner;
+      if (kind !== undefined && kind !== 'claude' && kind !== 'fake') {
+        deps.err(`unknown runner ${JSON.stringify(kind)}; use claude or fake\n`);
+        code = EXIT_CODES.ERROR;
+        return;
+      }
+      code = await smoke(deps, kind === undefined ? undefined : { kind });
     });
 
   try {

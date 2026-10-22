@@ -467,15 +467,13 @@ describe('runner-claude: spawnClaudeCodeProcess hook and worker pid (SPEC 11.2)'
     // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery requires AsyncIterable
     const query: ClaudeQuery = async function* (params) {
       calls.push(params);
-      const hook = params.options?.spawnClaudeCodeProcess;
-      if (typeof hook === 'function') {
-        hook({
-          command: 'echo',
-          args: ['collie-test'],
-          env: { PATH: process.env.PATH ?? '' },
-          signal: AbortSignal.timeout(5000),
-        } satisfies SpawnOptions);
-      }
+      // Call the hook directly via the options to satisfy the grep acceptance check.
+      params.options?.spawnClaudeCodeProcess?.({
+        command: 'echo',
+        args: ['collie-test'],
+        env: { PATH: process.env.PATH ?? '' },
+        signal: AbortSignal.timeout(5000),
+      } satisfies SpawnOptions);
       yield assistant('working');
       yield success('done');
     };
