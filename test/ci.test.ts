@@ -402,7 +402,9 @@ describe('ci: waitForCi (v01-b05 2c)', () => {
         'x-ratelimit-remaining': '0',
         'x-ratelimit-reset': resetSecs,
       });
-    const wait = await waitForCi(query, sequence(limited, green).fetch, LIMITS, clock);
+    // Authenticated query: rate limit is waited out (SPEC 3.1: only unauthenticated skips).
+    const authQuery = { ...query, token: 'ghp_test' };
+    const wait = await waitForCi(authQuery, sequence(limited, green).fetch, LIMITS, clock);
     expect(wait).toMatchObject({ timedOut: false, polls: 2 });
     expect(clock.sleeps).toEqual([120_000]);
   });
@@ -426,6 +428,40 @@ describe('ci: waitForCi (v01-b05 2c)', () => {
       'HTTP 502',
     );
     expect(clock.sleeps).toEqual([]);
+  });
+
+  it('unauthenticated rate limit on first poll returns immediately without waiting', async () => {
+    const clock = fakeClock();
+    const limited = (): Response =>
+      json({ message: 'API rate limit exceeded' }, 403, {
+        'x-ratelimit-remaining': '0',
+      });
+    // query.token is '' (unauthenticated); first poll rate_limited → return at once.
+    const wait = await waitForCi(query, sequence(limited, green).fetch, LIMITS, clock);
+    expect(wait).toMatchObject({
+      result: undefined,
+      timedOut: true,
+      waitedMs: 0,
+      polls: 1,
+      lastState: 'rate_limited',
+    });
+    // No sleeps: did not wait for the rate limit to reset.
+    expect(clock.sleeps).toEqual([]);
+  });
+
+  it('authenticated rate limit on first poll still waits as before', async () => {
+    const clock = fakeClock();
+    const resetSecs = String(Math.floor(clock.t / 1000) + 120);
+    const limited = (): Response =>
+      json({ message: 'API rate limit exceeded' }, 403, {
+        'x-ratelimit-remaining': '0',
+        'x-ratelimit-reset': resetSecs,
+      });
+    const authQuery = { ...query, token: 'ghp_fake' };
+    const wait = await waitForCi(authQuery, sequence(limited, green).fetch, LIMITS, clock);
+    expect(wait).toMatchObject({ timedOut: false, polls: 2 });
+    // Waited for the rate-limit reset (120s).
+    expect(clock.sleeps).toEqual([120_000]);
   });
 });
 

@@ -333,6 +333,17 @@ export async function waitForCi(
     } catch (error) {
       if (!(error instanceof CiRateLimitError)) throw error;
       lastState = 'rate_limited';
+      // SPEC 3.1: unauthenticated and first poll already rate_limited → no point
+      // waiting ci_wait_secs; return immediately as unknown with waited_secs=0.
+      if (!error.authenticated && polls === 1) {
+        return {
+          result: undefined,
+          timedOut: true,
+          waitedMs: clock.now() - start,
+          polls,
+          lastState,
+        };
+      }
       if (error.resetAt !== undefined)
         delay = Math.max(delay, error.resetAt.getTime() - clock.now());
     }
