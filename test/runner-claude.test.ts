@@ -10,6 +10,7 @@ import {
   type ClaudeQuery,
   type ClaudeQueryIterable,
   type ClaudeQueryParams,
+  type SpawnOptions,
 } from '../src/runner/claude.js';
 import type { RunHandle, RunOptions } from '../src/runner/index.js';
 
@@ -462,12 +463,18 @@ describe('runner-claude: spawnClaudeCodeProcess hook and worker pid (SPEC 11.2)'
     const calls: ClaudeQueryParams[] = [];
 
     // A query double that calls the spawn hook to simulate the SDK behaviour.
+    // SPEC 11.2: the hook receives a single SpawnOptions object, not three args.
     // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery requires AsyncIterable
     const query: ClaudeQuery = async function* (params) {
       calls.push(params);
       const hook = params.options?.spawnClaudeCodeProcess;
       if (typeof hook === 'function') {
-        hook('echo', ['collie-test'], { env: { PATH: process.env.PATH ?? '' } });
+        hook({
+          command: 'echo',
+          args: ['collie-test'],
+          env: { PATH: process.env.PATH ?? '' },
+          signal: AbortSignal.timeout(5000),
+        } satisfies SpawnOptions);
       }
       yield assistant('working');
       yield success('done');
@@ -495,14 +502,17 @@ describe('runner-claude: spawnClaudeCodeProcess hook and worker pid (SPEC 11.2)'
       calls.push(params);
       const hook = params.options?.spawnClaudeCodeProcess;
       if (typeof hook === 'function') {
-        // Simulate the SDK passing an env with CI tokens.
-        hook('echo', ['test'], {
+        // Simulate the SDK passing an env with CI tokens via a single SpawnOptions object.
+        hook({
+          command: 'echo',
+          args: ['test'],
           env: {
             PATH: '/usr/bin',
             GITHUB_TOKEN: 'ghp_leaked',
             GH_TOKEN: 'gho_leaked',
           },
-        });
+          signal: AbortSignal.timeout(5000),
+        } satisfies SpawnOptions);
         // We cannot inspect the sanitized env inside the child, but the hook
         // strips tokens before passing them to spawn. The test verifies the
         // hook is called without throwing — the structural invariant test
@@ -514,6 +524,42 @@ describe('runner-claude: spawnClaudeCodeProcess hook and worker pid (SPEC 11.2)'
     await new ClaudeRunner(config, { query }).run(opts());
     // The hook was called (no throw means it completed).
     expect(calls[0]?.options?.spawnClaudeCodeProcess).toBeTypeOf('function');
+  });
+
+  it('spawnClaudeCodeProcess hook receives single SpawnOptions object and strips GITHUB_TOKEN from env (v02-b04-fix4)', async () => {
+    // Spawn a real node subprocess that reports its own env keys via stdout.
+    // This end-to-end test proves the hook strips CI tokens before passing env to spawn.
+    const innerCalls: ClaudeQueryParams[] = [];
+    let childEnvKeys: string[] = [];
+    const query: ClaudeQuery = async function* (params) {
+      innerCalls.push(params);
+      const hook = params.options?.spawnClaudeCodeProcess;
+      if (typeof hook === 'function') {
+        // Call the hook with a single SpawnOptions object containing a CI token.
+        const child = hook({
+          command: process.execPath,
+          args: ['-e', 'process.stdout.write(JSON.stringify(Object.keys(process.env)))'],
+          env: { GITHUB_TOKEN: 'fake-token', PATH: '/x' },
+          signal: AbortSignal.timeout(5000),
+        } satisfies SpawnOptions);
+        // Read the child's stdout to see what env it actually received.
+        childEnvKeys = await new Promise<string[]>((resolve) => {
+          let data = '';
+          child.stdout.on('data', (chunk: Buffer) => {
+            data += String(chunk);
+          });
+          child.on('exit', () => {
+            resolve(data === '' ? [] : (JSON.parse(data) as string[]));
+          });
+        });
+      }
+      yield success();
+    };
+
+    await new ClaudeRunner(config, { query }).run(opts());
+    // GITHUB_TOKEN must be stripped; PATH must remain.
+    expect(childEnvKeys).not.toContain('GITHUB_TOKEN');
+    expect(childEnvKeys).toContain('PATH');
   });
 });
 

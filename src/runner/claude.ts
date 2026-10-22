@@ -3,51 +3,41 @@
 //
 // query() is injected (defaulting to the SDK's) so tests exercise this adapter
 // with a scripted double and never reach the network (CONSTRAINTS 铁律 16).
+//
+// SPEC 11.2: types passed to the SDK are `import type` from the SDK package
+// and derived with Pick / indexed access. Hand-written copies drift silently.
 import { spawn } from 'node:child_process';
+import type {
+  Options as SdkOptions,
+  SpawnOptions as SdkSpawnOptions,
+  SpawnedProcess as SdkSpawnedProcess,
+} from '@anthropic-ai/claude-agent-sdk';
 import type { CollieConfig } from '../schema/index.js';
 import type { AgentRunner, RunHandle, RunOptions, RunResult, Usage } from './index.js';
 
 /**
- * The slice of the SDK this adapter uses. Keeping it structural means the real
- * package and a test double are interchangeable, and no other module needs the
- * SDK's types.
+ * The slice of the SDK Options this adapter actually passes to query().
+ * Derived from the SDK's own type so field names cannot drift (SPEC 11.2).
  */
-export interface ClaudeQueryOptions {
-  model?: string;
-  maxTurns?: number;
-  systemPrompt?: string;
-  allowedTools?: string[];
-  cwd?: string;
-  abortController?: AbortController;
-  includePartialMessages?: boolean;
-  permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk' | 'auto';
-  allowDangerouslySkipPermissions?: boolean;
-  settingSources?: readonly string[];
-  /** SDK resume field: pass the session id of a previous run to continue it (SPEC 11.2). */
-  resume?: string;
-  /** Subprocess environment; R2 strips CI tokens here (SPEC 3.1 token_file). */
-  env?: Record<string, string>;
-  /**
-   * SDK hook: custom subprocess spawner (SPEC 11.2). Collie supplies its own
-   * so it can capture the worker pid for heartbeat and kill-level SIGKILL.
-   */
-  spawnClaudeCodeProcess?: (
-    command: string,
-    args: readonly string[],
-    options: SpawnHookOptions,
-  ) => SpawnHookResult;
-}
+export type ClaudeQueryOptions = Pick<
+  SdkOptions,
+  | 'model'
+  | 'maxTurns'
+  | 'systemPrompt'
+  | 'allowedTools'
+  | 'cwd'
+  | 'abortController'
+  | 'permissionMode'
+  | 'allowDangerouslySkipPermissions'
+  | 'settingSources'
+  | 'resume'
+  | 'env'
+  | 'spawnClaudeCodeProcess'
+>;
 
-/** Options the SDK passes through to the spawnClaudeCodeProcess hook. */
-export interface SpawnHookOptions {
-  env?: Record<string, string | undefined>;
-  [key: string]: unknown;
-}
-
-/** Minimal shape returned by the spawn hook; ChildProcess satisfies this. */
-export interface SpawnHookResult {
-  pid?: number;
-}
+/** Re-export SDK spawn types for test doubles (SPEC 11.2). */
+export type SpawnOptions = SdkSpawnOptions;
+export type SpawnedProcess = SdkSpawnedProcess;
 
 export interface ClaudeQueryParams {
   prompt: string;
@@ -232,23 +222,20 @@ export class ClaudeRunner implements AgentRunner {
     // SPEC 11.2 (v02-b04-fix3): capture the worker subprocess pid via the
     // spawnClaudeCodeProcess hook. The hook wraps child_process.spawn, records
     // the pid, and also strips CI tokens from the spawn env (SPEC 3.1).
+    // SPEC 11.2: the hook signature is (options: SpawnOptions) => SpawnedProcess.
     let workerPid: number | undefined;
-    const spawnHook: NonNullable<ClaudeQueryOptions['spawnClaudeCodeProcess']> = (
-      command,
-      args,
-      spawnOpts,
-    ) => {
-      const rawEnv = spawnOpts.env ?? {};
+    const spawnHook: NonNullable<ClaudeQueryOptions['spawnClaudeCodeProcess']> = (options) => {
+      const rawEnv = options.env;
       const cleanEnv: Record<string, string> = {};
       for (const [key, value] of Object.entries(rawEnv)) {
         if (!STRIPPED_ENV_KEYS.includes(key) && value !== undefined) {
           cleanEnv[key] = value;
         }
       }
-      const child = spawn(command, [...args], {
-        cwd: spawnOpts.cwd as string | undefined,
+      const child = spawn(options.command, [...options.args], {
+        cwd: options.cwd,
         env: cleanEnv,
-        ...(spawnOpts.stdio !== undefined ? { stdio: spawnOpts.stdio as 'pipe' } : {}),
+        signal: options.signal,
       });
       workerPid = child.pid;
       return child;

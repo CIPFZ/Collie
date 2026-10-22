@@ -73,4 +73,13 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/runner/claude.ts'), 'utf8');
     expect(content).toMatch(/spawnClaudeCodeProcess/);
   });
+
+  it('runner/claude.ts imports types from @anthropic-ai/claude-agent-sdk and has no hand-written SpawnHook interface (v02-b04-fix4)', () => {
+    const content = readFileSync(join(ROOT, 'src/runner/claude.ts'), 'utf8');
+    // Must import types from the SDK (SPEC 11.2). The import may span multiple lines.
+    expect(content).toContain("from '@anthropic-ai/claude-agent-sdk'");
+    expect(content).toMatch(/import type\b/);
+    // Must NOT have hand-written SpawnHook interfaces.
+    expect(content).not.toMatch(/interface SpawnHook/);
+  });
 });
