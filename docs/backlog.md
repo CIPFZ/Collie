@@ -2,6 +2,8 @@
 
 > 唯一可修改者：R1 方案设计 Agent（须用户批准）。其他角色只读。
 > 优先级在方案确定阶段一次排定，批次随之固定，**不做滚动重新拆解**。
+> R1 签发自查（v02-b04-fix 后）：条目里每一条「测试要注入 X / 用 Y 替代 Z」的要求，验收必须同时 grep 源文件和对应测试文件，
+> 只 grep `src/` 的验收抓不住「接口做了、测试没用上」（b04：只注入 now；b04-fix：指纹可注入但场景 G 没注入）。
 
 更新时间：2026-10-21
 当前版本：v0.2
@@ -465,6 +467,7 @@ worker 的 `2661d0e` 只改两个测试文件，R2 验收 8/8 通过、R1 复核
 | this 绑定有回归测试 | `grep -qE "binds this" test/runner-claude.test.ts` | exit 0 |
 | 未处理拒绝有兜底 | `grep -qE "unhandledRejection" src/run.ts src/cli.ts` | exit 0 |
 | 指纹已注入且看内容 | `grep -qE "fingerprint\?:" src/ladder.ts && grep -qE "diff" src/ladder.ts` | exit 0 |
+| 场景 G 两个用例都注入了假指纹 | `test "$(grep -cE "livenessFingerprint" test/scenario-g.test.ts)" -ge 2` | exit 0 |
 | SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
 
 额外禁止：
@@ -477,6 +480,12 @@ worker 的 `2661d0e` 只改两个测试文件，R2 验收 8/8 通过、R1 复核
 形式让 Node 直接退出。没有 run.finished、救援、progress、裁定；心跳文件遗留。worker 未提交的 4 文件改动（+90/−19，
 条目 1 做了一部分，条目 2、3 未动）存档于 tag `v02-b04-fix-attempt1`，不采纳；操作员 reset 到 `origin/main` 并删除心跳。
 原条目中的限流不等待与 worker_pid 移至 v02-b04-fix2。
+
+记录：第 2 次运行 r-20261022-044520 FIX（裁定 `6d4d0c6`），R2 未崩。条目 1、2 完成；条目 3 做了一半：
+指纹改为看内容、接口可注入、单测通过，但场景 G 两个用例没传 `livenessFingerprint`，仍用真实 git。
+验收只 grep 了 `src/ladder.ts` 没抓到，由 reviewer 按手册逐条核对拦下——这是改过的手册第一次真正起作用，
+也是第一次由 reviewer 自己把结论拉成非 PASS。R1 复核 9/9 验收通过、583 全过。按 FIX 常规重跑第 3 次，
+已补一条验收 grep 测试文件；阈值在第 3 次通过前继续保持调大。
 
 ## v02-b04-fix2 限流不等待、worker_pid
 
@@ -491,6 +500,12 @@ worker 的 `2661d0e` 只改两个测试文件，R2 验收 8/8 通过、R1 复核
 2. `ClaudeRunner` 提供 `worker_pid`（11.2）：通过 SDK 的 `spawnClaudeCodeProcess` 钩子用 `node:child_process.spawn`
    自行拉起并记下 `pid`，`RunHandle.pid` 返回它；`kill` 级对该 pid 发 `SIGKILL`。
    `test/runner-claude.test.ts` 断言注入 `query()` 收到的选项含该钩子，且钩子返回对象的 `pid` 流到 `RunHandle`
+3. 两处 b04-fix 第 2 次运行发现的小缺口：
+   a. `claude.ts` 惰性包装层的 `interrupt()`：SDK 对象已就绪但没有 `interrupt` 时必须抛错，不得静默返回
+   （现在 `:120` 的 `if (resolvedIterable?.interrupt !== undefined)` 让 `:227` 的检查永远不触发）；
+   SDK 尚未就绪时的调用仍可忽略但要记一条 stderr 日志。`test/runner-claude.test.ts` 加「就绪但无 interrupt → 抛错」用例
+   b. `heartbeat.ts` 三处 `writeFileSync` 改为写临时文件再 `renameSync`（原子）；
+   `test/heartbeat.test.ts` 加「文件为空 / 半截 JSON」两个用例，断言按 SPEC 11.3 处理且不抛出
 
 验收标准：
 
@@ -499,6 +514,8 @@ worker 的 `2661d0e` 只改两个测试文件，R2 验收 8/8 通过、R1 复核
 | 代码规范零错误 | `npm run lint` | exit 0 |
 | 类型检查零错误 | `npm run typecheck` | exit 0 |
 | 全部测试通过 | `npm test` | exit 0 |
+| 心跳原子写 | `grep -qE "renameSync" src/heartbeat.ts && ! grep -qE "writeFileSync\(path," src/heartbeat.ts` | exit 0 |
+| 包装层 interrupt 缺失抛错有测试 | `grep -ciE "no interrupt\|without interrupt\|missing interrupt" test/runner-claude.test.ts \| grep -qvE "^0$"` | exit 0 |
 | 限流不等待有测试 | `grep -qE "rate_limited" test/ci.test.ts && grep -qE "waited_secs: 0\|waitedMs: 0" test/ci.test.ts` | exit 0 |
 | pid 经钩子流到 RunHandle | `grep -qE "spawnClaudeCodeProcess" src/runner/claude.ts && grep -qE "spawnClaudeCodeProcess" test/runner-claude.test.ts` | exit 0 |
 | SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai\|spawnClaudeCodeProcess" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
