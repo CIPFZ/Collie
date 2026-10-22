@@ -312,4 +312,16 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v02-b05 · r-20261022-111044 · BLOCK
+
+- 时间：2026-10-22T11:10:45.137Z
+- 裁定：规则 0，worker crashed: Cannot read properties of undefined (reading 'env')
+- 提交：无
+- 验收命令：0/0 通过
+- 已推送：否
+- CI：unknown，监听分支未能取证
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：1（error）
 <!-- collie:runs:end -->
