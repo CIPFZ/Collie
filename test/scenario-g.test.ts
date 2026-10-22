@@ -30,8 +30,11 @@ afterEach(() => {
  * A fake monotonic clock for the liveness monitor (SPEC 11.5). Each call to
  * now() advances time by `stepMs`, ensuring the monitor sees enough elapsed
  * time for idle detection without relying on real wall-clock delays.
+ * stepMs=1 keeps the clock advancement slow enough that stall_secs is never
+ * reached during setup, while still allowing idle detection (progress_secs=1)
+ * after ~500 check cycles.
  */
-function fakeClock(stepMs = 200): { now: () => number } {
+function fakeClock(stepMs = 1): { now: () => number } {
   let t = 0;
   return {
     now: () => {
@@ -61,16 +64,15 @@ function instantDelay(): {
 }
 
 /**
- * A fake setTimer for the liveness monitor that fires callbacks via the microtask
- * queue instead of real timers (SPEC 11.5). The returned handle is inert
- * (clearTimeout on it is a no-op), but the monitor's own `stopped` flag
- * prevents stale callbacks from doing work.
+ * A fake setTimer for the liveness monitor that fires callbacks via setImmediate
+ * instead of real timers (SPEC 11.5). Using setImmediate (macrotask) ensures
+ * that I/O from real git subprocesses can interleave, preventing the check cycle
+ * from starving the worker during setup. The check frequency is controlled by
+ * this injected timer, not by the fingerprint function.
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- ms is intentionally unused; the fake fires immediately
 function fakeSetTimer(cb: () => void, _ms: number): ReturnType<typeof setTimeout> {
-  void Promise.resolve().then(() => {
-    cb();
-  });
+  setImmediate(cb);
   return undefined as unknown as ReturnType<typeof setTimeout>;
 }
 
@@ -80,10 +82,8 @@ function fakeSetTimer(cb: () => void, _ms: number): ReturnType<typeof setTimeout
  * called, after which it returns a constant (simulating idle — no file changes).
  * This lets the test control exactly when the liveness monitor sees "no progress".
  *
- * The resolution yields to the macrotask queue (via setImmediate), mirroring the
- * real computeFingerprint which spawns git subprocesses. Without this, the
- * microtask-driven check cycle (fakeSetTimer) would spin infinitely without
- * giving the worker a chance to proceed.
+ * Resolves via Promise.resolve() (microtask). The check frequency is controlled
+ * by the injected livenessSetTimer (setImmediate-based), not by this function.
  */
 function controllableFingerprint(): {
   livenessFingerprint: (root: string) => Promise<string>;
@@ -93,20 +93,10 @@ function controllableFingerprint(): {
   let frozen = false;
   return {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- matches LivenessConfig.fingerprint signature
-    livenessFingerprint: (_root: string): Promise<string> => {
+    livenessFingerprint: async (_root: string): Promise<string> => {
       if (!frozen) counter++;
-      // Yield to the macrotask queue so the check cycle doesn't starve the
-      // worker. The real computeFingerprint does this naturally via git subprocesses.
-      // Using setTimeout(0) instead of setImmediate: setImmediate fires every
-      // event-loop tick (~1µs), so the check cycle runs thousands of times during
-      // a single `await git(...)`, racing the fake clock past stall_secs.
-      // setTimeout(0) has a ~1ms minimum, limiting the check rate enough that the
-      // fake clock stays well below stall_secs during the worker's setup phase.
-      return new Promise((resolve) => {
-        setTimeout(() => {
-          resolve(`fp-${String(counter)}`);
-        }, 0);
-      });
+      await Promise.resolve();
+      return `fp-${String(counter)}`;
     },
     freeze: () => {
       frozen = true;
