@@ -13,8 +13,8 @@ export type LadderReason = 'stalled' | 'idling' | 'wallclock';
 export type StopLevel = 'soft' | 'hard' | 'kill';
 
 export interface LadderCallbacks {
-  /** Records worker.signaled for each level. */
-  onSignaled: (level: StopLevel, reason: LadderReason) => void;
+  /** Records worker.signaled for each level; error is set when stop() threw (SPEC 11.6). */
+  onSignaled: (level: StopLevel, reason: LadderReason, error?: string) => void;
   /** Records worker.stalled or worker.idling before starting the ladder. */
   onDetected?: (kind: 'stalled' | 'idling') => void;
 }
@@ -35,14 +35,25 @@ export interface LadderOptions {
 /**
  * Walks the signal ladder: soft -> grace -> hard -> grace -> kill (SPEC 11.6).
  * Each level records worker.signaled. Stops early if the worker exits during a
- * grace period.
+ * grace period. When stop() throws, records the error and continues to the next
+ * level (SPEC 11.6: errors do not bubble, except kill failures which re-throw
+ * for the 11.3 exception fallback).
  */
 export async function runLadder(opts: LadderOptions): Promise<void> {
   const levels: StopLevel[] = ['soft', 'hard', 'kill'];
   for (const level of levels) {
     if (opts.isExited()) return;
-    opts.callbacks.onSignaled(level, opts.reason);
-    await opts.handle.stop(level);
+    try {
+      await opts.handle.stop(level);
+      opts.callbacks.onSignaled(level, opts.reason);
+    } catch (error) {
+      // SPEC 11.6: stop() error → record with error field, treat as "not exited".
+      const msg = error instanceof Error ? error.message : String(error);
+      opts.callbacks.onSignaled(level, opts.reason, msg);
+      // kill failure → re-throw for 11.3 exception fallback.
+      if (level === 'kill') throw error;
+      continue; // Skip grace, go directly to next level.
+    }
     if (level === 'kill') return; // No grace after kill.
     // Wait grace_secs or until the worker exits, whichever comes first.
     await Promise.race([opts.delay(opts.graceSecs * MS_PER_SECOND), opts.exitPromise]);

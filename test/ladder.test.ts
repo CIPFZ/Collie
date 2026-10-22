@@ -165,6 +165,56 @@ describe('ladder: runLadder walks soft -> hard -> kill', () => {
     expect(signals).toEqual([]);
   });
 
+  it('soft throws → records error field → escalates to hard (SPEC 11.6)', async () => {
+    const stops: StopLevel[] = [];
+    const signals: { level: StopLevel; reason: string; error?: string }[] = [];
+    let exitedFlag = false;
+    let exitResolve: (() => void) | undefined;
+    const exitPromise = new Promise<void>((r) => {
+      exitResolve = r;
+    });
+    const handle: RunHandle = {
+      pid: 1,
+      // eslint-disable-next-line @typescript-eslint/require-await -- interface requires Promise<void>
+      async stop(level: StopLevel): Promise<void> {
+        stops.push(level);
+        if (level === 'soft') {
+          throw new Error('interrupt() TypeError: cannot read this.request');
+        }
+        if (level === 'hard') {
+          exitedFlag = true;
+          exitResolve?.();
+        }
+      },
+    };
+    const { delay, durations } = instantDelay();
+
+    await runLadder({
+      handle,
+      graceSecs: 20,
+      reason: 'stalled',
+      callbacks: {
+        onSignaled: (level, reason, error) => {
+          signals.push({ level, reason, ...(error !== undefined ? { error } : {}) });
+        },
+      },
+      isExited: () => exitedFlag,
+      exitPromise,
+      delay,
+    });
+
+    // soft was called but threw → error recorded; then escalated to hard.
+    expect(stops).toEqual(['soft', 'hard']);
+    expect(signals[0]).toMatchObject({
+      level: 'soft',
+      reason: 'stalled',
+      error: expect.stringContaining('TypeError') as unknown,
+    });
+    expect(signals[1]).toMatchObject({ level: 'hard', reason: 'stalled' });
+    // No grace after soft (error → skip), one grace after hard (exit races).
+    expect(durations).toEqual([20_000]);
+  });
+
   it('uses the injected delay, not real setTimeout', async () => {
     const { handle, exited, exitPromise } = fakeHandle();
     const { delay, durations } = instantDelay();

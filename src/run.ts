@@ -339,276 +339,340 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     return finish('BLOCK', { escalation: reason, decision });
   };
 
-  // E2: issue the envelope. base_sha is the last commit before the task commit (SPEC 3.3).
-  const baseSha = await revParse(root, 'HEAD');
-  rec.record('batch.selected', { base_sha: baseSha });
-  const task = buildTask(batch, {
-    run_id: runId,
-    base_sha: baseSha,
-    created_at: ctx.now().toISOString(),
-    attempt: 1,
-  });
-  writeTask(root, batch, task);
-  const relTask = taskPath('', batchId);
-  const taskSha = await commit(root, `docs: issue ${batchId} task envelope`, [relTask]);
-  rec.record('batch.task_written', { path: relTask, commit: taskSha });
-
-  // E3/E4: the worker, bounded by the wall clock (SPEC 3.3).
-  rec.record('worker.started');
-
-  // Liveness detection and signal ladder state (SPEC 11.5, 11.6).
-  let workerHandle: RunHandle | undefined;
-  let workerExited = false;
-  let workerExitResolve: (() => void) | undefined;
-  const workerExitPromise = new Promise<void>((r) => {
-    workerExitResolve = r;
-  });
-  let ladderRunning = false;
-  const graceSecs = config.limits.grace_secs;
-  const ladderDelay = ctx.ladderDelay ?? realDelay;
-
-  function startLadder(reason: LadderReason): void {
-    if (ladderRunning || workerExited || workerHandle === undefined) return;
-    ladderRunning = true;
-    if (reason === 'stalled') rec.record('worker.stalled');
-    if (reason === 'idling') rec.record('worker.idling');
-    void runLadder({
-      handle: workerHandle,
-      graceSecs,
-      reason,
-      callbacks: {
-        onSignaled: (level, r) => {
-          rec.record('worker.signaled', { level, reason: r });
-        },
-      },
-      isExited: () => workerExited,
-      exitPromise: workerExitPromise,
-      delay: ladderDelay,
-    });
-  }
-
-  // Wallclock timeout triggers the signal ladder (SPEC 11.6: reason=wallclock).
-  const wallclockMs = config.limits.wallclock_secs * MS_PER_SECOND;
-  const wallclockTimer =
-    ctx.workerSignal === undefined
-      ? setTimeout(() => {
-          startLadder('wallclock');
-        }, wallclockMs)
-      : undefined;
-
-  // Liveness monitor (SPEC 11.5).
-  const monitor = new LivenessMonitor({
-    stallSecs: config.limits.stall_secs,
-    progressSecs: config.limits.progress_secs,
-    root,
-    onStalled: () => {
-      startLadder('stalled');
-    },
-    onIdling: () => {
-      startLadder('idling');
-    },
-    ...(ctx.livenessIntervalMs === undefined ? {} : { checkIntervalMs: ctx.livenessIntervalMs }),
-    ...(ctx.livenessNow === undefined ? {} : { now: ctx.livenessNow }),
-    ...(ctx.livenessSetTimer === undefined ? {} : { setTimer: ctx.livenessSetTimer }),
-  });
-
-  // SPEC 11.3: stream + heartbeat callbacks.
-  const onEvent = (event: unknown): void => {
-    appendStream(root, runId, event);
-    touchHeartbeat(root, ctx.now().toISOString());
-    monitor.onEvent();
+  // SPEC 11.3: unhandledRejection handler — catches fire-and-forget promises
+  // (e.g. void runLadder()) that reject after stop() throws. The error is stored
+  // and handled by the outermost catch below.
+  let unhandledError: Error | undefined;
+  const onUnhandledRejection = (reason: unknown): void => {
+    unhandledError ??=
+      reason instanceof Error ? reason : new Error(`unhandled rejection: ${String(reason)}`);
   };
-  const onStarted = (handle: RunHandle): void => {
-    workerHandle = handle;
-    // SPEC 11.3: add worker_pid to the already-written heartbeat when the runner provides one.
-    if (handle.pid !== undefined) {
-      updateHeartbeat(root, { worker_pid: handle.pid, updated_at: ctx.now().toISOString() });
-    }
-    monitor.start();
-  };
+  process.on('unhandledRejection', onUnhandledRejection);
 
-  const cleanupTimers = (): void => {
-    workerExited = true;
-    workerExitResolve?.();
-    monitor.stop();
-    if (wallclockTimer !== undefined) clearTimeout(wallclockTimer);
-  };
-
+  // SPEC 11.3: outermost try — any unexpected exception after the heartbeat is
+  // written triggers the error fallback (run.finished → rescue → progress → heartbeat delete).
   try {
-    const result = await runWorker(ctx.runner, config, batch, root, {
-      ...(ctx.workerSignal === undefined ? {} : { signal: ctx.workerSignal }),
-      onEvent,
-      onStarted,
+    // E2: issue the envelope. base_sha is the last commit before the task commit (SPEC 3.3).
+    const baseSha = await revParse(root, 'HEAD');
+    rec.record('batch.selected', { base_sha: baseSha });
+    const task = buildTask(batch, {
+      run_id: runId,
+      base_sha: baseSha,
+      created_at: ctx.now().toISOString(),
+      attempt: 1,
     });
-    cleanupTimers();
-    // SPEC 11.7: track worker exit info for run.finished and progress.
-    workerExitCode = result.exitCode;
-    workerStopReason = result.stopReason;
-    rec.record('worker.finished', {
-      exit_code: result.exitCode,
-      // SPEC 3.6: without it a zero-output exit cannot be explained (v01-b05-smoke).
-      ...(result.finalText === undefined
-        ? {}
-        : { final_text: truncate(result.finalText, FINAL_TEXT_MAX) }),
-      ...(result.stopReason === undefined ? {} : { stop_reason: result.stopReason }),
+    writeTask(root, batch, task);
+    const relTask = taskPath('', batchId);
+    const taskSha = await commit(root, `docs: issue ${batchId} task envelope`, [relTask]);
+    rec.record('batch.task_written', { path: relTask, commit: taskSha });
+
+    // E3/E4: the worker, bounded by the wall clock (SPEC 3.3).
+    rec.record('worker.started');
+
+    // Liveness detection and signal ladder state (SPEC 11.5, 11.6).
+    let workerHandle: RunHandle | undefined;
+    let workerExited = false;
+    let workerExitResolve: (() => void) | undefined;
+    const workerExitPromise = new Promise<void>((r) => {
+      workerExitResolve = r;
     });
-  } catch (error) {
-    cleanupTimers();
-    // SPEC 11.7: crashed worker has no RunResult, record what we know.
-    workerExitCode = EXIT_CODES.ERROR;
-    workerStopReason = 'error';
-    // SPEC 11.6: worker.crashed only for runner self-exceptions, not ladder-induced stops.
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by startLadder() during async worker
-    if (!ladderRunning) {
-      rec.record('worker.crashed', { error: message(error) });
+    let ladderRunning = false;
+    const graceSecs = config.limits.grace_secs;
+    const ladderDelay = ctx.ladderDelay ?? realDelay;
+
+    function startLadder(reason: LadderReason): void {
+      if (ladderRunning || workerExited || workerHandle === undefined) return;
+      ladderRunning = true;
+      if (reason === 'stalled') rec.record('worker.stalled');
+      if (reason === 'idling') rec.record('worker.idling');
+      void runLadder({
+        handle: workerHandle,
+        graceSecs,
+        reason,
+        callbacks: {
+          onSignaled: (level, r, error) => {
+            rec.record('worker.signaled', {
+              level,
+              reason: r,
+              ...(error !== undefined ? { error } : {}),
+            });
+          },
+        },
+        isExited: () => workerExited,
+        exitPromise: workerExitPromise,
+        delay: ladderDelay,
+      });
     }
-    // SPEC 11.4: rescue any uncommitted work even on crash.
+
+    // Wallclock timeout triggers the signal ladder (SPEC 11.6: reason=wallclock).
+    const wallclockMs = config.limits.wallclock_secs * MS_PER_SECOND;
+    const wallclockTimer =
+      ctx.workerSignal === undefined
+        ? setTimeout(() => {
+            startLadder('wallclock');
+          }, wallclockMs)
+        : undefined;
+
+    // Liveness monitor (SPEC 11.5).
+    const monitor = new LivenessMonitor({
+      stallSecs: config.limits.stall_secs,
+      progressSecs: config.limits.progress_secs,
+      root,
+      onStalled: () => {
+        startLadder('stalled');
+      },
+      onIdling: () => {
+        startLadder('idling');
+      },
+      ...(ctx.livenessIntervalMs === undefined ? {} : { checkIntervalMs: ctx.livenessIntervalMs }),
+      ...(ctx.livenessNow === undefined ? {} : { now: ctx.livenessNow }),
+      ...(ctx.livenessSetTimer === undefined ? {} : { setTimer: ctx.livenessSetTimer }),
+    });
+
+    // SPEC 11.3: stream + heartbeat callbacks.
+    const onEvent = (event: unknown): void => {
+      appendStream(root, runId, event);
+      touchHeartbeat(root, ctx.now().toISOString());
+      monitor.onEvent();
+    };
+    const onStarted = (handle: RunHandle): void => {
+      workerHandle = handle;
+      // SPEC 11.3: add worker_pid to the already-written heartbeat when the runner provides one.
+      if (handle.pid !== undefined) {
+        updateHeartbeat(root, { worker_pid: handle.pid, updated_at: ctx.now().toISOString() });
+      }
+      monitor.start();
+    };
+
+    const cleanupTimers = (): void => {
+      workerExited = true;
+      workerExitResolve?.();
+      monitor.stop();
+      if (wallclockTimer !== undefined) clearTimeout(wallclockTimer);
+    };
+
+    try {
+      const result = await runWorker(ctx.runner, config, batch, root, {
+        ...(ctx.workerSignal === undefined ? {} : { signal: ctx.workerSignal }),
+        onEvent,
+        onStarted,
+      });
+      cleanupTimers();
+      // SPEC 11.7: track worker exit info for run.finished and progress.
+      workerExitCode = result.exitCode;
+      workerStopReason = result.stopReason;
+      rec.record('worker.finished', {
+        exit_code: result.exitCode,
+        // SPEC 3.6: without it a zero-output exit cannot be explained (v01-b05-smoke).
+        ...(result.finalText === undefined
+          ? {}
+          : { final_text: truncate(result.finalText, FINAL_TEXT_MAX) }),
+        ...(result.stopReason === undefined ? {} : { stop_reason: result.stopReason }),
+      });
+    } catch (error) {
+      cleanupTimers();
+      // SPEC 11.7: crashed worker has no RunResult, record what we know.
+      workerExitCode = EXIT_CODES.ERROR;
+      workerStopReason = 'error';
+      // SPEC 11.6: worker.crashed only for runner self-exceptions, not ladder-induced stops.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by startLadder() during async worker
+      if (!ladderRunning) {
+        rec.record('worker.crashed', { error: message(error) });
+      }
+      // SPEC 11.4: rescue any uncommitted work even on crash.
+      const rescue = await rescueDirtyWorkspace(root, batchId);
+      if (rescue !== undefined) {
+        rec.record('worker.rescued', { sha: rescue.sha, files: rescue.files });
+      }
+      return await escalate(`worker crashed: ${message(error)}`);
+    }
+
+    // SPEC 11.4: rescue uncommitted work left behind by the worker.
     const rescue = await rescueDirtyWorkspace(root, batchId);
     if (rescue !== undefined) {
       rec.record('worker.rescued', { sha: rescue.sha, files: rescue.files });
     }
-    return await escalate(`worker crashed: ${message(error)}`);
-  }
 
-  // SPEC 11.4: rescue uncommitted work left behind by the worker.
-  const rescue = await rescueDirtyWorkspace(root, batchId);
-  if (rescue !== undefined) {
-    rec.record('worker.rescued', { sha: rescue.sha, files: rescue.files });
-  }
-
-  let report: Report;
-  try {
-    report = readReport(root, batchId);
-  } catch (error) {
-    return await escalate(`no valid report: ${message(error)}`);
-  }
-  // head_sha is itself a claim: it must be a commit built on top of the task commit.
-  const headOk = await isAncestor(root, taskSha, report.head_sha).catch(() => false);
-  if (!headOk)
-    return await escalate(
-      `report head_sha ${report.head_sha} does not descend from the task commit ${taskSha}`,
-    );
-
-  // Worker output is taskSha..head_sha: the task commit is R2's, not the worker's (SPEC 3.3).
-  const outcome = await withHeadWorktree(root, batchId, report.head_sha, async (tree) => {
-    // SPEC 11.3: heartbeat transitions to reviewer phase.
-    updateHeartbeat(root, { phase: 'reviewer', updated_at: ctx.now().toISOString() });
-
-    // E5: the reviewer works in the head_sha worktree, where report.md does not exist (SPEC 3.5).
-    let finalText: string | undefined;
-    rec.record('reviewer.started', { head_sha: report.head_sha });
+    let report: Report;
     try {
-      const reviewer = await runReviewer(
-        ctx.runner,
-        config,
-        {
-          batch_id: batchId,
-          base_sha: taskSha,
-          head_sha: report.head_sha,
-          items: batch.items,
-          acceptance: batch.acceptance,
-          spec_paths: ['SPEC.md', 'CONSTRAINTS.md'],
-        },
-        tree,
-      );
-      finalText = reviewer.finalText;
+      report = readReport(root, batchId);
     } catch (error) {
-      finalText = undefined;
-      rec.record('escalated', { reason: `reviewer failed: ${message(error)}` });
+      return await escalate(`no valid report: ${message(error)}`);
     }
-    const verdict = persistVerdict(root, batchId, finalText);
-    rec.record(
-      'reviewer.verdict',
-      verdict.ok ? { verdict: verdict.value.verdict } : { error: verdict.error },
-    );
+    // head_sha is itself a claim: it must be a commit built on top of the task commit.
+    const headOk = await isAncestor(root, taskSha, report.head_sha).catch(() => false);
+    if (!headOk)
+      return await escalate(
+        `report head_sha ${report.head_sha} does not descend from the task commit ${taskSha}`,
+      );
 
-    // SPEC 11.3: heartbeat transitions to ci phase (evidence collection includes CI polling).
-    updateHeartbeat(root, { phase: 'ci', updated_at: ctx.now().toISOString() });
+    // Worker output is taskSha..head_sha: the task commit is R2's, not the worker's (SPEC 3.3).
+    const outcome = await withHeadWorktree(root, batchId, report.head_sha, async (tree) => {
+      // SPEC 11.3: heartbeat transitions to reviewer phase.
+      updateHeartbeat(root, { phase: 'reviewer', updated_at: ctx.now().toISOString() });
 
-    // R2's own measurements, also on the committed head_sha tree.
-    const collected = await collectEvidence({
-      root,
-      verifyCwd: tree,
-      remote: ctx.remote,
-      baseSha: taskSha,
-      headSha: report.head_sha,
-      commands: verifyCommands(config.verify.commands, batch),
-      config,
-      fetch: ctx.fetch,
-      ...(ctx.clock === undefined ? {} : { clock: ctx.clock }),
+      // E5: the reviewer works in the head_sha worktree, where report.md does not exist (SPEC 3.5).
+      let finalText: string | undefined;
+      rec.record('reviewer.started', { head_sha: report.head_sha });
+      try {
+        const reviewer = await runReviewer(
+          ctx.runner,
+          config,
+          {
+            batch_id: batchId,
+            base_sha: taskSha,
+            head_sha: report.head_sha,
+            items: batch.items,
+            acceptance: batch.acceptance,
+            spec_paths: ['SPEC.md', 'CONSTRAINTS.md'],
+          },
+          tree,
+        );
+        finalText = reviewer.finalText;
+      } catch (error) {
+        finalText = undefined;
+        rec.record('escalated', { reason: `reviewer failed: ${message(error)}` });
+      }
+      const verdict = persistVerdict(root, batchId, finalText);
+      rec.record(
+        'reviewer.verdict',
+        verdict.ok ? { verdict: verdict.value.verdict } : { error: verdict.error },
+      );
+
+      // SPEC 11.3: heartbeat transitions to ci phase (evidence collection includes CI polling).
+      updateHeartbeat(root, { phase: 'ci', updated_at: ctx.now().toISOString() });
+
+      // R2's own measurements, also on the committed head_sha tree.
+      const collected = await collectEvidence({
+        root,
+        verifyCwd: tree,
+        remote: ctx.remote,
+        baseSha: taskSha,
+        headSha: report.head_sha,
+        commands: verifyCommands(config.verify.commands, batch),
+        config,
+        fetch: ctx.fetch,
+        ...(ctx.clock === undefined ? {} : { clock: ctx.clock }),
+      });
+      if (collected.ciWait?.timedOut === true) {
+        rec.record('ci.wait_timeout', {
+          head_sha: report.head_sha,
+          waited_secs: Math.round(collected.ciWait.waitedMs / MS_PER_SECOND),
+          polls: collected.ciWait.polls,
+          last_state: collected.ciWait.lastState,
+        });
+      }
+      return { verdict, collected };
     });
-    if (collected.ciWait?.timedOut === true) {
-      rec.record('ci.wait_timeout', {
-        head_sha: report.head_sha,
-        waited_secs: Math.round(collected.ciWait.waitedMs / MS_PER_SECOND),
-        polls: collected.ciWait.polls,
-        last_state: collected.ciWait.lastState,
+    const { verdict, collected } = outcome;
+
+    // SPEC 11.3: heartbeat transitions to arbiter phase.
+    updateHeartbeat(root, { phase: 'arbiter', updated_at: ctx.now().toISOString() });
+
+    // The arbiter judges claims against R2's measurements; the reviewer contributes its verdict
+    // value and its own mismatches, and its evidence stays on record in verdict.md.
+    const decision = arbitrate({
+      claims: report.claims,
+      verdict: verdict.ok
+        ? { ok: true, value: { ...verdict.value, evidence: collected.evidence } }
+        : verdict,
+      approvedDeps: APPROVED_DEPENDENCIES,
+      testCommand: collected.testCommand ?? 'npm test',
+      // R2's own judgement of every command against its expect (verify.ts), full stdout included.
+      failedAcceptance: collected.verify
+        .filter((r) => !r.passed)
+        .map((r) => ({
+          cmd: r.cmd,
+          exit_code: r.exit_code,
+          expect: expectOf(r.cmd, verifyCommands(config.verify.commands, batch)),
+        })),
+    });
+    for (const m of decision.mismatches) {
+      rec.record('claim.mismatch', {
+        rule: m.rule,
+        field: m.field,
+        claimed: toJson(m.claimed),
+        actual: toJson(m.actual),
       });
     }
-    return { verdict, collected };
-  });
-  const { verdict, collected } = outcome;
+    for (const f of decision.failedAcceptance) {
+      rec.record('acceptance.failed', {
+        cmd: f.cmd,
+        exit_code: f.exit_code,
+        expect: toJson(f.expect),
+      });
+    }
+    if (decision.downgraded) {
+      rec.record('verdict.downgraded', {
+        from: decision.original,
+        to: decision.final,
+        rule: decision.rule,
+        reason: decision.reason,
+      });
+    }
 
-  // SPEC 11.3: heartbeat transitions to arbiter phase.
-  updateHeartbeat(root, { phase: 'arbiter', updated_at: ctx.now().toISOString() });
+    const progressPath = writeProgress(root, {
+      batchId,
+      runId,
+      at: ctx.now().toISOString(),
+      decision,
+      evidence: collected.evidence,
+      workerExitCode,
+      workerStopReason,
+    });
+    // R2 commits its envelopes only after the worker has exited (CONSTRAINTS 铁律 19).
+    const envelopes = [relative(root, progressPath)];
+    if (existsSync(verdictPath(root, batchId)))
+      envelopes.push(relative(root, verdictPath(root, batchId)));
+    await commit(root, `progress: ${batchId} ${decision.final}`, envelopes);
+    return finish(decision.final, { decision });
+  } catch (outerError) {
+    // SPEC 11.3: exception fallback. Any unexpected error after heartbeat write
+    // must not let the process exit without cleanup.
+    const errorMsg = message(outerError);
 
-  // The arbiter judges claims against R2's measurements; the reviewer contributes its verdict
-  // value and its own mismatches, and its evidence stays on record in verdict.md.
-  const decision = arbitrate({
-    claims: report.claims,
-    verdict: verdict.ok
-      ? { ok: true, value: { ...verdict.value, evidence: collected.evidence } }
-      : verdict,
-    approvedDeps: APPROVED_DEPENDENCIES,
-    testCommand: collected.testCommand ?? 'npm test',
-    // R2's own judgement of every command against its expect (verify.ts), full stdout included.
-    failedAcceptance: collected.verify
-      .filter((r) => !r.passed)
-      .map((r) => ({
-        cmd: r.cmd,
-        exit_code: r.exit_code,
-        expect: expectOf(r.cmd, verifyCommands(config.verify.commands, batch)),
-      })),
-  });
-  for (const m of decision.mismatches) {
-    rec.record('claim.mismatch', {
-      rule: m.rule,
-      field: m.field,
-      claimed: toJson(m.claimed),
-      actual: toJson(m.actual),
+    // 1. Record run.finished with result=error.
+    rec.record('run.finished', {
+      result: 'error',
+      error: errorMsg,
+      ...(workerExitCode !== undefined ? { worker_exit_code: workerExitCode } : {}),
+      ...(workerStopReason !== undefined ? { worker_stop_reason: workerStopReason } : {}),
     });
-  }
-  for (const f of decision.failedAcceptance) {
-    rec.record('acceptance.failed', {
-      cmd: f.cmd,
-      exit_code: f.exit_code,
-      expect: toJson(f.expect),
-    });
-  }
-  if (decision.downgraded) {
-    rec.record('verdict.downgraded', {
-      from: decision.original,
-      to: decision.final,
-      rule: decision.rule,
-      reason: decision.reason,
-    });
-  }
 
-  const progressPath = writeProgress(root, {
-    batchId,
-    runId,
-    at: ctx.now().toISOString(),
-    decision,
-    evidence: collected.evidence,
-    workerExitCode,
-    workerStopReason,
-  });
-  // R2 commits its envelopes only after the worker has exited (CONSTRAINTS 铁律 19).
-  const envelopes = [relative(root, progressPath)];
-  if (existsSync(verdictPath(root, batchId)))
-    envelopes.push(relative(root, verdictPath(root, batchId)));
-  await commit(root, `progress: ${batchId} ${decision.final}`, envelopes);
-  return finish(decision.final, { decision });
+    // 2. Rescue any dirty workspace (SPEC 11.4).
+    try {
+      const rescue = await rescueDirtyWorkspace(root, batchId);
+      if (rescue !== undefined) {
+        rec.record('worker.rescued', { sha: rescue.sha, files: rescue.files });
+      }
+    } catch {
+      // Best effort: if rescue itself fails, continue cleanup.
+    }
+
+    // 3. Write progress record for this failed run.
+    try {
+      const decision = escalationDecision(`exception: ${errorMsg}`);
+      const progressPath = writeProgress(root, {
+        batchId,
+        runId,
+        at: ctx.now().toISOString(),
+        decision,
+        evidence: emptyEvidence(),
+        workerExitCode,
+        workerStopReason,
+      });
+      await commit(root, `progress: ${batchId} ${decision.final}`, [relative(root, progressPath)]);
+    } catch {
+      // Best effort: if progress commit fails, continue cleanup.
+    }
+
+    // 4. Delete heartbeat.
+    removeHeartbeat(root);
+
+    return { final: 'BLOCK', exitCode: EXIT_CODES.ERROR, escalation: `exception: ${errorMsg}` };
+  } finally {
+    process.removeListener('unhandledRejection', onUnhandledRejection);
+  }
 }
 
 /**
