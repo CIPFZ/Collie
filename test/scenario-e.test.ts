@@ -1,12 +1,18 @@
-// Scenario E front half (SPEC 11.9): fake worker writes files, then gets
-// killed (effect calls handle.stop('kill')). Collie must: 1) leave a
-// wip(collie) rescue commit with those files; 2) record a worker.rescued event.
-// The second half (attempt=2, interrupted_at) is v02-b04.
+// Scenario E (SPEC 11.9): fake worker writes files, then gets killed (effect
+// calls handle.stop('kill')). Front half: rescue commit. Back half (v02-b05):
+// attempt=2, interrupted_at, rescue_sha, base_sha reuse across attempts.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { git } from '../src/git.js';
+import { batchHistory } from '../src/run.js';
 import type { FakeScene, FakeSceneContext } from '../src/runner/fake.js';
 import { FakeRunner } from '../src/runner/fake.js';
-import { BATCH, Sandbox } from './support/sandbox.js';
+import {
+  BATCH,
+  fooledReviewerScene,
+  honestClaims,
+  Sandbox,
+  workerScene,
+} from './support/sandbox.js';
 
 let box: Sandbox;
 
@@ -113,5 +119,86 @@ describe('scenario E: heartbeat lifecycle during a run', () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
     expect(fs.existsSync(path.join(box.root, '.collie', 'heartbeat.json'))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scenario E back half (v02-b05): attempt=2, interrupted_at, rescue_sha,
+// base_sha reuse across attempts.
+// ---------------------------------------------------------------------------
+
+describe('scenario E back half: interrupt marking and base_sha reuse', () => {
+  it('second run has attempt=2, interrupted_at, rescue_sha, and reuses the first base_sha', async () => {
+    // --- Run 1: worker killed, rescue commit created ---
+    const r1 = new FakeRunner([killedWorkerScene()]);
+    await box.run(r1);
+
+    // Verify batchHistory after run 1.
+    const h1 = batchHistory(box.root, BATCH);
+    expect(h1.attempt).toBe(2);
+    expect(h1.interruptedAt).toBeDefined();
+    expect(h1.interruptedAt).toContain('run.finished');
+    expect(h1.rescueSha).toMatch(/^[0-9a-f]{40}$/);
+    const firstBaseSha = h1.baseSha;
+    expect(firstBaseSha).toBeDefined();
+
+    // --- Run 2: honest worker succeeds ---
+    const r2 = new FakeRunner([
+      workerScene(box, { passing: 5, failing: 0, push: true, claims: honestClaims(5, true) }),
+      fooledReviewerScene(box),
+    ]);
+    const code2 = await box.run(r2);
+    expect(code2).toBe(0);
+
+    // The second run's events should include worker.resumed.
+    const events = box.events();
+    const resumed = events.filter((e) => e.event === 'worker.resumed');
+    expect(resumed).toHaveLength(1);
+    expect(resumed[0]?.attempt).toBe(2);
+
+    // base_sha reuse (SPEC 4.3): both runs share the same base_sha.
+    const selected = events.filter((e) => e.event === 'batch.selected');
+    expect(selected).toHaveLength(2);
+    expect(selected[0]?.base_sha).toBe(firstBaseSha);
+    expect(selected[1]?.base_sha).toBe(firstBaseSha);
+  });
+
+  it('PASS run resets interrupt state; a third run starts fresh', async () => {
+    // Run 1: killed → interrupted
+    const r1 = new FakeRunner([killedWorkerScene()]);
+    await box.run(r1);
+
+    // Run 2: honest PASS → resets
+    const r2 = new FakeRunner([
+      workerScene(box, { passing: 5, failing: 0, push: true, claims: honestClaims(5, true) }),
+      fooledReviewerScene(box),
+    ]);
+    expect(await box.run(r2)).toBe(0);
+
+    // After PASS, interrupt context should be cleared.
+    const h = batchHistory(box.root, BATCH);
+    expect(h.interruptedAt).toBeUndefined();
+    expect(h.rescueSha).toBeUndefined();
+    // PASS does not reset attempt; a re-run of this batch would still be attempt 2.
+    // In practice, passed batches are never re-run (SPEC 11.7).
+    expect(h.attempt).toBe(2);
+  });
+
+  it('batch.task_written includes the interrupt section in the task body', async () => {
+    // Run 1: killed
+    const r1 = new FakeRunner([killedWorkerScene()]);
+    await box.run(r1);
+
+    // Run 2: check the task.md content includes the interrupt section.
+    const r2 = new FakeRunner([
+      workerScene(box, { passing: 5, failing: 0, push: true, claims: honestClaims(5, true) }),
+      fooledReviewerScene(box),
+    ]);
+    await box.run(r2);
+
+    const taskContent = box.read(`.collie/batches/${BATCH}/task.md`);
+    expect(taskContent).toContain('## 上一轮中断');
+    expect(taskContent).toContain('中断信息');
+    expect(taskContent).toContain('救援提交');
   });
 });

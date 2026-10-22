@@ -1,0 +1,158 @@
+// collie show restores event chains for scenarios E, F, and G (SPEC 11.7).
+// Each test runs 1-2 batches, then calls `collie show` and verifies the
+// decision trail contains the expected event types.
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { FakeSceneContext } from '../src/runner/fake.js';
+import { FakeRunner } from '../src/runner/fake.js';
+import {
+  BATCH,
+  fooledReviewerScene,
+  honestClaims,
+  Sandbox,
+  workerScene,
+} from './support/sandbox.js';
+
+let box: Sandbox;
+
+beforeEach(async () => {
+  box = await Sandbox.create();
+});
+
+afterEach(() => {
+  box.dispose();
+});
+
+/** Collects the `collie show` output for the default batch. */
+async function showOutput(): Promise<string> {
+  box.output.length = 0;
+  await box.cli(['show', BATCH], undefined);
+  return box.output.join('');
+}
+
+describe('collie show: scenario E event chain (rescue + interrupt)', () => {
+  it('shows worker.rescued and escalated events after a killed run', async () => {
+    const killedWorker: ReturnType<typeof workerScene> = {
+      expectRole: 'worker',
+      files: { 'dirty.txt': 'partial\n' },
+      effect: async ({ handle }: FakeSceneContext) => {
+        await handle.stop('kill');
+      },
+      result: { exitCode: 1 },
+    };
+    await box.run(new FakeRunner([killedWorker]));
+
+    const out = await showOutput();
+    expect(out).toContain('worker.rescued');
+    expect(out).toContain('escalated');
+    expect(out).toContain('run.finished');
+  });
+
+  it('shows worker.resumed in the second run after an interrupted first run', async () => {
+    // Run 1: killed
+    const r1 = new FakeRunner([
+      {
+        expectRole: 'worker',
+        files: { 'dirty.txt': 'wip\n' },
+        effect: async ({ handle }: FakeSceneContext) => {
+          await handle.stop('kill');
+        },
+        result: { exitCode: 1, sessionId: 'sess-e1' },
+      },
+    ]);
+    await box.run(r1);
+
+    // Run 2: honest PASS
+    const r2 = new FakeRunner([
+      workerScene(box, { passing: 5, failing: 0, push: true, claims: honestClaims(5, true) }),
+      fooledReviewerScene(box),
+    ]);
+    await box.run(r2);
+
+    const out = await showOutput();
+    expect(out).toContain('worker.resumed');
+    expect(out).toContain('session_id=sess-e1');
+    expect(out).toContain('attempt=2');
+  });
+});
+
+describe('collie show: scenario F event chain (resume strategy)', () => {
+  it('shows resumed event with session_id from prior run', async () => {
+    // Run 1: worker exits with session id
+    const r1 = new FakeRunner([
+      {
+        expectRole: 'worker',
+        effect: async ({ handle }: FakeSceneContext) => {
+          await handle.stop('kill');
+        },
+        result: { exitCode: 1, sessionId: 'sess-f1' },
+      },
+    ]);
+    await box.run(r1);
+
+    // Run 2: uses the session id for resume
+    const r2 = new FakeRunner([
+      {
+        expectRole: 'worker',
+        effect: async ({ handle }: FakeSceneContext) => {
+          await handle.stop('kill');
+        },
+        result: { exitCode: 1, sessionId: 'sess-f2' },
+      },
+    ]);
+    await box.run(r2);
+
+    const out = await showOutput();
+    expect(out).toContain('worker.resumed');
+    expect(out).toContain('sess-f1');
+  });
+});
+
+describe('collie show: scenario G event chain (idle worker)', () => {
+  it('shows worker.idling and worker.signaled for an idle worker', async () => {
+    // Override progress_secs to 1s for quick idle detection.
+    const toml = box
+      .read('.collie/collie.toml')
+      .replace(/progress_secs\s*=\s*\d+/, 'progress_secs = 1');
+    box.write('.collie/collie.toml', toml);
+
+    let t = 0;
+    const idleWorker: ReturnType<typeof workerScene> = {
+      expectRole: 'worker',
+      events: [{ type: 'heartbeat' }],
+      effect: async ({ stopped }: FakeSceneContext) => {
+        // Wait until the signal ladder stops us.
+        await stopped;
+      },
+      result: { exitCode: 1 },
+    };
+    const runner = new FakeRunner([idleWorker]);
+    await box.run(runner, {
+      ladderDelay: () => Promise.resolve(),
+      livenessIntervalMs: 1,
+      livenessNow: () => {
+        t += 1;
+        return t;
+      },
+      livenessFingerprint: () => Promise.resolve('unchanged'),
+    });
+
+    const out = await showOutput();
+    expect(out).toContain('worker.idling');
+    expect(out).toContain('worker.signaled');
+    expect(out).toContain('run.finished');
+  });
+});
+
+describe('collie show: ci.resolved in a normal PASS run', () => {
+  it('shows ci.resolved event when CI resolves successfully', async () => {
+    const r = new FakeRunner([
+      workerScene(box, { passing: 5, failing: 0, push: true, claims: honestClaims(5, true) }),
+      fooledReviewerScene(box),
+    ]);
+    expect(await box.run(r)).toBe(0);
+
+    const out = await showOutput();
+    expect(out).toContain('ci.resolved');
+    expect(out).toContain('conclusion=success');
+  });
+});

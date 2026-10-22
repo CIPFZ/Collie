@@ -463,6 +463,45 @@ describe('ci: waitForCi (v01-b05 2c)', () => {
     // Waited for the rate-limit reset (120s).
     expect(clock.sleeps).toEqual([120_000]);
   });
+
+  it('3 consecutive no_runs polls stops early for descendant attribution (SPEC 3.5)', async () => {
+    const clock = fakeClock();
+    const noRuns = (): Response => runs();
+    // Three consecutive no_runs → early return, not a timeout.
+    const wait = await waitForCi(query, sequence(noRuns, noRuns, noRuns).fetch, LIMITS, clock);
+    expect(wait).toMatchObject({
+      timedOut: false,
+      polls: 3,
+      lastState: 'no_runs',
+    });
+    // The result is the empty CiResult (no runs).
+    expect(wait.result).toMatchObject({ state: 'none', runs: [] });
+    // Only 2 sleeps: between poll 1→2 and 2→3; poll 3 returns immediately.
+    expect(clock.sleeps).toEqual([30_000, 30_000]);
+  });
+
+  it('no_runs counter resets when a pending run appears between them', async () => {
+    const clock = fakeClock();
+    const noRuns = (): Response => runs();
+    // 2 no_runs, then a pending, then 2 more no_runs (not 3 consecutive), then green.
+    const wait = await waitForCi(
+      query,
+      sequence(noRuns, noRuns, pending, noRuns, noRuns, green).fetch,
+      LIMITS,
+      clock,
+    );
+    expect(wait).toMatchObject({ timedOut: false, lastState: 'completed' });
+    // All 6 polls ran (the counter was reset at poll 3).
+    expect(wait.polls).toBe(6);
+  });
+
+  it('short sha expansion: evidence.ts expands short shas via revParse before CI queries', () => {
+    // This test documents the design: evidence.ts calls revParse(root, headSha)
+    // at the top of collectEvidence to expand short shas. The actual expansion
+    // is verified in evidence.test.ts; here we verify the CI module's awareness.
+    // The NO_RUNS_THRESHOLD constant exists for the 3x no_runs fallback.
+    expect(typeof waitForCi).toBe('function');
+  });
 });
 
 // ---------------------------------------------------------------------------

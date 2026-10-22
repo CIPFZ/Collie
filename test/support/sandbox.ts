@@ -81,6 +81,8 @@ export class Sandbox {
   /** What the fake reviewer could see in its working directory. */
   reviewerSawReport: boolean | undefined;
   reviewerCwd: string | undefined;
+  /** Monotonic tick shared across runs so each run gets a distinct run_id. */
+  private tick = 0;
   private readonly savedEnv = {
     global: process.env.GIT_CONFIG_GLOBAL,
     nosystem: process.env.GIT_CONFIG_NOSYSTEM,
@@ -163,13 +165,13 @@ export class Sandbox {
     runner: FakeRunner | undefined,
     extra: Partial<CliDeps> = {},
   ): Promise<number> {
-    let tick = 0;
     return main(argv, {
       cwd: this.root,
       runner,
       fetch: this.fetch,
       // A fixed, advancing clock keeps envelopes and run ids deterministic.
-      now: () => new Date(Date.UTC(2026, 9, 19, 12, 0, tick++)),
+      // The tick is shared across runs so multi-run tests get distinct run_ids.
+      now: () => new Date(Date.UTC(2026, 9, 19, 12, 0, this.tick++)),
       out: (t) => this.output.push(t),
       err: (t) => this.output.push(t),
       ...extra,

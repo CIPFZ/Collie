@@ -217,6 +217,26 @@ describe('evidence: CI', () => {
   });
 });
 
+describe('evidence: short sha expansion (SPEC 3.5 v02-b05)', () => {
+  it('expands a 7-char short sha to 40 chars before CI query', async () => {
+    write('src.ts', 'x\n');
+    const head = await commitAll('code');
+    const shortSha = head.slice(0, 7);
+    // The CI fetch sees the URL: if revParse expanded it, the sha in the URL is 40 chars.
+    const calls: string[] = [];
+    const capturingFetch: FetchLike = (url, init) => {
+      calls.push(url);
+      return ciFetch('main')(url, init);
+    };
+    await collect(shortSha, capturingFetch);
+    // The URL should contain the full 40-char sha, not the 7-char short one.
+    expect(calls.length).toBeGreaterThan(0);
+    const shaInUrl = new URL(calls[0] ?? '').searchParams.get('head_sha') ?? '';
+    expect(shaInUrl).toHaveLength(40);
+    expect(shaInUrl).toBe(head);
+  });
+});
+
 describe('evidence: verify', () => {
   it('runs each command once, in the worktree root, and finds the test command', async () => {
     write('src.ts', 'x\n');

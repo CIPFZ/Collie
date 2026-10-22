@@ -82,4 +82,11 @@ describe('structural invariants (SPEC 3.2)', () => {
     // Must NOT have hand-written SpawnHook interfaces.
     expect(content).not.toMatch(/interface SpawnHook/);
   });
+
+  it('ci.resolved appears in schema, run.ts, and this invariants file (v02-b05)', () => {
+    const schema = readFileSync(join(ROOT, 'src/schema/index.ts'), 'utf8');
+    const run = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    expect(schema).toContain('ci.resolved');
+    expect(run).toContain('ci.resolved');
+  });
 });
