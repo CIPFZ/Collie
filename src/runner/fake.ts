@@ -97,56 +97,72 @@ export class FakeRunner implements AgentRunner {
       hasOnStarted: opts.onStarted !== undefined,
       ...(opts.resumeSessionId === undefined ? {} : { resumeSessionId: opts.resumeSessionId }),
     });
-    // Like a real runner, refuse to start once cancelled.
-    opts.signal?.throwIfAborted();
 
-    const scene = this.scenes[index];
-    if (scene === undefined) {
-      throw new FakeRunnerError(
-        `script exhausted: call ${String(index + 1)} (role ${opts.role}) has no scene; ${String(this.scenes.length)} scripted`,
-      );
+    // SPEC 3.1 (token_file): strip CI tokens during the run, so effects
+    // (which run in-process) cannot see them. Restored in the finally block.
+    const savedGithubToken = process.env.GITHUB_TOKEN;
+    const savedGhToken = process.env.GH_TOKEN;
+    delete process.env.GITHUB_TOKEN;
+    delete process.env.GH_TOKEN;
+
+    try {
+      // Like a real runner, refuse to start once cancelled.
+      opts.signal?.throwIfAborted();
+
+      const scene = this.scenes[index];
+      if (scene === undefined) {
+        throw new FakeRunnerError(
+          `script exhausted: call ${String(index + 1)} (role ${opts.role}) has no scene; ${String(this.scenes.length)} scripted`,
+        );
+      }
+      if (scene.expectRole !== undefined && scene.expectRole !== opts.role) {
+        throw new FakeRunnerError(
+          `scene ${String(index)} expects role ${scene.expectRole}, got ${opts.role}`,
+        );
+      }
+
+      // Three-level stop (SPEC 11.2): the handle records the highest level received.
+      let stopLevel: 'soft' | 'hard' | 'kill' | undefined;
+      let stopResolve: ((level: 'soft' | 'hard' | 'kill') => void) | undefined;
+      const stoppedPromise = new Promise<'soft' | 'hard' | 'kill'>((r) => {
+        stopResolve = r;
+      });
+      const handle: RunHandle = {
+        ...(scene.pid === undefined ? { pid: process.pid } : { pid: scene.pid }),
+        // eslint-disable-next-line @typescript-eslint/require-await -- interface requires Promise<void>
+        async stop(level: 'soft' | 'hard' | 'kill'): Promise<void> {
+          if (level === 'soft' && scene.ignoreSoft === true) return;
+          stopLevel = level;
+          stopResolve?.(level);
+        },
+      };
+      opts.onStarted?.(handle);
+
+      for (const [path, content] of Object.entries(scene.files ?? {})) {
+        const target = join(opts.cwd, safeRelative(path));
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, content);
+      }
+      for (const event of scene.events ?? []) opts.onEvent?.(event);
+      await scene.effect?.({ cwd: opts.cwd, opts, handle, stopped: stoppedPromise });
+
+      // A stop during the scene (e.g. the effect called handle.stop('kill'))
+      // terminates with stopReason before checking the signal.
+      if (stopLevel !== undefined) {
+        const base = scene.result ?? { exitCode: 1 };
+        return { ...base, stopReason: 'stopped' };
+      }
+
+      opts.signal?.throwIfAborted();
+
+      if (scene.error !== undefined) throw scene.error;
+      return { ...scene.result };
+    } finally {
+      // Restore stripped CI tokens (SPEC 3.1).
+      if (savedGithubToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = savedGithubToken;
+      if (savedGhToken === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = savedGhToken;
     }
-    if (scene.expectRole !== undefined && scene.expectRole !== opts.role) {
-      throw new FakeRunnerError(
-        `scene ${String(index)} expects role ${scene.expectRole}, got ${opts.role}`,
-      );
-    }
-
-    // Three-level stop (SPEC 11.2): the handle records the highest level received.
-    let stopLevel: 'soft' | 'hard' | 'kill' | undefined;
-    let stopResolve: ((level: 'soft' | 'hard' | 'kill') => void) | undefined;
-    const stoppedPromise = new Promise<'soft' | 'hard' | 'kill'>((r) => {
-      stopResolve = r;
-    });
-    const handle: RunHandle = {
-      ...(scene.pid === undefined ? { pid: process.pid } : { pid: scene.pid }),
-      // eslint-disable-next-line @typescript-eslint/require-await -- interface requires Promise<void>
-      async stop(level: 'soft' | 'hard' | 'kill'): Promise<void> {
-        if (level === 'soft' && scene.ignoreSoft === true) return;
-        stopLevel = level;
-        stopResolve?.(level);
-      },
-    };
-    opts.onStarted?.(handle);
-
-    for (const [path, content] of Object.entries(scene.files ?? {})) {
-      const target = join(opts.cwd, safeRelative(path));
-      mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, content);
-    }
-    for (const event of scene.events ?? []) opts.onEvent?.(event);
-    await scene.effect?.({ cwd: opts.cwd, opts, handle, stopped: stoppedPromise });
-
-    // A stop during the scene (e.g. the effect called handle.stop('kill'))
-    // terminates with stopReason before checking the signal.
-    if (stopLevel !== undefined) {
-      const base = scene.result ?? { exitCode: 1 };
-      return { ...base, stopReason: 'stopped' };
-    }
-
-    opts.signal?.throwIfAborted();
-
-    if (scene.error !== undefined) throw scene.error;
-    return { ...scene.result };
   }
 }

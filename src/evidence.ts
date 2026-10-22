@@ -1,6 +1,9 @@
 // R2's own evidence (SPEC 8, CONSTRAINTS 铁律 4): what verify.ts, git.ts and
 // ci.ts measure, in the SPEC 3.5 evidence shape. The arbiter judges claims
 // against this, not against the reviewer's account of the same facts.
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import {
   isEnvelopeOnlyDiff,
   queryCi,
@@ -163,10 +166,25 @@ export async function collectEvidence(input: EvidenceInput): Promise<CollectedEv
 
   // Wait for head_sha's CI to settle before measuring it (v01-b05 2c). A commit
   // that is not on the remote will never get CI, so it is queried once, not awaited.
+
+  // SPEC 3.1 (token_file): read CI token from file when configured.
+  let ciToken: string | undefined;
+  if (config.ci.token_file !== undefined) {
+    const raw = config.ci.token_file;
+    const tokenPath = raw.startsWith('~') ? join(homedir(), raw.slice(1)) : raw;
+    try {
+      const content = readFileSync(tokenPath, 'utf8').trim();
+      if (content !== '') ciToken = content;
+    } catch {
+      // File not found or unreadable: treat as unconfigured (SPEC 3.1).
+    }
+  }
+
   const ciQuery = {
     repo: config.project.repo,
     sha: headSha,
     expectedBranch: config.ci.expected_branch,
+    ...(ciToken !== undefined ? { token: ciToken } : {}),
     ...signalOpt,
   };
   let ci: CollectedEvidence['ci'];

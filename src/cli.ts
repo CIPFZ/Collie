@@ -51,7 +51,7 @@ export interface CliDeps {
 
 const TEMPLATE = join(import.meta.dirname, '..', 'templates', 'collie.toml');
 const ISO_SECONDS = /^(?<y>\d{4})-(?<mo>\d{2})-(?<d>\d{2})T(?<h>\d{2}):(?<mi>\d{2}):(?<s>\d{2})/;
-const GITIGNORE_ENTRIES = ['.collie/runs/', '.collie/heartbeat.json'];
+const GITIGNORE_ENTRIES = ['.collie/runs/', '.collie/heartbeat.json', '.collie/github-token'];
 const GITHUB_SSH = /^git@github\.com:(?<path>[^\s]+?)(?:\.git)?$/;
 const GITHUB_HTTPS = /^https:\/\/github\.com\/(?<path>[^\s]+?)(?:\.git)?\/?$/;
 

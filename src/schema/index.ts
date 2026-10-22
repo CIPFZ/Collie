@@ -90,6 +90,8 @@ export const CollieConfigSchema = z.strictObject({
   ci: z.strictObject({
     provider: z.literal('github-actions'),
     expected_branch: NonEmptyString,
+    /** SPEC 3.1: optional path to a file containing a read-only GitHub PAT; `~` expands to home. */
+    token_file: z.string().optional(),
   }),
 });
 export type CollieConfig = z.infer<typeof CollieConfigSchema>;

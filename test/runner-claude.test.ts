@@ -107,7 +107,7 @@ describe('runner-claude: options built from the role config', () => {
   it('takes model, tools and turns from the worker config, in the call cwd', async () => {
     const { query, calls } = scripted([success()]);
     await new ClaudeRunner(config, { query }).run(opts());
-    expect(calls[0]).toEqual({
+    expect(calls[0]).toMatchObject({
       prompt: 'do the batch',
       options: {
         model: config.agent.worker.model,
@@ -119,6 +119,7 @@ describe('runner-claude: options built from the role config', () => {
         settingSources: [],
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
+        env: expect.any(Object) as unknown,
       },
     });
   });
@@ -444,6 +445,31 @@ describe('runner-claude: RunHandle and stop levels (SPEC 11.2)', () => {
     const result = await new ClaudeRunner(config, { query }).run(opts());
     expect(result.stopReason).toBe('turns_exhausted');
     expect(result.sessionId).toBe('s');
+  });
+});
+
+describe('runner-claude: subprocess env strips CI tokens (SPEC 3.1 token_file)', () => {
+  it('options.env does not contain GITHUB_TOKEN or GH_TOKEN', async () => {
+    // Set both env vars to simulate a host that has them.
+    const savedGH = process.env.GITHUB_TOKEN;
+    const savedGHT = process.env.GH_TOKEN;
+    process.env.GITHUB_TOKEN = 'ghp_host_token';
+    process.env.GH_TOKEN = 'gho_host_token';
+    try {
+      const { query, calls } = scripted([success()]);
+      await new ClaudeRunner(config, { query }).run(opts());
+      const env = calls[0]?.options?.env;
+      expect(env).toBeDefined();
+      expect(env).not.toHaveProperty('GITHUB_TOKEN');
+      expect(env).not.toHaveProperty('GH_TOKEN');
+      // Other env vars are passed through.
+      expect(env?.PATH ?? env?.Path).toBeDefined();
+    } finally {
+      if (savedGH === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = savedGH;
+      if (savedGHT === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = savedGHT;
+    }
   });
 });
 

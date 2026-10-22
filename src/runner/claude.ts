@@ -24,6 +24,8 @@ export interface ClaudeQueryOptions {
   settingSources?: readonly string[];
   /** SDK resume field: pass the session id of a previous run to continue it (SPEC 11.2). */
   resume?: string;
+  /** Subprocess environment; R2 strips CI tokens here (SPEC 3.1 token_file). */
+  env?: Record<string, string>;
 }
 
 export interface ClaudeQueryParams {
@@ -189,6 +191,16 @@ export class ClaudeRunner implements AgentRunner {
       opts.signal?.addEventListener('abort', forwardAbort, { once: true });
     }
 
+    // SPEC 3.1 (token_file): strip CI tokens from the subprocess environment.
+    // The worker's event stream is persisted raw (Q5); tokens must not leak.
+    const STRIPPED_ENV_KEYS = ['GITHUB_TOKEN', 'GH_TOKEN'];
+    const sanitizedEnv: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (!STRIPPED_ENV_KEYS.includes(key) && value !== undefined) {
+        sanitizedEnv[key] = value;
+      }
+    }
+
     const queryOptions: ClaudeQueryOptions = {
       // SDK isolation mode: no CLAUDE.md, settings files or hooks from the machine.
       settingSources: [],
@@ -206,6 +218,8 @@ export class ClaudeRunner implements AgentRunner {
         : {}),
       // SPEC 11.2: resume a previous session.
       ...(opts.resumeSessionId === undefined ? {} : { resume: opts.resumeSessionId }),
+      // SPEC 3.1 (token_file): sanitized subprocess env without CI tokens.
+      env: sanitizedEnv,
     };
 
     // Soft stop calls interrupt() on the query iterable (SPEC 11.2 v02-b03: SDK-level
