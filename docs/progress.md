@@ -270,4 +270,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v02-b04-fix2 · r-20261022-082259 · PASS
+
+- 时间：2026-10-22T09:23:29.439Z
+- 裁定：规则 9，十条验收命令全部实跑 exit 0；三个提交已推送至 origin/main；无受保护文件变更；无依赖变更；条目要求逐条核对满足；额外禁止全部遵守。CI 无法查询（环境无 GH_TOKEN），记为 unknown。
+- 提交：`145f139` `95c8acb` `43ed35c`
+- 验收命令：10/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，601 passed, 0 failed
+  - `test "$(grep -cE "^\s*it\(" test/invariants.test.ts)" -ge 6` → exit 0，exit 0
+  - `! grep -qE "setInterval|setTimeout\(" test/scenario-g.test.ts` → exit 0，exit 0
+  - `grep -qE "token_file" src/schema/index.ts && grep -qE "token_file" src/evidence.ts` → exit 0，exit 0
+  - `grep -qE "GITHUB_TOKEN" test/runner-claude.test.ts && grep -qE "GH_TOKEN" src/runner/claude.ts` → exit 0，exit 0
+  - `grep -qE "github-token" .gitignore && grep -qE "github-token" src/cli.ts` → exit 0，exit 0
+  - `grep -qE "unauthenticated.*rate.?limit.*(no wait|without waiting|immediately)" test/ci.test.ts` → exit 0，exit 0
+  - `! grep -rlE "@anthropic-ai" src --include='*.ts' | grep -v '^src/runner/'` → exit 0，exit 0
+- 已推送：是
+- CI：unknown，监听分支未能取证
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
