@@ -137,7 +137,11 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
 ## 每一轮做什么
 
 1. 确认当前在仓库根、工作区干净、`.collie/heartbeat.json` 不存在（存在说明上次被 kill，照常启动，Collie 会处理）。
+   `collie smoke` 子命令可用后（v02-b04-fix4），先跑 `npx tsx src/cli.ts smoke`，退出码非 0 就停下报告，不签发批次。
 2. `npx tsx src/cli.ts run <batch>`（或 `npm run collie -- run <batch>`）。**只跑一次**，无论结果。
+   R2 自身代码坏了、`collie run` 无法完成一轮时（SPEC 11.3「R2 自救」）：按 R1 指定的 sha 建 worktree
+   `git worktree add /tmp/collie-r2 <sha> && (cd /tmp/collie-r2 && npm ci)`，
+   然后 `npx tsx /tmp/collie-r2/src/cli.ts run <修复批次>`，cwd 仍是主仓库根。修复批次 PASS 后 `git worktree remove /tmp/collie-r2`。
    不在运行中干预，不重跑，不手改任何文件。
 3. 结束后看退出码（0 PASS / 10 FIX / 20 BLOCK / 1 错误），`collie show <batch>`，
    读 `.collie/batches/<batch>/report.md` 与 `verdict.md`，读 `.collie/runs/<run_id>/events.ndjson`。

@@ -30,7 +30,8 @@
 | 12 | v02-b04-fix | R2 不再崩：interrupt this、异常兜底、内容指纹 | v02-b04 | passed |
 | 13 | v02-b04-fix2 | CI 证据与结构回归 | v02-b04-fix | passed |
 | 14 | v02-b04-fix3 | worker_pid、包装层 interrupt、原子心跳 | v02-b04-fix2 | passed |
-| 15 | v02-b05 | 中断标记与 resume | v02-b04-fix3 | pending |
+| 15 | v02-b04-fix4 | spawn 钩子按 SDK 签名、类型来自 SDK、collie smoke | v02-b04-fix3 | pending |
+| 16 | v02-b05 | 中断标记与 resume | v02-b04-fix4 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -583,9 +584,48 @@ fix2 的两项第一次真实生效：R2 用 token 取到 head_sha 自己的 CI�
 子进程环境无密钥（/proc 实读）、stream.ndjson 无 token 字样。阈值恢复 900 / 2700。
 遗留：CI 取证成功时 journal 无事件（只有超时才写），进 b05 条目 2。
 
-## v02-b05 中断标记与 resume
+## v02-b04-fix4 spawn 钩子按 SDK 签名、类型来自 SDK、collie smoke
 
 优先级：15　依赖：v02-b04-fix3
+
+v02-b05 第 1 次运行 worker 0.16 秒崩溃：fix3 的 `spawnClaudeCodeProcess` 按 Node `spawn` 写成三参数，SDK 实际只传一个
+`SpawnOptions` 对象。R2 自身用这段代码，无法正常签发批次；本批次由操作员按 SPEC 11.3「R2 自救」从 `b6a141a`（fix2 代码，
+fix3 那轮实跑验证过）的 worktree 运行 R2。规格见 SPEC 11.2、11.3。
+
+条目：
+1. `claude.ts` 钩子改为 `(options) => spawn(options.command, options.args, { cwd: options.cwd, env: 去密钥后的 options.env, signal: options.signal })`，
+   返回值满足 SDK 的 `SpawnedProcess`；`test/runner-claude.test.ts` 里所有调用钩子的地方改为传单个对象，
+   并加一条断言：钩子收到 `{ command, args, env: { GITHUB_TOKEN: 'fake-token', PATH: '/x' } }` 时，`spawn` 替身收到的 `env` 无 `GITHUB_TOKEN`、有 `PATH`
+2. `ClaudeQueryOptions` 及钩子、`SpawnOptions`、`SpawnedProcess` 相关类型全部 `import type` 自 `@anthropic-ai/claude-agent-sdk` 并用
+   `Pick` / 索引类型派生，删除手写的 `SpawnHookOptions` / `SpawnHookResult`；`test/invariants.test.ts` 加一条：
+   `src/runner/claude.ts` 含 `import type .* from '@anthropic-ai/claude-agent-sdk'`，且不含 `interface SpawnHook`
+3. `collie smoke` 子命令：用配置的真实 runner、`maxTurns: 1`、`allowedTools: []`、prompt「Reply with the single word ok.」拉起 worker 角色，
+   收到 `RunResult` 即退出码 0 并打印 `exitCode / sessionId / usage`；拉不起来或 runner 抛出则退出码 1 并打印错误。
+   不写 journal、不碰 `.collie/batches`。`test/cli.test.ts` 用 fake runner 覆盖成功与失败两条路径；
+   `AGENT_KICKOFF.md` 由 R1 事后把「跑批次前先 `collie smoke`」写进操作员流程
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 钩子不再是三参数 | `! grep -qE "spawnClaudeCodeProcess\?: \($" src/runner/claude.ts && ! grep -qE "command: string,$" src/runner/claude.ts` | exit 0 |
+| 类型来自 SDK | `grep -qE "import type .* from '@anthropic-ai/claude-agent-sdk'" src/runner/claude.ts && ! grep -qE "interface SpawnHook" src/runner/claude.ts` | exit 0 |
+| 不变量已加 | `grep -qE "claude-agent-sdk" test/invariants.test.ts` | exit 0 |
+| 测试按单对象调用钩子 | `grep -qE "spawnClaudeCodeProcess\(\{" test/runner-claude.test.ts \|\| grep -qE "spawnClaudeCodeProcess\?\.\(\{" test/runner-claude.test.ts` | exit 0 |
+| smoke 子命令存在且有测试 | `grep -qE "'smoke'" src/cli.ts && grep -qE "smoke" test/cli.test.ts` | exit 0 |
+| SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai\|spawnClaudeCodeProcess" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 改变 soft / hard 的现有实现
+
+## v02-b05 中断标记与 resume
+
+优先级：16　依赖：v02-b04-fix4
 
 规格见 SPEC 11.7、11.9。
 
@@ -620,3 +660,8 @@ fix2 的两项第一次真实生效：R2 用 token 取到 head_sha 自己的 CI�
 - 改动任何受保护路径
 - resume 的 session 内容进入 journal（只记 session_id）
 - 为了让测试过而删除或跳过任何测试
+
+记录：第 1 次运行 r-20261022-111044 BLOCK（上报：无 report，裁定 `fbc7410`）。worker 启动 163 毫秒崩溃，
+fix3 的 spawn 钩子签名与 SDK 不符（三参数 vs 单对象），claude 子进程没起来。R2 自身（fix3 代码）用 b04-fix 的兜底正常收尾，
+run.finished / progress / 心跳删除都执行了，无残留现场。修复批次 v02-b04-fix4 插在前面，本批次依赖改为它。
+这是第三次「手写 SDK 类型与真实 SDK 不一致、typecheck 与替身测试都过、真实运行才炸」，规则进 SPEC 11.2。
