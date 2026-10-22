@@ -30,7 +30,7 @@
 | 12 | v02-b04-fix | R2 不再崩：interrupt this、异常兜底、内容指纹 | v02-b04 | passed |
 | 13 | v02-b04-fix2 | CI 证据与结构回归 | v02-b04-fix | passed |
 | 14 | v02-b04-fix3 | worker_pid、包装层 interrupt、原子心跳 | v02-b04-fix2 | passed |
-| 15 | v02-b04-fix4 | spawn 钩子按 SDK 签名、类型来自 SDK、collie smoke | v02-b04-fix3 | pending |
+| 15 | v02-b04-fix4 | spawn 钩子按 SDK 签名、类型来自 SDK、collie smoke | v02-b04-fix3 | blocked |
 | 16 | v02-b05 | 中断标记与 resume | v02-b04-fix4 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
@@ -623,6 +623,11 @@ fix3 那轮实跑验证过）的 worktree 运行 R2。规格见 SPEC 11.2、11.3
 - 为了让测试过而删除或跳过任何测试
 - 改变 soft / hard 的现有实现
 
+记录：第 1 次运行 r-20261022-114309 BLOCK（裁定 `2999228`），规则 1：reviewer 把 `commits_actual` 写成 `git log --oneline` 整行，
+不是纯 sha。reviewer 自判 PASS；R2 验收 9/9 通过、CI success；R1 复核 9/9、616 全过。
+参照 v02-b04-tests 先例：标 blocked，`8170a3d`、`1bd1ac5` 采纳，不重跑。R2 自救流程（从 `b6a141a` worktree 运行）首次使用，通畅。
+遗留：report 写了 7 位 `head_sha`，R2 原样查 Actions API 得 0 条，有 token 也等满 30 分钟才退回后代归属。进 b05 条目 3。
+
 ## v02-b05 中断标记与 resume
 
 优先级：16　依赖：v02-b04-fix4
@@ -637,7 +642,9 @@ fix3 那轮实跑验证过）的 worktree 运行 R2。规格见 SPEC 11.2、11.3
 2. resume 策略（11.7）：按 `resume_max` 决定是否传 `resumeSessionId`；新增事件 `worker.resumed`；
    仲裁 PASS 的运行不算中断、`attempt` 不递增（11.7 第一段）；
    `claude.ts` 的 `turns_exhausted` 映射已在 b03 提前落地，本批次只需测试覆盖。
-   顺带：CI 取证成功时记 `ci.resolved` 事件（3.6 字段），`collie show` 能据此还原 R2 等了多久
+   顺带两处 R2 取证侧（3.5、3.6）：CI 取证成功时记 `ci.resolved` 事件，`collie show` 能据此还原 R2 等了多久；
+   取证前用 `git rev-parse` 把 report 的 `head_sha` 与 `commits[]` 展开为 40 位再查 CI、再校验，
+   等待逻辑连续 3 次 `no_runs` 即转后代归属。`test/ci.test.ts` 覆盖「短 sha 展开」与「3 次 no_runs 转后代」
 3. 场景 E 后半段（attempt / interrupted_at / rescue_sha）与场景 F：
    `test/scenario-e.test.ts` 补全，`test/scenario-f.test.ts` 新增；
    `collie show` 按顺序还原 E / F / G 的事件链
@@ -655,6 +662,7 @@ fix3 那轮实跑验证过）的 worktree 运行 R2。规格见 SPEC 11.2、11.3
 | ci.resolved 进 schema 与 R2 | `grep -qE "ci\.resolved" src/schema/index.ts && grep -qE "ci\.resolved" src/run.ts && grep -qE "ci\.resolved" test/invariants.test.ts` | exit 0 |
 | 场景 F 覆盖 resume 上限 | `grep -qE "resume_max" test/scenario-f.test.ts` | exit 0 |
 | 后续 attempt 沿用首次 base_sha 有测试 | `grep -qE "base_sha" test/scenario-e.test.ts` | exit 0 |
+| 短 sha 展开与 no_runs 转后代有测试 | `grep -qE "rev-parse\|revParse" src/evidence.ts && grep -qE "no_runs" test/ci.test.ts && grep -qiE "short sha\|expands" test/ci.test.ts test/evidence.test.ts` | exit 0 |
 
 额外禁止：
 - 改动任何受保护路径

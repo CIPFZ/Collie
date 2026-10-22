@@ -335,6 +335,10 @@ R4 写，R2 读。Markdown 推理正文 + 尾部围栏 JSON。
 `ci_branch_matched` 为 `boolean | null`（`null` = 未能取证），`ci_run_url` 可为空串；
 `conditions?: string[]` 可选，非空表示 PASS 附条件。arbiter 把 `ci_branch_matched=null`
 视为未取证：若 `claims.ci_passed=true` 则按规则 7 降 FIX。
+R2 取证前先把 report 的 `head_sha` 与 `commits[]` 用 `git rev-parse` 展开成 40 位（v02-b04-fix4 后）：
+schema 允许 7~40 位，但 GitHub Actions API 的 `head_sha` 过滤只认完整 sha，短 sha 查到 0 条会被当成「还没出结果」白等到超时
+（fix4 第 1 次：有 token 仍等满 1801 秒、60 次轮询）。
+等待 CI 时 `no_runs` 不是「还没出结果」：连续 3 次轮询仍为 `no_runs` 即改查后代提交；后代也无运行才继续等 `pending`。
 CI 运行的归属（v01-b05-smoke 后）：`head_sha` 自己的运行优先；若不存在，可采信其**后代提交**
 在 `expected_branch` 上的运行，条件是 `git diff --name-only head_sha..后代` 只含 `.collie/**` 与
 `docs/progress.md`（即只多了信封提交，代码与 head_sha 相同）。其他后代一律不采信。

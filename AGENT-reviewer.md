@@ -55,6 +55,10 @@ JSON 字段的允许值（arbiter 用 schema 严格校验，写了别的值就�
   不要自己造 `cannot_verify` 之类的值；原因写进 `reason`
 - `ci_branch_matched`：`true` / `false` / `null`。没查到 CI 就写 `null`，不要写 `true`
 - `verdict`：`PASS` / `FIX` / `BLOCK`
+- `commits_actual` 的每个元素、`ci_run_url` 之外任何名字含 `sha` 的字段：**只放 sha 本身**，40 位小写十六进制，
+  用 `git rev-parse <ref>` 取；不要把 `git log --oneline` 那样的「sha + 提交说明」整行填进去
+  （v02-b04-fix4 第 1 次因此被规则 1 判 BLOCK，而代码与验收都是好的）
+- `verify_results[].exit_code`：整数；`spec_diff_lines`：整数；`deps_diff`：字符串数组
 你没有实测到的东西不要填成实测到了。arbiter 不采信你的 evidence，但会检查它的格式和它与 R2 实测的差异。
 
 ## 3. 三种结论的判据
@@ -125,7 +129,7 @@ JSON 字段的允许值（arbiter 用 schema 严格校验，写了别的值就�
   "batch_id": "<batch_id>",
   "verdict": "PASS",
   "evidence": {
-    "commits_actual": [],
+    "commits_actual": ["<40 位纯十六进制 sha>", "<同上>"],
     "verify_results": [
       { "cmd": "", "exit_code": 0, "summary": "" }
     ],
