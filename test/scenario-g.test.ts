@@ -2,7 +2,8 @@
 // The liveness monitor detects idle (fingerprint unchanged for progress_secs)
 // and the signal ladder escalates. Tests use injected ladder delay so grace
 // periods are instant, an injected now() so the monitor uses a fast fake clock,
-// and progress_secs=1 so idle is detected quickly.
+// an injected fingerprint so no real git subprocess is needed, and progress_secs=1
+// so idle is detected quickly.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -41,8 +42,10 @@ function fakeClock(stepMs = 200): { now: () => number } {
   };
 }
 
-/** Near-instant delay that yields via microtasks, letting the worker effect
- *  react to stop() before the ladder escalates. Records requested durations. */
+/** Near-instant delay that yields to the macrotask queue, letting the worker's
+ *  async completion chain settle before the ladder proceeds. Records requested
+ *  durations. Uses setTimeout(0) instead of bare microtask yields so the test
+ *  does not depend on microtask ordering (SPEC 11.5: "不依赖事件循环时序"). */
 function instantDelay(): {
   delay: (ms: number) => Promise<void>;
   durations: number[];
@@ -51,10 +54,11 @@ function instantDelay(): {
   return {
     delay: async (ms: number) => {
       durations.push(ms);
-      // Yield several times so the worker's stopped promise and cleanup can run.
-      for (let i = 0; i < 5; i++) {
-        await Promise.resolve();
-      }
+      // Yield to the macrotask queue: all pending microtasks (including the
+      // worker's stopped → RunResult → cleanupTimers chain) settle first.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
     },
     durations,
   };
@@ -75,22 +79,66 @@ function fakeSetTimer(cb: () => void, _ms: number): ReturnType<typeof setTimeout
 }
 
 /**
- * An idle worker scene: it commits code (to write a valid report), then emits
- * events in a loop without making further file changes. The liveness monitor
- * sees a frozen fingerprint and triggers the ladder.
+ * A controllable fake fingerprint for the liveness monitor (SPEC 11.5).
+ * While `frozen` is false, every call returns a unique value (simulating
+ * progress). When `frozen` is true, the value stays constant (simulating idle).
+ * No real git subprocess is involved, and no event loop timing dependency exists.
  */
-function idleWorkerScene(opts: { ignoreSoft?: boolean } = {}): FakeRunner {
+function fakeFingerprint(): {
+  fingerprint: () => Promise<string>;
+  /** Set to true to freeze the fingerprint value, simulating idle. */
+  frozen: boolean;
+} {
+  let counter = 0;
+  let frozenValue: string | undefined;
+  const state = { frozen: false };
+  return {
+    fingerprint: () => {
+      if (state.frozen) {
+        frozenValue ??= `frozen-${String(counter)}`;
+        return Promise.resolve(frozenValue);
+      }
+      return Promise.resolve(`progress-${String(counter++)}`);
+    },
+    get frozen() {
+      return state.frozen;
+    },
+    set frozen(v: boolean) {
+      state.frozen = v;
+      if (!v) frozenValue = undefined;
+    },
+  };
+}
+
+/**
+ * An idle worker scene: it commits code (to write a valid report), changing the
+ * fake fingerprint between each git operation to signal progress. Then it emits
+ * events in a loop without changing the fingerprint (frozen). The liveness
+ * monitor sees a frozen fingerprint and triggers the ladder. All timing is
+ * driven by the injected fake clock, fingerprint and setTimer — no dependency on
+ * real subprocesses or event loop ordering.
+ */
+function idleWorkerScene(
+  fp: { frozen: boolean },
+  opts: { ignoreSoft?: boolean } = {},
+): FakeRunner {
   return new FakeRunner([
     {
       expectRole: 'worker',
       ignoreSoft: opts.ignoreSoft,
       effect: async (ctx: FakeSceneContext) => {
-        // Commit code and report so the run can proceed.
+        // ---- Commit phase: fingerprint auto-increments (frozen=false) ----
+
         const featurePath = join(ctx.cwd, 'feature.txt');
         mkdirSync(dirname(featurePath), { recursive: true });
         writeFileSync(featurePath, 'feature\n');
+
+        ctx.opts.onEvent?.({ type: 'assistant', message: 'staging' });
         await git(ctx.cwd, ['add', '-A']);
+
+        ctx.opts.onEvent?.({ type: 'assistant', message: 'committing' });
         await git(ctx.cwd, ['commit', '-q', '-m', 'feat: add feature']);
+
         const sha = await revParse(ctx.cwd, 'HEAD');
 
         // Write report.md
@@ -119,13 +167,16 @@ function idleWorkerScene(opts: { ignoreSoft?: boolean } = {}): FakeRunner {
           join(reportDir, 'report.md'),
           `# Report\n\n## What\nDone.\n\n## Tests\nN/A.\n\n## Deviations\nNone.\n\n## Next\nNone.\n\n\`\`\`json\n${report}\n\`\`\`\n`,
         );
+
+        ctx.opts.onEvent?.({ type: 'assistant', message: 'writing report' });
         await git(ctx.cwd, ['add', '-A']);
+
+        ctx.opts.onEvent?.({ type: 'assistant', message: 'committing report' });
         await git(ctx.cwd, ['commit', '-q', '-m', `report(collie): ${BATCH}`]);
 
-        // Now enter the "idle" phase: emit events but don't change files.
-        // The liveness monitor will detect the frozen fingerprint.
-        // Events are emitted synchronously; the fake clock in the liveness
-        // monitor advances fast enough to detect idle without real timers.
+        // ---- Idle phase: freeze fingerprint, emit events without changing it ----
+        fp.frozen = true;
+
         for (let i = 0; i < 10; i++) {
           ctx.opts.onEvent?.({ type: 'assistant', message: 'still thinking...' });
         }
@@ -140,7 +191,8 @@ function idleWorkerScene(opts: { ignoreSoft?: boolean } = {}): FakeRunner {
 
 describe('scenario G: idle worker detected by liveness monitor (SPEC 11.5, 11.6)', () => {
   it('detects idle, sends soft, worker responds → no rescue needed', async () => {
-    const runner = idleWorkerScene();
+    const fp = fakeFingerprint();
+    const runner = idleWorkerScene(fp);
     const { delay } = instantDelay();
     const clock = fakeClock();
     const exitCode = await box.run(runner, {
@@ -148,6 +200,7 @@ describe('scenario G: idle worker detected by liveness monitor (SPEC 11.5, 11.6)
       livenessIntervalMs: 50,
       livenessNow: clock.now,
       livenessSetTimer: fakeSetTimer,
+      livenessFingerprint: fp.fingerprint,
     });
 
     // Exit code 20 (BLOCK) because the escalation path fires.
@@ -173,7 +226,8 @@ describe('scenario G: idle worker detected by liveness monitor (SPEC 11.5, 11.6)
   });
 
   it('does not respond to soft → ladder escalates to hard and kill', async () => {
-    const runner = idleWorkerScene({ ignoreSoft: true });
+    const fp = fakeFingerprint();
+    const runner = idleWorkerScene(fp, { ignoreSoft: true });
     const { delay } = instantDelay();
     const clock = fakeClock();
     const exitCode = await box.run(runner, {
@@ -181,6 +235,7 @@ describe('scenario G: idle worker detected by liveness monitor (SPEC 11.5, 11.6)
       livenessIntervalMs: 50,
       livenessNow: clock.now,
       livenessSetTimer: fakeSetTimer,
+      livenessFingerprint: fp.fingerprint,
     });
 
     expect(exitCode).toBe(20);

@@ -81,6 +81,12 @@ export interface LivenessConfig {
    * Tests pass a fake to avoid real delays.
    */
   setTimer?: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  /**
+   * Injected output fingerprint function (SPEC 11.5). Defaults to
+   * computeFingerprint(root) which calls real git. Tests inject a synchronous-
+   * returning fake so the monitor never shells out to git.
+   */
+  fingerprint?: () => Promise<string>;
 }
 
 // eslint-disable-next-line no-restricted-syntax -- monitor default interval, not a threshold
@@ -96,6 +102,7 @@ export class LivenessMonitor {
   private readonly checkIntervalMs: number;
   private readonly nowFn: () => number;
   private readonly setTimerFn: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  private readonly fingerprintFn: () => Promise<string>;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private lastEventMs: number;
   private lastProgressMs: number;
@@ -108,6 +115,7 @@ export class LivenessMonitor {
     this.checkIntervalMs = config.checkIntervalMs ?? DEFAULT_CHECK_INTERVAL_MS;
     this.nowFn = config.now ?? (() => Date.now());
     this.setTimerFn = config.setTimer ?? ((cb, ms) => setTimeout(cb, ms));
+    this.fingerprintFn = config.fingerprint ?? (() => computeFingerprint(config.root));
     const now = this.nowFn();
     this.lastEventMs = now;
     this.lastProgressMs = now;
@@ -153,7 +161,7 @@ export class LivenessMonitor {
 
     // Idle: events arriving but fingerprint unchanged for progress_secs.
     try {
-      const fp = await computeFingerprint(this.config.root);
+      const fp = await this.fingerprintFn();
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by stop()/check() during await
       if (this.stopped || this.triggered) return; // May have been stopped while awaiting.
       if (this.lastFingerprint === undefined || fp !== this.lastFingerprint) {
