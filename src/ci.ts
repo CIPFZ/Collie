@@ -303,7 +303,13 @@ function unsettled(result: CiResult): 'pending' | 'no_runs' | undefined {
 /**
  * Polls queryCi until head_sha's CI settles or `timeoutMs` passes (v01-b05 2c).
  * Rate limits are waited out within the deadline. Other errors reject, as in queryCi.
+ *
+ * SPEC 3.5 (v02-b05): 3 consecutive `no_runs` polls → stop waiting and return
+ * the empty result so the caller can try descendant attribution.
  */
+// eslint-disable-next-line no-restricted-syntax -- SPEC 3.5: structural constant, not a tunable threshold
+const NO_RUNS_THRESHOLD = 3;
+
 export async function waitForCi(
   query: CiQuery,
   fetchImpl: FetchLike,
@@ -314,6 +320,7 @@ export async function waitForCi(
   const deadline = start + limits.timeoutMs;
   let polls = 0;
   let lastState: CiWait['lastState'];
+  let consecutiveNoRuns = 0;
   for (;;) {
     polls++;
     let delay = limits.pollMs;
@@ -330,6 +337,21 @@ export async function waitForCi(
         };
       }
       lastState = waiting;
+      // SPEC 3.5: track consecutive no_runs; 3 in a row → delegate to descendant.
+      if (waiting === 'no_runs') {
+        consecutiveNoRuns++;
+        if (consecutiveNoRuns >= NO_RUNS_THRESHOLD) {
+          return {
+            result,
+            timedOut: false,
+            waitedMs: clock.now() - start,
+            polls,
+            lastState: 'no_runs',
+          };
+        }
+      } else {
+        consecutiveNoRuns = 0;
+      }
     } catch (error) {
       if (!(error instanceof CiRateLimitError)) throw error;
       lastState = 'rate_limited';

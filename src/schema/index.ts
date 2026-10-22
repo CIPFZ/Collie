@@ -152,6 +152,10 @@ export const EVENT_TYPES = [
   'worker.stalled',
   'worker.idling',
   'worker.signaled',
+  // v0.2 (SPEC 11.7): resume from a previous interrupted session.
+  'worker.resumed',
+  // v0.2 (SPEC 3.6): CI evidence successfully collected (R2's own measurement).
+  'ci.resolved',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);
@@ -193,10 +197,12 @@ export const TaskFrontmatterSchema = z.strictObject({
   base_sha: ShaSchema,
   created_at: IsoDateTime,
   attempt: z.number().int().positive(),
-  // v0.2 fills this in; v0.1 always writes null, but the key must be present.
-  interrupted_at: z.null(),
+  // v0.2 (SPEC 11.7): "<run_id> <reason> <last_event>@<time>" or null.
+  interrupted_at: z.string().nullable(),
   issued_by: NonEmptyString.optional(),
   revised_at: IsoDateTime.nullable().optional(),
+  // v0.2 (SPEC 11.7): sha of the wip(collie) rescue commit, if any. Optional, no version bump.
+  rescue_sha: ShaSchema.optional(),
 });
 export type TaskFrontmatter = z.infer<typeof TaskFrontmatterSchema>;
 

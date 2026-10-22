@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -18,7 +19,17 @@ import { loadBacklog } from './backlog.js';
 import type { Clock, FetchLike } from './ci.js';
 import { loadConfig } from './config.js';
 import { collectEvidence, type Evidence } from './evidence.js';
-import { addWorktree, commit, git, isAncestor, removeWorktree, revParse, status } from './git.js';
+import {
+  addWorktree,
+  commit,
+  git,
+  isAncestor,
+  log,
+  remoteContains,
+  removeWorktree,
+  revParse,
+  status,
+} from './git.js';
 import {
   checkHeartbeat,
   removeHeartbeat,
@@ -26,7 +37,7 @@ import {
   updateHeartbeat,
   writeHeartbeat,
 } from './heartbeat.js';
-import { createJournal, RUNS_RELATIVE_DIR, type Journal } from './journal.js';
+import { createJournal, EVENTS_FILE_NAME, RUNS_RELATIVE_DIR, type Journal } from './journal.js';
 import { LivenessMonitor, runLadder, type LadderReason } from './ladder.js';
 import { writeProgress } from './progress.js';
 import { readVerdict, runReviewer, verdictPath } from './roles/reviewer.js';
@@ -42,6 +53,7 @@ import type {
   Verdict,
   VerdictValue,
 } from './schema/index.js';
+import { RunIdSchema } from './schema/index.js';
 
 /** SPEC 5 exit codes of `collie run`. */
 /* eslint-disable no-restricted-syntax, @typescript-eslint/no-magic-numbers -- SPEC 5 exit codes */
@@ -264,6 +276,124 @@ function realDelay(ms: number): Promise<void> {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Batch history analysis (SPEC 11.7): reads all previous runs of a batch to
+// determine attempt, base_sha, interrupt context, and resume eligibility.
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a run ended as an "interrupt" per SPEC 11.7: non-PASS verdict AND one
+ * of the abnormal end conditions (stalled / idling / wallclock / orphaned /
+ * turns_exhausted / non-zero exit).
+ */
+function isInterruptedRun(events: readonly Event[]): boolean {
+  const finished = events.findLast((e) => e.event === 'run.finished');
+  if (finished === undefined) return true; // no run.finished means crashed hard
+  // SPEC 11.7: PASS runs never count as interrupted.
+  if (finished.verdict === 'PASS') return false;
+  // Any non-PASS termination is an interrupt for task.md injection purposes.
+  return true;
+}
+
+export interface BatchHistory {
+  /** Attempt number for the next run. */
+  attempt: number;
+  /** The first run's base_sha (SPEC 4.3: subsequent attempts reuse it). */
+  baseSha: string | undefined;
+  /** SPEC 11.7: interrupted_at string for the task envelope. */
+  interruptedAt: string | undefined;
+  /** SPEC 11.7: rescue commit sha from the last run. */
+  rescueSha: string | undefined;
+  /** Last run's sessionId for resume, if available. */
+  lastSessionId: string | undefined;
+  /** Number of times resume has been used for this batch. */
+  resumeCount: number;
+}
+
+/** All journal events of every run that touched `batchId`, oldest run first. */
+function allBatchEvents(root: string): Map<string, Event[]> {
+  const runsDir = join(root, RUNS_RELATIVE_DIR);
+  if (!existsSync(runsDir)) return new Map();
+  const journal = createJournal(root);
+  const runs = new Map<string, Event[]>();
+  for (const runId of readdirSync(runsDir).sort()) {
+    if (
+      !RunIdSchema.safeParse(runId).success ||
+      !existsSync(join(runsDir, runId, EVENTS_FILE_NAME))
+    )
+      continue;
+    runs.set(runId, journal.replay(runId));
+  }
+  return runs;
+}
+
+/**
+ * Analyzes the journal to determine the state of a batch across previous runs
+ * (SPEC 11.7). Returns the context needed for the next task envelope.
+ */
+export function batchHistory(root: string, batchId: string, excludeRunId?: string): BatchHistory {
+  const allRuns = allBatchEvents(root);
+  let attempt = 1;
+  let baseSha: string | undefined;
+  let interruptedAt: string | undefined;
+  let rescueSha: string | undefined;
+  let lastSessionId: string | undefined;
+  let resumeCount = 0;
+
+  for (const [runId, events] of allRuns) {
+    if (runId === excludeRunId) continue;
+    const batchEvents = events.filter((e) => e.batch_id === batchId);
+    if (batchEvents.length === 0) continue;
+
+    // Extract first run's base_sha from batch.selected event.
+    const selected = batchEvents.find((e) => e.event === 'batch.selected');
+    if (selected !== undefined && baseSha === undefined && typeof selected.base_sha === 'string') {
+      baseSha = selected.base_sha;
+    }
+
+    // Count resume usage from worker.resumed events with a session_id.
+    const resumed = batchEvents.find((e) => e.event === 'worker.resumed');
+    if (resumed !== undefined && typeof resumed.session_id === 'string') {
+      resumeCount++;
+    }
+
+    // Determine if this run was interrupted (SPEC 11.7).
+    if (isInterruptedRun(batchEvents)) {
+      attempt++;
+
+      // Build interrupted_at from the last run's info.
+      const finished = batchEvents.findLast((e) => e.event === 'run.finished');
+      const workerFinished = batchEvents.findLast((e) => e.event === 'worker.finished');
+      const lastEvent = batchEvents.at(-1);
+      const runId = lastEvent?.run_id ?? '';
+      const stopReason =
+        typeof finished?.worker_stop_reason === 'string'
+          ? finished.worker_stop_reason
+          : typeof finished?.result === 'string'
+            ? finished.result
+            : 'unknown';
+      const lastType = lastEvent?.event ?? 'unknown';
+      const lastTs = lastEvent?.ts ?? '';
+      interruptedAt = `${runId} ${stopReason} ${lastType}@${lastTs}`;
+
+      // Session ID from worker.finished for resume eligibility.
+      lastSessionId =
+        typeof workerFinished?.session_id === 'string' ? workerFinished.session_id : undefined;
+
+      // Rescue sha from worker.rescued event.
+      const rescued = batchEvents.findLast((e) => e.event === 'worker.rescued');
+      rescueSha = typeof rescued?.sha === 'string' ? rescued.sha : undefined;
+    } else {
+      // PASS run: reset interrupt context, attempt does not increment.
+      interruptedAt = undefined;
+      rescueSha = undefined;
+      lastSessionId = undefined;
+    }
+  }
+
+  return { attempt, baseSha, interruptedAt, rescueSha, lastSessionId, resumeCount };
+}
+
 /** Runs one batch end to end. Never throws for agent misbehaviour; only for Collie's own failures. */
 export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   const { root, batchId, runId } = ctx;
@@ -323,17 +453,45 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     removeHeartbeat(root);
     return { final, exitCode: EXIT_CODES[final], ...extra };
   };
-  const escalate = async (reason: string): Promise<RunOutcome> => {
+  const escalate = async (reason: string, evidenceBaseSha?: string): Promise<RunOutcome> => {
     rec.record('escalated', { reason });
-    // SPEC 11.7: any exit writes a progress record — even escalations that never
-    // reach the arbiter. Build synthetic decision + evidence for the commit.
-    const decision = escalationDecision(reason);
+    // SPEC 4.3: "上报：无 report" — escalation without the word "规则 0".
+    const escalationReason = `上报：无 report — ${reason}`;
+    const decision = escalationDecision(escalationReason);
+
+    // SPEC 4.3: the escalation path still uses git to check base_sha..HEAD for
+    // actual commits and push status, so progress records reflect reality.
+    let evidence = emptyEvidence();
+    if (evidenceBaseSha !== undefined) {
+      try {
+        const commits = await log(root, evidenceBaseSha, 'HEAD');
+        let remoteHasHead = false;
+        try {
+          remoteHasHead = await remoteContains(
+            root,
+            ctx.remote,
+            config.ci.expected_branch,
+            await revParse(root, 'HEAD'),
+          );
+        } catch {
+          // Best effort
+        }
+        evidence = {
+          ...evidence,
+          commits_actual: commits.map((c) => c.sha),
+          remote_has_head: remoteHasHead,
+        };
+      } catch {
+        // Best effort: if git commands fail, fall back to empty evidence.
+      }
+    }
+
     const progressPath = writeProgress(root, {
       batchId,
       runId,
       at: ctx.now().toISOString(),
       decision,
-      evidence: emptyEvidence(),
+      evidence,
       workerExitCode,
       workerStopReason,
     });
@@ -354,19 +512,40 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   // SPEC 11.3: outermost try — any unexpected exception after the heartbeat is
   // written triggers the error fallback (run.finished → rescue → progress → heartbeat delete).
   try {
-    // E2: issue the envelope. base_sha is the last commit before the task commit (SPEC 3.3).
-    const baseSha = await revParse(root, 'HEAD');
+    // SPEC 11.7: analyze previous runs to determine attempt, base_sha, and interrupt context.
+    const history = batchHistory(root, batchId, runId);
+
+    // E2: issue the envelope. SPEC 4.3: subsequent attempts reuse the first attempt's base_sha.
+    const baseSha = history.baseSha ?? (await revParse(root, 'HEAD'));
     rec.record('batch.selected', { base_sha: baseSha });
+
+    // SPEC 11.7: determine resume eligibility.
+    const resumeMax = config.limits.resume_max;
+    const resumeSessionId =
+      history.lastSessionId !== undefined && history.resumeCount < resumeMax
+        ? history.lastSessionId
+        : undefined;
+
     const task = buildTask(batch, {
       run_id: runId,
       base_sha: baseSha,
       created_at: ctx.now().toISOString(),
-      attempt: 1,
+      attempt: history.attempt,
+      interrupted_at: history.interruptedAt,
+      rescue_sha: history.rescueSha,
     });
     writeTask(root, batch, task);
     const relTask = taskPath('', batchId);
     const taskSha = await commit(root, `docs: issue ${batchId} task envelope`, [relTask]);
     rec.record('batch.task_written', { path: relTask, commit: taskSha });
+
+    // SPEC 11.7: record worker.resumed event when this is a subsequent attempt.
+    if (history.attempt > 1) {
+      rec.record('worker.resumed', {
+        session_id: resumeSessionId ?? null,
+        attempt: history.attempt,
+      });
+    }
 
     // E3/E4: the worker, bounded by the wall clock (SPEC 3.3).
     rec.record('worker.started');
@@ -459,6 +638,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         ...(ctx.workerSignal === undefined ? {} : { signal: ctx.workerSignal }),
         onEvent,
         onStarted,
+        ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
       });
       cleanupTimers();
       // SPEC 11.7: track worker exit info for run.finished and progress.
@@ -471,6 +651,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
           ? {}
           : { final_text: truncate(result.finalText, FINAL_TEXT_MAX) }),
         ...(result.stopReason === undefined ? {} : { stop_reason: result.stopReason }),
+        // SPEC 11.7: session_id for resume eligibility in the next attempt.
+        ...(result.sessionId === undefined ? {} : { session_id: result.sessionId }),
       });
     } catch (error) {
       cleanupTimers();
@@ -487,7 +669,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       if (rescue !== undefined) {
         rec.record('worker.rescued', { sha: rescue.sha, files: rescue.files });
       }
-      return await escalate(`worker crashed: ${message(error)}`);
+      return await escalate(`worker crashed: ${message(error)}`, baseSha);
     }
 
     // SPEC 11.4: rescue uncommitted work left behind by the worker.
@@ -500,13 +682,14 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     try {
       report = readReport(root, batchId);
     } catch (error) {
-      return await escalate(`no valid report: ${message(error)}`);
+      return await escalate(`no valid report: ${message(error)}`, baseSha);
     }
     // head_sha is itself a claim: it must be a commit built on top of the task commit.
     const headOk = await isAncestor(root, taskSha, report.head_sha).catch(() => false);
     if (!headOk)
       return await escalate(
         `report head_sha ${report.head_sha} does not descend from the task commit ${taskSha}`,
+        baseSha,
       );
 
     // Worker output is taskSha..head_sha: the task commit is R2's, not the worker's (SPEC 3.3).
@@ -563,6 +746,35 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
           waited_secs: Math.round(collected.ciWait.waitedMs / MS_PER_SECOND),
           polls: collected.ciWait.polls,
           last_state: collected.ciWait.lastState,
+        });
+      }
+      // SPEC 3.6: record ci.resolved when CI evidence was successfully collected.
+      if (
+        collected.ciWait !== undefined &&
+        !collected.ciWait.timedOut &&
+        collected.ciWait.result !== undefined
+      ) {
+        rec.record('ci.resolved', {
+          head_sha: report.head_sha,
+          conclusion: collected.evidence.ci_conclusion,
+          branch_matched: collected.evidence.ci_branch_matched,
+          run_url: collected.evidence.ci_run_url,
+          waited_secs: Math.round(collected.ciWait.waitedMs / MS_PER_SECOND),
+          polls: collected.ciWait.polls,
+        });
+      } else if (
+        collected.ciWait === undefined &&
+        !('error' in collected.ci) &&
+        collected.ci.state === 'completed'
+      ) {
+        // Single query (not pushed + waited), but still resolved.
+        rec.record('ci.resolved', {
+          head_sha: report.head_sha,
+          conclusion: collected.evidence.ci_conclusion,
+          branch_matched: collected.evidence.ci_branch_matched,
+          run_url: collected.evidence.ci_run_url,
+          waited_secs: 0,
+          polls: 1,
         });
       }
       return { verdict, collected };

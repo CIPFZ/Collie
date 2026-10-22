@@ -49,7 +49,8 @@ export function renderEntry(entry: ProgressEntry): string {
     `### ${entry.batchId} · ${entry.runId} · ${verdict}`,
     '',
     `- 时间：${entry.at}`,
-    `- 裁定：规则 ${String(decision.rule)}，${decision.reason}`,
+    // SPEC 4.3: escalations (rule 0) write "上报：无 report", never "规则 0".
+    `- 裁定：${decision.rule === 0 ? decision.reason : `规则 ${String(decision.rule)}，${decision.reason}`}`,
     `- 提交：${evidence.commits_actual.length > 0 ? evidence.commits_actual.map((s) => `\`${short(s)}\``).join(' ') : '无'}`,
     `- 验收命令：${String(evidence.verify_results.length - failed)}/${String(evidence.verify_results.length)} 通过`,
     ...evidence.verify_results.map(

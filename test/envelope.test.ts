@@ -73,13 +73,17 @@ describe('envelope: TaskFrontmatterSchema (SPEC 3.3)', () => {
     );
   });
 
-  it('requires interrupted_at to be present and null in v0.1', () => {
+  it('requires interrupted_at to be present (null or string)', () => {
     const missing: Partial<TaskFrontmatter> = { ...frontmatter };
     delete missing.interrupted_at;
     expect(issuePaths(TaskFrontmatterSchema.safeParse(missing))).toEqual(['interrupted_at']);
+    // Now accepts strings (SPEC 11.7: interrupt info).
     expect(
-      issuePaths(TaskFrontmatterSchema.safeParse({ ...frontmatter, interrupted_at: 'item 2' })),
-    ).toEqual(['interrupted_at']);
+      TaskFrontmatterSchema.safeParse({
+        ...frontmatter,
+        interrupted_at: 'r-001 stopped run.finished@...',
+      }).success,
+    ).toBe(true);
   });
 
   it.each([

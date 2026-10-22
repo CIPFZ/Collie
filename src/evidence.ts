@@ -13,7 +13,7 @@ import {
   type Clock,
   type FetchLike,
 } from './ci.js';
-import { diffNameOnly, diffStat, log, remoteContains, showFile } from './git.js';
+import { diffNameOnly, diffStat, log, remoteContains, revParse, showFile } from './git.js';
 import {
   PackageJsonSchema,
   PackageLockSchema,
@@ -148,8 +148,13 @@ function dedupe(commands: readonly Acceptance[]): Acceptance[] {
 
 /** Measures everything arbiter rules 2-3 and 5-7 need. */
 export async function collectEvidence(input: EvidenceInput): Promise<CollectedEvidence> {
-  const { root, baseSha, headSha, config } = input;
+  const { root, baseSha, config } = input;
   const signalOpt = input.signal === undefined ? {} : { signal: input.signal };
+
+  // SPEC 3.5 (v02-b04-fix4): expand short shas to 40 chars before CI queries.
+  // GitHub Actions API's head_sha filter only matches full shas; a short sha
+  // query returns 0 runs, causing ci_wait_secs timeout with "still pending".
+  const headSha = await revParse(root, input.headSha);
 
   const commits = await log(root, baseSha, headSha);
   const protectedDiff = await diffStat(root, baseSha, headSha, PROTECTED_PATHS);

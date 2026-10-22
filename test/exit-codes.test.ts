@@ -139,6 +139,7 @@ describe('exit-codes: the journal of a full run (SPEC 3.6)', () => {
       'worker.finished',
       'reviewer.started',
       'reviewer.verdict',
+      'ci.resolved',
       'run.finished',
     ]);
   });

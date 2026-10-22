@@ -28,6 +28,10 @@ export interface TaskContext {
   base_sha: string;
   created_at: string;
   attempt: number;
+  /** SPEC 11.7: e.g. "<run_id> <reason> <last_event>@<time>". */
+  interrupted_at?: string;
+  /** SPEC 11.7: sha of the wip(collie) rescue commit from the previous run. */
+  rescue_sha?: string;
 }
 
 export interface TaskEnvelope {
@@ -121,6 +125,21 @@ function renderBody(batch: Batch): string {
   return `${sections.join('\n\n')}\n`;
 }
 
+/**
+ * SPEC 11.7: when the previous run was interrupted, the task body gets an extra
+ * section so the new worker can locate the interrupted state.
+ */
+function renderInterruptSection(ctx: TaskContext): string {
+  const lines = ['', '## 上一轮中断', '', `中断信息：\`${ctx.interrupted_at ?? ''}\``];
+  if (ctx.rescue_sha !== undefined) {
+    lines.push(`救援提交：\`${ctx.rescue_sha}\``);
+    lines.push('');
+    lines.push(`请先核实 \`${ctx.rescue_sha}\` 中的半成品是否完整，不要把它当作已完成。`);
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
 /** Assembles task.md: YAML frontmatter (SPEC 3.3) followed by the Markdown body. */
 export function buildTask(batch: Batch, ctx: TaskContext): TaskEnvelope {
   const frontmatter: TaskFrontmatter = {
@@ -130,12 +149,19 @@ export function buildTask(batch: Batch, ctx: TaskContext): TaskEnvelope {
     base_sha: ctx.base_sha,
     created_at: ctx.created_at,
     attempt: ctx.attempt,
-    interrupted_at: null,
+    interrupted_at: ctx.interrupted_at ?? null,
     // SPEC 3.3: tells the worker no human will confirm a plan (AGENT-worker.md 6).
     issued_by: ISSUER,
+    // SPEC 11.7: include rescue_sha when the previous run left a rescue commit.
+    ...(ctx.rescue_sha !== undefined ? { rescue_sha: ctx.rescue_sha } : {}),
   };
   // renderFrontmatter validates, so an invalid context fails here, not at the worker.
-  return { frontmatter, markdown: `${renderFrontmatter(frontmatter)}\n${renderBody(batch)}` };
+  const body = renderBody(batch);
+  const interruptSection = ctx.interrupted_at !== undefined ? renderInterruptSection(ctx) : '';
+  return {
+    frontmatter,
+    markdown: `${renderFrontmatter(frontmatter)}\n${body}${interruptSection}`,
+  };
 }
 
 /** Writes task.md to .collie/batches/<id>/ and returns its path. */
