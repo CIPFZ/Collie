@@ -143,7 +143,13 @@ commands = ["npm run lint", "npm run typecheck", "npm test"]
 [ci]
 provider = "github-actions"
 expected_branch = "main"   # 用于核对 CI 实际监听分支，防止「假全绿」
+token_file = "~/.config/collie/github-token"   # 可选。只读 PAT（Actions: read）所在文件，`~` 展开；只有 R2 读它
 ```
+
+`token_file`（v02-b04-fix2 后）：R2 在取证前读取该文件内容（去首尾空白）作为 `queryCi` 的 `token`，
+**不**放进环境变量。runner 拉起 worker / reviewer 时必须从子进程环境里删除 `GITHUB_TOKEN`、`GH_TOKEN`，
+worker 的事件流会原样落盘（Q5），不能让它看见密钥。文件不存在时与未配置相同。
+推荐放在仓库外；若放在 `.collie/` 下，`.collie/github-token` 在 `.gitignore` 与 `collie init` 的忽略清单里。
 
 `permission_mode` 取值 `default` / `acceptEdits` / `bypassPermissions`，省略时沿用 SDK 默认（逐次询问）。
 **v0.1 裁定（v01-b05）：两个角色都用 `bypassPermissions`。** 无人值守下任何「询问」都等于卡死；
@@ -181,6 +187,11 @@ interface Acceptance {
 
 硬约束：`acceptance[].cmd` 必须是可执行命令。无法写成命令的验收标准，
 R1 必须停下来与用户重新讨论，不得进入执行环节。
+
+结构不变量（v02-b04-fix 第 3 次运行后）：批次 PASS 之后它的验收命令不再执行，后续批次可以悄悄改回去
+（b04-tests 去掉了场景 G 的真实定时器，b04-fix 第 3 次又加了一个 `setTimeout(0)`，没人拦）。
+因此凡是 grep 类的结构检查，必须同时以测试形式写进 `test/invariants.test.ts`，由 `npm test` 永久回归；
+验收表里的 grep 只负责在本批次把它第一次立起来。R1 签发含结构检查的批次时，条目里必须写明「同步加进 invariants」。
 
 验收命令的能力边界（v01-b01 bootstrap 实测得出）：
 命令只能证明「绿」，不能证明「测了该测的」。一个只写 `expect(true)` 的测试文件

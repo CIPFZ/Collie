@@ -26,9 +26,10 @@
 | 9 | v02-b03 | 活性检测与信号阶梯 | v02-b02 | passed |
 | 10 | v02-b04 | b02/b03 遗留修补 | v02-b03 | passed |
 | 11 | v02-b04-tests | 测试去真实定时器 | v02-b04 | blocked |
-| 12 | v02-b04-fix | R2 不再崩：interrupt this、异常兜底、内容指纹 | v02-b04 | pending |
-| 13 | v02-b04-fix2 | 限流不等待、worker_pid | v02-b04-fix | pending |
-| 14 | v02-b05 | 中断标记与 resume | v02-b04-fix2 | pending |
+| 12 | v02-b04-fix | R2 不再崩：interrupt this、异常兜底、内容指纹 | v02-b04 | passed |
+| 13 | v02-b04-fix2 | CI 证据与结构回归 | v02-b04-fix | pending |
+| 14 | v02-b04-fix3 | worker_pid、包装层 interrupt、原子心跳 | v02-b04-fix2 | pending |
+| 15 | v02-b05 | 中断标记与 resume | v02-b04-fix3 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -487,25 +488,71 @@ worker 的 `2661d0e` 只改两个测试文件，R2 验收 8/8 通过、R1 复核
 也是第一次由 reviewer 自己把结论拉成非 PASS。R1 复核 9/9 验收通过、583 全过。按 FIX 常规重跑第 3 次，
 已补一条验收 grep 测试文件；阈值在第 3 次通过前继续保持调大。
 
-## v02-b04-fix2 限流不等待、worker_pid
+记录：第 3 次运行 r-20261022-062718 PASS（裁定 `eb98dd0`），10/10 验收通过，583 全过，单核加压 3 次全过、场景 G 10 次全过。
+worker 读了 progress 里上一次 FIX 的理由，只补做了场景 G 注入（1 个提交，只改测试）。
+遗留：假指纹函数里用了真实 `setTimeout(0)` 限制检查频率，b04-tests 的结构检查对 main 已不通过，本批次验收没沿用那条，
+reviewer 打了勾。PASS 维持；缺口与「结构检查不回归」问题进 fix2。
+claims `pushed=false` 而实际已推送，第二次出现（b03 亦然），无害，不开条目。
+
+## v02-b04-fix2 CI 证据与结构回归
 
 优先级：13　依赖：v02-b04-fix
 
-规格见 SPEC 3.1、11.2。
+所有者已生成只读 PAT，等本批次落地后才放进环境；本批次让 R2 能用它、worker 看不见它。规格见 SPEC 3.1、3.2、11.5。
 
 条目：
-1. `ci.ts` 实现 SPEC 3.1 的「限流不等待」：环境无 `GITHUB_TOKEN` 且首次轮询即 `rate_limited` 时，
-   立即返回 unknown、记 `ci.wait_timeout`（`waited_secs: 0`、`last_state: rate_limited`），不再等 `ci_wait_secs`。
-   有 token 时行为不变。测试用注入的 fetch 替身覆盖两种情况
-2. `ClaudeRunner` 提供 `worker_pid`（11.2）：通过 SDK 的 `spawnClaudeCodeProcess` 钩子用 `node:child_process.spawn`
+1. `ci.token_file`（3.1）：`ConfigSchema` 的 `[ci]` 加可选 `token_file`（字符串，`~` 展开为 home）；
+   `evidence.ts` 构造 `ciQuery` 时读取文件内容（trim）作为 `token`，文件不存在等同未配置；
+   runner 拉起子进程时从 env 删除 `GITHUB_TOKEN` 与 `GH_TOKEN`（fake 与 claude 两个 runner 都要，claude 走 SDK 的 `env` 选项）；
+   `.gitignore` 与 `src/cli.ts` 的 `GITIGNORE_ENTRIES` 加 `.collie/github-token`。
+   测试：config 解析 `token_file`、`~` 展开；evidence 从临时文件读到 token 并传给注入的 fetch（断言 `Authorization` 头）；
+   runner 测试断言传给 `query()` 的 `options.env` 不含这两个键
+2. 限流不等待（3.1）：无 token 且首次轮询即 `rate_limited` 时立即返回 unknown、记 `ci.wait_timeout`
+   （`waited_secs: 0`、`last_state: rate_limited`），不再等 `ci_wait_secs`；有 token 时行为不变。注入 fetch 替身覆盖两种情况，
+   无 token 那条用例的测试名须含 `unauthenticated` 与 `rate limit` 与 `immediately` 三个词
+3. 结构回归（3.2）：新建 `test/invariants.test.ts`，把已通过批次的 grep 类结构检查改写为测试，至少包括：
+   `.collie/heartbeat.json` 被 gitignore（b02）；`test/scenario-g.test.ts` 与 `test/ladder.test.ts` 无 `setInterval` / `setTimeout(`（b04-tests）；
+   `src/runner/claude.ts` 无 `softStopRequested`、无拆出调用的 `interrupt`（b03、b04-fix）；`src/` 除 `src/runner/` 外无 `@anthropic-ai`（b02）；
+   `src/ladder.ts` 有 `fingerprint?:`（b04-fix）。
+   同时把场景 G 假指纹的 `setTimeout(0)` 去掉：改为同步返回或 `await Promise.resolve()`，检查频率由注入的 `livenessSetTimer` 控制，
+   让 b04-tests 那条不变量对 main 重新成立
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 不变量文件存在且含 5 类检查 | `test "$(grep -cE "^\s*it\(" test/invariants.test.ts)" -ge 6` | exit 0 |
+| 场景 G 无真实定时器（恢复 b04-tests） | `! grep -qE "setInterval\|setTimeout\(" test/scenario-g.test.ts` | exit 0 |
+| token_file 进 schema 与 evidence | `grep -qE "token_file" src/schema/index.ts && grep -qE "token_file" src/evidence.ts` | exit 0 |
+| 子进程 env 去密钥有测试 | `grep -qE "GITHUB_TOKEN" test/runner-claude.test.ts && grep -qE "GH_TOKEN" src/runner/claude.ts` | exit 0 |
+| token 文件被忽略 | `grep -qE "github-token" .gitignore && grep -qE "github-token" src/cli.ts` | exit 0 |
+| 限流不等待有测试 | `grep -qE "unauthenticated.*rate.?limit.*(no wait\|without waiting\|immediately)" test/ci.test.ts` | exit 0 |
+| SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（`.gitignore` 不在清单内，本批次允许改）
+- 把任何 token 值写进代码、测试或 fixture；测试里用 `fake-token` 字样
+- 为了让测试过而删除或跳过任何测试
+
+## v02-b04-fix3 worker_pid、包装层 interrupt、原子心跳
+
+优先级：14　依赖：v02-b04-fix2
+
+规格见 SPEC 11.2、11.3。
+
+条目：
+1. `ClaudeRunner` 提供 `worker_pid`（11.2）：通过 SDK 的 `spawnClaudeCodeProcess` 钩子用 `node:child_process.spawn`
    自行拉起并记下 `pid`，`RunHandle.pid` 返回它；`kill` 级对该 pid 发 `SIGKILL`。
-   `test/runner-claude.test.ts` 断言注入 `query()` 收到的选项含该钩子，且钩子返回对象的 `pid` 流到 `RunHandle`
-3. 两处 b04-fix 第 2 次运行发现的小缺口：
-   a. `claude.ts` 惰性包装层的 `interrupt()`：SDK 对象已就绪但没有 `interrupt` 时必须抛错，不得静默返回
-   （现在 `:120` 的 `if (resolvedIterable?.interrupt !== undefined)` 让 `:227` 的检查永远不触发）；
+   `test/runner-claude.test.ts` 断言注入 `query()` 收到的选项含该钩子，且钩子返回对象的 `pid` 流到 `RunHandle`。
+   fix2 的 env 去密钥在这条路径上同样生效（spawn 时的 env 也要删）
+2. `claude.ts` 惰性包装层的 `interrupt()`：SDK 对象已就绪但没有 `interrupt` 时必须抛错，不得静默返回；
    SDK 尚未就绪时的调用仍可忽略但要记一条 stderr 日志。`test/runner-claude.test.ts` 加「就绪但无 interrupt → 抛错」用例
-   b. `heartbeat.ts` 三处 `writeFileSync` 改为写临时文件再 `renameSync`（原子）；
-   `test/heartbeat.test.ts` 加「文件为空 / 半截 JSON」两个用例，断言按 SPEC 11.3 处理且不抛出
+3. `heartbeat.ts` 三处 `writeFileSync` 改为写临时文件再 `renameSync`（原子）；
+   `test/heartbeat.test.ts` 加「文件为空 / 半截 JSON」两个用例，断言按 SPEC 11.3 处理且不抛出。
+   以上三条的结构检查同步加进 `test/invariants.test.ts`
 
 验收标准：
 
@@ -516,18 +563,18 @@ worker 的 `2661d0e` 只改两个测试文件，R2 验收 8/8 通过、R1 复核
 | 全部测试通过 | `npm test` | exit 0 |
 | 心跳原子写 | `grep -qE "renameSync" src/heartbeat.ts && ! grep -qE "writeFileSync\(path," src/heartbeat.ts` | exit 0 |
 | 包装层 interrupt 缺失抛错有测试 | `grep -ciE "no interrupt\|without interrupt\|missing interrupt" test/runner-claude.test.ts \| grep -qvE "^0$"` | exit 0 |
-| 限流不等待有测试 | `grep -qE "rate_limited" test/ci.test.ts && grep -qE "waited_secs: 0\|waitedMs: 0" test/ci.test.ts` | exit 0 |
 | pid 经钩子流到 RunHandle | `grep -qE "spawnClaudeCodeProcess" src/runner/claude.ts && grep -qE "spawnClaudeCodeProcess" test/runner-claude.test.ts` | exit 0 |
+| 不变量已扩充 | `grep -qE "renameSync\|spawnClaudeCodeProcess" test/invariants.test.ts` | exit 0 |
 | SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai\|spawnClaudeCodeProcess" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
 
 额外禁止：
 - 改动任何受保护路径
 - 为了让测试过而删除或跳过任何测试
-- 条目 2 不得改变 soft / hard 的现有实现（`interrupt()` / abort）
+- 条目 1 不得改变 soft / hard 的现有实现（`interrupt()` / abort）
 
 ## v02-b05 中断标记与 resume
 
-优先级：14　依赖：v02-b04-fix2
+优先级：15　依赖：v02-b04-fix3
 
 规格见 SPEC 11.7、11.9。
 
