@@ -227,4 +227,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v02-b04-fix · r-20261022-044520 · FIX
+
+- 时间：2026-10-22T06:02:07.521Z
+- 裁定：规则 9，All 9 acceptance commands pass, commits pushed, no protected file changes, no dependency changes. FIX because scenario-g.test.ts does not inject fake fingerprint — an explicit item requirement (task description item 3 + SPEC 11.5) that is the core fix target of this batch.
+- 提交：`ad7ad75` `857e378` `dbe276b`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，583 passed, 0 failed
+  - `for i in 1 2 3 4 5; do npx vitest run test/scenario-g.test.ts || exit 1; done` → exit 0，3 passed, 0 failed
+  - `! grep -qE "= *(resolvedIterable|queryIterable)\??\.interrupt;" src/runner/claude.ts` → exit 0，exit 0
+  - `grep -qE "binds this" test/runner-claude.test.ts` → exit 0，exit 0
+  - `grep -qE "unhandledRejection" src/run.ts src/cli.ts` → exit 0，exit 0
+  - `grep -qE "fingerprint\?:" src/ladder.ts && grep -qE "diff" src/ladder.ts` → exit 0，exit 0
+  - `! grep -rlE "@anthropic-ai" src --include='*.ts' | grep -v '^src/runner/'` → exit 0，exit 0
+- 已推送：是
+- CI：unknown，监听分支未能取证
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
