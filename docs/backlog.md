@@ -24,8 +24,9 @@
 | 9 | v02-b03 | 活性检测与信号阶梯 | v02-b02 | passed |
 | 10 | v02-b04 | b02/b03 遗留修补 | v02-b03 | passed |
 | 11 | v02-b04-tests | 测试去真实定时器 | v02-b04 | blocked |
-| 12 | v02-b04-fix | 指纹注入、限流不等待、worker_pid | v02-b04 | pending |
-| 13 | v02-b05 | 中断标记与 resume | v02-b04-fix | pending |
+| 12 | v02-b04-fix | R2 不再崩：interrupt this、异常兜底、内容指纹 | v02-b04 | pending |
+| 13 | v02-b04-fix2 | 限流不等待、worker_pid | v02-b04-fix | pending |
+| 14 | v02-b05 | 中断标记与 resume | v02-b04-fix2 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -431,21 +432,63 @@ worker 的 `2661d0e` 只改两个测试文件，R2 验收 8/8 通过、R1 复核
 剩余不确定性在 `src/ladder.ts` 每次采样都起真实 `git` 子进程取指纹，本批次禁止改 `src/`，修不到。
 判 blocked，不重跑；缺口进 v02-b04-fix。
 
-## v02-b04-fix 指纹注入、限流不等待、worker_pid
+## v02-b04-fix R2 不再崩：interrupt this、异常兜底、内容指纹
 
 优先级：12　依赖：v02-b04
 
-三处都是真实运行里暴露、规格已写但没有批次实现的。规格见 SPEC 3.1、11.2、11.5。
+第 1 次运行（r-20261022-025901）R2 自己崩了，见下方记录。本批次只做让 R2 在真实运行里不再崩的三处。
+规格见 SPEC 11.2、11.3、11.5、11.6。运行本批次期间 `progress_secs` / `wallclock_secs` 已临时调大（SPEC 3.1），
+让空转与墙钟实际不触发；修好后 R1 恢复。
 
 条目：
-1. `LivenessMonitor` 的产出指纹函数可注入（11.5）：`LivenessConfig.fingerprint?: () => Promise<string>`，
-   默认实现才调 git。`test/scenario-g.test.ts` 注入同步返回的假指纹，fake worker 发事件、推进假时钟、
-   改变假指纹三者全部由测试代码顺序控制，不依赖任何真实子进程或事件循环时序。
-   `test/ladder.test.ts` 同样处理
-2. `ci.ts` 实现 SPEC 3.1 的「限流不等待」：环境无 `GITHUB_TOKEN` 且首次轮询即 `rate_limited` 时，
+1. `claude.ts` 的 `interrupt()` 调用保持 `this`（11.2）：两处（惰性包装与 `stop('soft')`）都改为直接在对象上调用并 `await`，
+   不再 `void`。`test/runner-claude.test.ts` 加回归测试：替身的 `interrupt` 读 `this` 上的字段、`this` 为 undefined 时抛错，
+   测试名含 `binds this`
+2. R2 异常兜底（11.3）与阶梯容错（11.6）：`run.ts` 最外层 try / finally，任何异常都先记 `run.finished(result=error)`、
+   救援、追加 progress、删心跳，再以退出码 1 退出；注册 `unhandledRejection`；
+   阶梯里某级 `stop()` 抛出时记 `worker.signaled` 带 `error` 字段并进入下一级。
+   `test/ladder.test.ts` 加「soft 抛错 → 记 error → 升级 hard」用例；`test/run.test.ts`（或现有 run 测试文件）加
+   「worker 阶段抛出 → run.finished(error) 存在、心跳已删、进程未直接退出」用例
+3. 产出指纹（11.5）：改为 `HEAD` + `git diff HEAD` 哈希 + 未跟踪文件 (路径, 大小, mtime) 哈希，
+   并做成可注入（`LivenessConfig.fingerprint?`）。`test/scenario-g.test.ts` 注入假指纹，fake worker 发事件、推进假时钟、
+   改变假指纹三者全部由测试代码顺序控制；另加一条单测：同一文件内容改两次，两次指纹不同
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 场景 G 连跑 5 次 | `for i in 1 2 3 4 5; do npx vitest run test/scenario-g.test.ts \|\| exit 1; done` | exit 0 |
+| interrupt 不再拆出调用 | `! grep -qE "= *(resolvedIterable\|queryIterable)\??\.interrupt;" src/runner/claude.ts` | exit 0 |
+| this 绑定有回归测试 | `grep -qE "binds this" test/runner-claude.test.ts` | exit 0 |
+| 未处理拒绝有兜底 | `grep -qE "unhandledRejection" src/run.ts src/cli.ts` | exit 0 |
+| 指纹已注入且看内容 | `grep -qE "fingerprint\?:" src/ladder.ts && grep -qE "diff" src/ladder.ts` | exit 0 |
+| SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 实现限流不等待或 worker_pid（那是 v02-b04-fix2）
+
+记录：第 1 次运行 r-20261022-025901 退出码 1，R2 进程崩溃。worker 在同一组 4 个文件上连续编辑 15 分钟，
+指纹（porcelain）不变被判空转；R2 发 soft，`claude.ts` 把 `interrupt` 拆出来调用丢了 `this`，TypeError 以未处理拒绝
+形式让 Node 直接退出。没有 run.finished、救援、progress、裁定；心跳文件遗留。worker 未提交的 4 文件改动（+90/−19，
+条目 1 做了一部分，条目 2、3 未动）存档于 tag `v02-b04-fix-attempt1`，不采纳；操作员 reset 到 `origin/main` 并删除心跳。
+原条目中的限流不等待与 worker_pid 移至 v02-b04-fix2。
+
+## v02-b04-fix2 限流不等待、worker_pid
+
+优先级：13　依赖：v02-b04-fix
+
+规格见 SPEC 3.1、11.2。
+
+条目：
+1. `ci.ts` 实现 SPEC 3.1 的「限流不等待」：环境无 `GITHUB_TOKEN` 且首次轮询即 `rate_limited` 时，
    立即返回 unknown、记 `ci.wait_timeout`（`waited_secs: 0`、`last_state: rate_limited`），不再等 `ci_wait_secs`。
    有 token 时行为不变。测试用注入的 fetch 替身覆盖两种情况
-3. `ClaudeRunner` 提供 `worker_pid`（11.2）：通过 SDK 的 `spawnClaudeCodeProcess` 钩子用 `node:child_process.spawn`
+2. `ClaudeRunner` 提供 `worker_pid`（11.2）：通过 SDK 的 `spawnClaudeCodeProcess` 钩子用 `node:child_process.spawn`
    自行拉起并记下 `pid`，`RunHandle.pid` 返回它；`kill` 级对该 pid 发 `SIGKILL`。
    `test/runner-claude.test.ts` 断言注入 `query()` 收到的选项含该钩子，且钩子返回对象的 `pid` 流到 `RunHandle`
 
@@ -456,8 +499,6 @@ worker 的 `2661d0e` 只改两个测试文件，R2 验收 8/8 通过、R1 复核
 | 代码规范零错误 | `npm run lint` | exit 0 |
 | 类型检查零错误 | `npm run typecheck` | exit 0 |
 | 全部测试通过 | `npm test` | exit 0 |
-| 场景 G 连跑 5 次 | `for i in 1 2 3 4 5; do npx vitest run test/scenario-g.test.ts \|\| exit 1; done` | exit 0 |
-| 指纹已注入 | `grep -qE "fingerprint" test/scenario-g.test.ts && grep -qE "fingerprint\?:" src/ladder.ts` | exit 0 |
 | 限流不等待有测试 | `grep -qE "rate_limited" test/ci.test.ts && grep -qE "waited_secs: 0\|waitedMs: 0" test/ci.test.ts` | exit 0 |
 | pid 经钩子流到 RunHandle | `grep -qE "spawnClaudeCodeProcess" src/runner/claude.ts && grep -qE "spawnClaudeCodeProcess" test/runner-claude.test.ts` | exit 0 |
 | SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai\|spawnClaudeCodeProcess" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
@@ -465,11 +506,11 @@ worker 的 `2661d0e` 只改两个测试文件，R2 验收 8/8 通过、R1 复核
 额外禁止：
 - 改动任何受保护路径
 - 为了让测试过而删除或跳过任何测试
-- 条目 3 不得改变 soft / hard 的现有实现（`interrupt()` / abort）
+- 条目 2 不得改变 soft / hard 的现有实现（`interrupt()` / abort）
 
 ## v02-b05 中断标记与 resume
 
-优先级：13　依赖：v02-b04-fix
+优先级：14　依赖：v02-b04-fix2
 
 规格见 SPEC 11.7、11.9。
 

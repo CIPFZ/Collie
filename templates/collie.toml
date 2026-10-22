@@ -23,8 +23,8 @@ permission_mode = "bypassPermissions"   # SPEC 3.1；白名单仍无 Write/Edit
 
 [limits]
 stall_secs = 300         # SPEC 3.1；事件流静默判定卡死；须大于 SDK 单次最长输出时长（11.5）
-progress_secs = 900      # SPEC 3.1；有事件但无产出判定空转（v0.2 生效）
-wallclock_secs = 2700    # SPEC 3.1；单批次墙钟硬顶
+progress_secs = 3600     # SPEC 3.1；有事件但无产出判定空转（v0.2 生效）
+wallclock_secs = 5400    # SPEC 3.1；单批次墙钟硬顶
 resume_max = 2           # SPEC 3.1；resume 上限（v0.2 生效）
 fix_max = 2              # SPEC 3.1；同批次 FIX 上限（v0.3 生效）
 dry_k = 2                # SPEC 3.1；连续 dry 轮数（v0.5 生效）

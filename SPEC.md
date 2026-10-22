@@ -126,8 +126,8 @@ permission_mode = "bypassPermissions"
 
 [limits]
 stall_secs = 300         # 事件流静默判定卡死；v02-b04 第 1 次运行 90 秒把「正在写 report」误判为卡死，上调
-progress_secs = 900      # 有事件但无产出判定空转（v0.2 生效）
-wallclock_secs = 2700    # 单批次墙钟硬顶
+progress_secs = 3600     # 有事件但无产出判定空转。临时值：v02-b04-fix 修好 soft 崩溃前任何 soft 都会让 R2 退出，先让空转实际不触发；b04-fix 通过后 R1 恢复 900
+wallclock_secs = 5400    # 单批次墙钟硬顶。临时值，同上；b04-fix 通过后恢复 2700
 resume_max = 2           # resume 上限（v0.2 生效）
 fix_max = 2              # 同批次 FIX 上限（v0.3 生效）
 dry_k = 2                # 连续 dry 轮数（v0.5 生效）
@@ -625,7 +625,10 @@ interface RunResult {
 
 约束（v02-b02 第 1 次运行暴露）：
 - `soft` 与 `hard` 不得实现为同一个调用。`soft` 必须是「本轮结束后停、session 可续接」的 SDK 级中断；
-  `hard` 才是 abort。`interrupt()` 是必调且 `await` 的：SDK 对象上没有它就抛错，不得写成 `interrupt?.()`。
+  `hard` 才是 abort。`interrupt()` 是必调且 `await` 的：SDK 对象上没有它就抛错，不得写成 `interrupt?.()`；
+  也不得把方法拆出来再调（`const fn = q.interrupt; fn()` 会丢 `this`，SDK 内部要用 `this.request`，
+  v02-b04-fix 第 1 次运行因此 TypeError），要写成 `await q.interrupt()`。
+  runner 测试的替身 `interrupt` 必须依赖 `this`（读自身字段，`this` 为 undefined 时抛错），否则这类错误测不出来。
 - SDK 因轮数用满等原因中止时，runner 须捕获并返回 `RunResult`（`exitCode` 非零、`stopReason`、
   以及已从事件流里拿到的 `sessionId`），不得让 `sessionId` 随异常丢失。
 - runner 的测试须断言注入的 `query()` 实际收到的选项：`resumeSessionId` 落到 SDK 认的续接字段上。
@@ -647,6 +650,13 @@ ROADMAP 写的 SIGINT → SIGTERM → SIGKILL 是子进程语义；Collie 只认
   两者都不存活判定「上一次被 kill」：记 `run.orphaned`（字段 run_id / batch_id / phase / updated_at），
   执行 11.4 的救援，再删除该文件。
 
+R2 的异常兜底（v02-b04-fix 第 1 次运行后）：`collie run` 的主流程必须有最外层的 try / finally。
+任何未预期的异常（含 `stop()` 抛出、Promise 未处理拒绝）都不得让进程直接退出：
+先记 `run.finished`（`result: error`，带错误信息与当时的 phase），再执行 11.4 的救援、追加 progress 运行记录、
+删除心跳，最后以退出码 1 结束。进程级别须注册 `unhandledRejection` 处理，走同一条收尾路径。
+v02-b04-fix 第 1 次运行：soft 停止时 `interrupt()` 抛 TypeError 未被捕获，Node 直接终止，
+run.finished / 救援 / progress / 心跳删除全部没有执行。
+
 ### 11.4 脏工作区救援
 
 worker 退出后（无论原因），若 `git status --porcelain` 非空，R2 执行
@@ -659,7 +669,10 @@ R2 在 worker 运行期间按两条独立计时判定：
 
 - **卡死**：距上一条事件超过 `stall_secs` → 记 `worker.stalled`，进入 11.6 阶梯。
 - **空转**：持续收到事件，但「产出指纹」超过 `progress_secs` 无变化 → 记 `worker.idling`，进入 11.6 阶梯。
-  产出指纹 = `HEAD` sha + `git status --porcelain` 输出的哈希，每收到一条事件采样一次。
+  产出指纹必须随**文件内容**变化：`HEAD` sha + `git diff HEAD` 输出的哈希 + 未跟踪文件的 (路径, 大小, mtime) 列表哈希，
+  每收到一条事件采样一次。不能只用 `git status --porcelain`：它对已变脏的文件只输出 ` M path`，
+  内容再改也不变，worker 在同一组文件上连续改超过 `progress_secs` 就会被判空转
+  （v02-b04-fix 第 1 次运行：最后一个新变脏文件在 03:05:09，900 秒后 03:20:09 判空转，其间 worker 一直在编辑）。
 
 两者都以事件为驱动，没有事件时只有 stall 计时在走。
 卡死只认「完全没有事件」。SDK 在模型生成一段长输出（正文或工具参数）期间不发任何事件，
@@ -680,6 +693,8 @@ stop('soft') → 等 grace_secs → 未退出则 stop('hard') → 等 grace_secs
 每级记一条 `worker.signaled`（字段 level / reason，reason 取 stalled / idling / wallclock）。
 v0.1 的 `wallclock_secs` 超时从「直接 abort + 记 crashed」改为走本阶梯，reason=wallclock。
 阶梯结束后一律执行 11.4 救援。
+某一级 `stop()` 抛出或拒绝时不得向上冒泡：记 `worker.signaled`（该级，字段 `error` 为消息），视同「未退出」直接进入下一级；
+`kill` 级也失败则进入 11.3 的异常兜底。
 
 ### 11.7 中断标记与 resume
 
