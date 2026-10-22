@@ -146,7 +146,8 @@ expected_branch = "main"   # 用于核对 CI 实际监听分支，防止「假�
 token_file = "~/.config/collie/github-token"   # 可选。只读 PAT（Actions: read）所在文件，`~` 展开；只有 R2 读它
 ```
 
-`token_file`（v02-b04-fix2 后）：R2 在取证前读取该文件内容（去首尾空白）作为 `queryCi` 的 `token`，
+`token_file`（v02-b04-fix2 后）：`~` 展开为 home；相对路径相对**仓库根**而非进程 cwd（fix3 条目 3 对齐实现，现为 cwd）。
+R2 在取证前读取该文件内容（去首尾空白）作为 `queryCi` 的 `token`，
 **不**放进环境变量。runner 拉起 worker / reviewer 时必须从子进程环境里删除 `GITHUB_TOKEN`、`GH_TOKEN`，
 worker 的事件流会原样落盘（Q5），不能让它看见密钥。文件不存在时与未配置相同。
 推荐放在仓库外；若放在 `.collie/` 下，`.collie/github-token` 在 `.gitignore` 与 `collie init` 的忽略清单里。

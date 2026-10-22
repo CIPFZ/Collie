@@ -39,3 +39,4 @@ commands = ["npm run lint", "npm run typecheck", "npm test"]
 # SPEC 3.1；用于核对 CI 实际监听分支，防止「假全绿」（铁律 5）
 provider = "github-actions"
 expected_branch = "main"
+token_file = "~/.config/collie/github-token"   # SPEC 3.1；可选，只读 PAT 文件；不存在等同未配置

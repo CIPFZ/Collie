@@ -4,6 +4,7 @@
 > 优先级在方案确定阶段一次排定，批次随之固定，**不做滚动重新拆解**。
 > R1 签发自查（v02-b04-fix 后）：条目里每一条「测试要注入 X / 用 Y 替代 Z」的要求，验收必须同时 grep 源文件和对应测试文件，
 > 只 grep `src/` 的验收抓不住「接口做了、测试没用上」（b04：只注入 now；b04-fix：指纹可注入但场景 G 没注入）。
+> 凡验收表含 grep 类结构检查的批次，条目正文必须写「同步加进 `test/invariants.test.ts`」，验收加一条 grep 该文件（SPEC 3.2 结构不变量）。
 
 更新时间：2026-10-21
 当前版本：v0.2
@@ -27,7 +28,7 @@
 | 10 | v02-b04 | b02/b03 遗留修补 | v02-b03 | passed |
 | 11 | v02-b04-tests | 测试去真实定时器 | v02-b04 | blocked |
 | 12 | v02-b04-fix | R2 不再崩：interrupt this、异常兜底、内容指纹 | v02-b04 | passed |
-| 13 | v02-b04-fix2 | CI 证据与结构回归 | v02-b04-fix | pending |
+| 13 | v02-b04-fix2 | CI 证据与结构回归 | v02-b04-fix | passed |
 | 14 | v02-b04-fix3 | worker_pid、包装层 interrupt、原子心跳 | v02-b04-fix2 | pending |
 | 15 | v02-b05 | 中断标记与 resume | v02-b04-fix3 | pending |
 
@@ -537,6 +538,10 @@ claims `pushed=false` 而实际已推送，第二次出现（b03 亦然），无
 - 把任何 token 值写进代码、测试或 fixture；测试里用 `fake-token` 字样
 - 为了让测试过而删除或跳过任何测试
 
+记录：第 1 次运行 r-20261022-082259 PASS（裁定 `b3f828e`），10/10 验收通过，601 全过，历史中无 token 字样。
+`invariants.test.ts` 8 条。R1 随后把 `token_file` 写进 toml（SPEC 3.1 约定由 R1 事后补）。
+遗留：`token_file` 相对路径按进程 cwd 解析，规格定为相对仓库根，fix3 条目 3 对齐。
+
 ## v02-b04-fix3 worker_pid、包装层 interrupt、原子心跳
 
 优先级：14　依赖：v02-b04-fix2
@@ -552,6 +557,7 @@ claims `pushed=false` 而实际已推送，第二次出现（b03 亦然），无
    SDK 尚未就绪时的调用仍可忽略但要记一条 stderr 日志。`test/runner-claude.test.ts` 加「就绪但无 interrupt → 抛错」用例
 3. `heartbeat.ts` 三处 `writeFileSync` 改为写临时文件再 `renameSync`（原子）；
    `test/heartbeat.test.ts` 加「文件为空 / 半截 JSON」两个用例，断言按 SPEC 11.3 处理且不抛出。
+   顺带：`evidence.ts` 的 `token_file` 相对路径改为相对仓库根（SPEC 3.1），加一条测试。
    以上三条的结构检查同步加进 `test/invariants.test.ts`
 
 验收标准：

@@ -42,6 +42,7 @@ commands = ["npm run lint", "npm run typecheck", "npm test"]
 [ci]
 provider = "github-actions"
 expected_branch = "main"
+token_file = "~/.config/collie/github-token"
 `;
 
 function configError(text: string): ConfigError {
@@ -102,7 +103,11 @@ describe('config: the repository .collie/collie.toml', () => {
 
   it('has the verify commands and CI section of SPEC 3.1', () => {
     expect(config.verify.commands).toEqual(['npm run lint', 'npm run typecheck', 'npm test']);
-    expect(config.ci).toEqual({ provider: 'github-actions', expected_branch: 'main' });
+    expect(config.ci).toEqual({
+      provider: 'github-actions',
+      expected_branch: 'main',
+      token_file: '~/.config/collie/github-token',
+    });
   });
 
   it('equals the inline SPEC 3.1 fixture used by the error tests', () => {
@@ -120,7 +125,11 @@ describe('config: validation errors carry field paths', () => {
 
   it('reports a missing section', () => {
     const err = configError(
-      replaceLine(VALID_TOML, '[ci]\nprovider = "github-actions"\nexpected_branch = "main"\n', ''),
+      replaceLine(
+        VALID_TOML,
+        '[ci]\nprovider = "github-actions"\nexpected_branch = "main"\ntoken_file = "~/.config/collie/github-token"\n',
+        '',
+      ),
     );
     expect(err.issues.map((i) => i.path)).toEqual(['ci']);
   });
@@ -178,17 +187,14 @@ describe('config: validation errors carry field paths', () => {
   });
 
   it('accepts ci.token_file as an optional string (SPEC 3.1)', () => {
-    const text = replaceLine(
-      VALID_TOML,
-      'expected_branch = "main"',
-      'expected_branch = "main"\ntoken_file = "~/.config/collie/github-token"',
+    expect(parseConfig(VALID_TOML, 'inline.toml').ci.token_file).toBe(
+      '~/.config/collie/github-token',
     );
-    expect(parseConfig(text, 'inline.toml').ci.token_file).toBe('~/.config/collie/github-token');
   });
 
   it('parses config without ci.token_file (field is optional)', () => {
-    const config = parseConfig(VALID_TOML, 'inline.toml');
-    expect(config.ci.token_file).toBeUndefined();
+    const text = replaceLine(VALID_TOML, 'token_file = "~/.config/collie/github-token"\n', '');
+    expect(parseConfig(text, 'inline.toml').ci.token_file).toBeUndefined();
   });
 
   it('reports a schema_version mismatch', () => {
