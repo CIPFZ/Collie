@@ -2,92 +2,71 @@
 
 ## 做了什么
 
-### Item 1: 修复 `interrupt()` 的 `this` 绑定 (SPEC 11.2)
+本批次是 v02-b04-fix 的第 2 次尝试（FIX 修复）。上一次尝试（attempt 1）实现了全部 3 个条目的核心逻辑，但 reviewer 判定 FIX，原因是 `test/scenario-g.test.ts` 未注入假指纹（条目 3 的测试侧要求）。
 
-`src/runner/claude.ts` 中有两处将 `interrupt` 作为变量提取后调用，丢失了 `this` 上下文：
+本次仅修复遗漏项：在 `test/scenario-g.test.ts` 中注入假指纹，使事件、时钟、指纹三者全部由测试代码控制。
 
-1. **Lazy wrapper（约 L116）**：原先将 `resolvedIterable` 的 `interrupt` 赋值给局部变量再调用。修改为在 lazy wrapper 的 `interrupt()` 方法中直接调用 `resolvedIterable.interrupt()`，保留 `this` 绑定。
+**条目 1（interrupt this 绑定）**：上一次已完成（commit `ad7ad75`），本次无需改动。验收通过。
 
-2. **stop('soft')（约 L224）**：同样改为直接调用 `queryIterable.interrupt()` 而非提取后调用。
+**条目 2（R2 异常兜底与阶梯容错）**：上一次已完成（commit `857e378`），本次无需改动。验收通过。
 
-新增回归测试 `test/runner-claude.test.ts`：构造一个 `interrupt()` 内部读取 `this.state` 的 double，验证调用时 `this` 不是 `undefined`（否则抛 TypeError）。
+**条目 3（产出指纹）**：上一次实现了 `computeFingerprint`、`LivenessConfig.fingerprint?` 注入口和 `computeFingerprint` 单测（commit `dbe276b`），但缺少在 scenario-g 集成测试中注入假指纹。本次新增：
 
-### Item 2: R2 异常兜底 (SPEC 11.3) 与 ladder 容错 (SPEC 11.6)
+1. `controllableFingerprint()` 辅助函数：返回一个每次调用自增的指纹函数（模拟 setup 阶段文件变化），和一个 `freeze()` 方法（调用后指纹不再变化，模拟 idle 阶段）。指纹通过 `setTimeout(resolve, 0)` 解析，模拟真实 `computeFingerprint` 的 git 子进程让出事件循环的行为。
 
-**`src/run.ts` — R2 异常兜底**：
-- 在 heartbeat 写入之后的主体外围包裹 `try/catch/finally`。
-- 注册 `unhandledRejection` 处理器捕获 `void runLadder()` 的 fire-and-forget 拒绝。
-- catch 分支：记录 `run.finished(result:'error')`、rescue dirty workspace、写 progress、删 heartbeat，返回 BLOCK 结果而非让进程崩溃。
-- finally 分支：移除 `unhandledRejection` 监听。
+2. `idleWorkerScene` 新增 `onEnterIdle` 回调：worker 完成 setup（提交代码和报告）后、进入 idle 阶段前调用，测试将其绑定到 `fp.freeze()`。
 
-**`src/ladder.ts` — ladder 容错**：
-- `onSignaled` 回调新增可选 `error?: string` 参数。
-- `runLadder` 中 `stop()` 包裹在 try/catch 中：成功时正常记录 signaled；失败时记录带 error 字段的 signaled 事件，跳过 grace 直接升级到下一级；`kill` 级失败则 re-throw 由 11.3 兜底。
+3. 两个集成测试用例均通过 `livenessFingerprint: fp.livenessFingerprint` 注入假指纹。
 
-**`src/run.ts` — onSignaled 传递 error**：
-- `startLadder` 中的 `onSignaled` 回调将 error 字段传入 journal.record。
-
-新增测试：
-- `test/ladder.test.ts`：添加 "soft throws → records error field → escalates to hard" 单元测试。
-- `test/run-fallback.test.ts`（新建）：验证 worker crash → `run.finished(error)` 存在、heartbeat 已删、进程不崩溃。
-
-### Item 3: 输出指纹内容感知 + 可注入 (SPEC 11.5)
-
-**`src/ladder.ts` — `computeFingerprint` 重写**：
-- 原指纹：`HEAD sha + git status --porcelain` 拼接。对同一个已 dirty 文件的二次编辑无法区分（status 行不变）。
-- 新指纹：`HEAD sha + sha256(git diff HEAD) + sha256(untracked files path\tsize\tmtime)` 三段组合的 sha256。`git diff HEAD` 会输出实际 diff 内容，同一文件的不同编辑产生不同哈希。untracked 文件取 `(path, size, mtime)` 三元组。
-
-**`src/ladder.ts` — LivenessConfig 可注入**：
-- 新增 `fingerprint?: (root: string) => Promise<string>` 字段。
-- `LivenessMonitor` 构造时存储 `fingerprintFn`，`check()` 中使用它替代直接调用 `computeFingerprint`。
-
-**`src/run.ts` + `src/cli.ts` — 注入管道**：
-- `RunContext` 新增 `livenessFingerprint?` 字段，传递给 LivenessMonitor。
-- `CliDeps` 新增 `livenessFingerprint?` 字段，传递给 runBatch。
-
-**测试**：
-- `test/scenario-g.test.ts` 新增 `computeFingerprint: content-sensitive` 单元测试：在 sandbox 中对同一 tracked 文件修改两次，验证两次指纹不同。
-- 集成测试（idle worker 场景）使用真实 `computeFingerprint`（不注入 fake），因为 fake fingerprint 的瞬时 resolve 会导致 liveness check 在 microtask 队列中连续链式执行，在 worker 的 git I/O 完成前就触发 idle 检测，造成 ladder 完整执行 soft→hard→kill 的时序竞态。真实指纹的 git 子进程自然间隔了检查节奏，且指纹随 commit 变化，正确反映了 worker 的进展。
+**关键技术取舍**：假指纹不能用 `Promise.resolve()` 或 `setImmediate` 解析：
+- `Promise.resolve()`：让检查周期完全在微任务中运行，形成无限循环，饿死 worker
+- `setImmediate`：每事件循环 tick 触发一次（~1us），检查周期在一次 `await git()` 期间运行数万次，假时钟快速推进到 `stall_secs`，触发误判
+- `setTimeout(resolve, 0)`：~1ms 最小延迟，检查频率合理，setup 阶段假时钟不会超过 `stall_secs`，idle 阶段能正确检测
 
 ## 测试结果
 
 ```
-npm run lint   → eslint + prettier: 0 errors, 0 warnings
-npm run typecheck → tsc: no errors
-npm test       → 30 test files, 583 tests passed, 0 failed
-                  Duration 8.16s
+$ npm run lint
+All matched files use Prettier code style!
+
+$ npm run typecheck
+> tsc -p tsconfig.json
+（exit 0，无错误）
+
+$ npm test
+ Test Files  30 passed (30)
+      Tests  583 passed (583)
+
+$ for i in 1 2 3 4 5; do npx vitest run test/scenario-g.test.ts || exit 1; done
+5 次全部 exit 0（3 passed 每次）
+
+$ test "$(grep -cE "livenessFingerprint" test/scenario-g.test.ts)" -ge 2
+count=4, exit 0
 ```
 
-场景 G 额外跑了 5 次连续验证，全部通过，无闪烁。
+全部 10 项验收命令通过。
 
 ## 偏离或疑问
 
-无。
-
-三个 item 均严格按照 task.md 和 SPEC 对应章节实现。未新增第三方依赖，未修改任何受保护文件。
+无。本次修改严格限于 `test/scenario-g.test.ts`，未触碰 src/ 或任何受保护文件。
 
 ## 下一步建议
 
-- v02-b04-fix2（如存在）可继续处理 progress_secs / wallclock_secs 恢复为默认值、resume 机制等后续内容。
-- 当前的 `computeFingerprint` 在每次 check 时调用三个 git 子进程；如果 check interval 较短（如 500ms），可能对性能有影响。未来可考虑缓存或增量指纹方案，但当前满足 SPEC 要求。
+本批次 3 个条目均已完成并验收通过。建议签发 v02-b04-fix2（惰性 interrupt 抛错、原子心跳、worker_pid 等）。
 
-```json
+````json
 {
   "schema_version": 1,
   "batch_id": "v02-b04-fix",
-  "head_sha": "dbe276b60b3a915fcf3fe5cc0185d6d49fd681da",
+  "head_sha": "6fe4d740796ebb306be5c5c7a84203103423ab57",
   "claims": {
-    "commits": [
-      "ad7ad75",
-      "857e378",
-      "dbe276b"
-    ],
+    "commits": ["6fe4d740796ebb306be5c5c7a84203103423ab57"],
     "tests_passed": 583,
     "tests_failed": 0,
-    "pushed": true,
+    "pushed": false,
     "new_deps": [],
     "spec_touched": false
   },
   "open_questions": []
 }
-```
+````
