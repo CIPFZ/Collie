@@ -99,7 +99,7 @@ export class Sandbox {
     const configDir = join(box.dir, 'gitconfig');
     writeFileSync(
       configDir,
-      '[user]\n\tname = Sandbox\n\temail = sandbox@example.invalid\n[init]\n\tdefaultBranch = main\n',
+      '[user]\n\tname = Sandbox\n\temail = sandbox@example.invalid\n[init]\n\tdefaultBranch = main\n[gc]\n\tauto = 0\n',
     );
     process.env.GIT_CONFIG_GLOBAL = configDir;
     process.env.GIT_CONFIG_NOSYSTEM = '1';
@@ -199,7 +199,7 @@ export class Sandbox {
   dispose(): void {
     restore('GIT_CONFIG_GLOBAL', this.savedEnv.global);
     restore('GIT_CONFIG_NOSYSTEM', this.savedEnv.nosystem);
-    rmSync(this.dir, { recursive: true, force: true });
+    rmSync(this.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 

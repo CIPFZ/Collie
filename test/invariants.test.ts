@@ -94,4 +94,28 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/arbiter.ts'), 'utf8');
     expect(content).toMatch(/RULE_DEFAULT = 10/);
   });
+
+  it('src/runner/claude.ts contains redact (v02-e-drill)', () => {
+    const content = readFileSync(join(ROOT, 'src/runner/claude.ts'), 'utf8');
+    expect(content).toContain('redact');
+  });
+
+  it('only src/run.ts and src/evidence.ts access .token_file (v02-e-drill)', () => {
+    let output: string;
+    try {
+      output = execSync('grep -rlE "\\.token_file" src --include="*.ts"', {
+        cwd: ROOT,
+        encoding: 'utf8',
+      }).trim();
+    } catch {
+      // grep exit 1 = no matches: pass (nothing accesses token_file).
+      return;
+    }
+    const files = output.split('\n').filter(Boolean);
+    const allowed = new Set(['src/run.ts', 'src/evidence.ts']);
+    const leaked = files.filter((f) => !allowed.has(f));
+    expect(leaked, `token_file accessed outside allowed files: ${leaked.join(', ')}`).toHaveLength(
+      0,
+    );
+  });
 });
