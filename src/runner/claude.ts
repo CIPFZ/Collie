@@ -70,6 +70,33 @@ export const CLAUDE_SDK_PACKAGE = '@anthropic-ai/claude-agent-sdk';
 
 const EXIT_OK = 0;
 const EXIT_FAILED = 1;
+/**
+ * Minimum secret length for redaction (v02-e-drill): values shorter than this
+ * are skipped to avoid false-positive replacements in the event stream.
+ * This is a security floor, not a tunable threshold.
+ */
+// eslint-disable-next-line no-restricted-syntax -- security floor, not a SPEC threshold
+const REDACT_MIN_LENGTH = 8;
+const REDACT_MASK = '***';
+
+/**
+ * Replaces every occurrence of each secret (length ≥ REDACT_MIN_LENGTH) in the
+ * JSON-serialised event with REDACT_MASK, then parses the result back.
+ * When no secret matches (or the list is empty), returns the original object.
+ */
+function redactEvent(event: unknown, secrets: readonly string[]): unknown {
+  if (secrets.length === 0) return event;
+  let json = JSON.stringify(event);
+  let changed = false;
+  for (const secret of secrets) {
+    if (secret === '' || secret.length < REDACT_MIN_LENGTH) continue;
+    if (json.includes(secret)) {
+      json = json.split(secret).join(REDACT_MASK);
+      changed = true;
+    }
+  }
+  return changed ? (JSON.parse(json) as unknown) : event;
+}
 
 /**
  * Loads the SDK on first use. The specifier is kept in a variable so the
@@ -311,9 +338,11 @@ export class ClaudeRunner implements AgentRunner {
     let result: ResultMessage | undefined;
     // Track sessionId from any message (SPEC 11.2: do not lose it on error).
     let lastSessionId: string | undefined;
+    const secrets = opts.redact ?? [];
     try {
       for await (const message of queryIterable) {
-        opts.onEvent?.(message);
+        const redacted = redactEvent(message, secrets);
+        opts.onEvent?.(redacted);
         const sid = extractSessionId(message);
         if (sid !== undefined) lastSessionId = sid;
         if (isResultMessage(message)) result = message;

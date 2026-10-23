@@ -48,6 +48,13 @@ export interface RunOptions {
    * onStarted — R2 uses this, not handle.pid, for heartbeat worker_pid.
    */
   onPid?: (pid: number) => void;
+  /**
+   * Secret values to redact from the event stream before it reaches onEvent
+   * (v02-e-drill). R2 constructs this from token_file and CI environment
+   * variables; the runner applies the mask but never reads config or env itself.
+   * Values shorter than 8 chars or empty are silently skipped (false-positive guard).
+   */
+  redact?: readonly string[];
 }
 
 export interface RunResult {

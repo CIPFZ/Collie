@@ -200,6 +200,8 @@ export async function runWorker(
     onStarted?: (handle: RunHandle) => void;
     onPid?: (pid: number) => void;
     resumeSessionId?: string;
+    /** Secret values to mask in the event stream (v02-e-drill). */
+    redact?: readonly string[];
   } = {},
 ): Promise<RunResult> {
   const systemPrompt = readFileSync(join(root, WORKER_MANUAL), 'utf8');
@@ -215,6 +217,7 @@ export async function runWorker(
     ...(opts.onStarted === undefined ? {} : { onStarted: opts.onStarted }),
     ...(opts.onPid === undefined ? {} : { onPid: opts.onPid }),
     ...(opts.resumeSessionId === undefined ? {} : { resumeSessionId: opts.resumeSessionId }),
+    ...(opts.redact === undefined ? {} : { redact: opts.redact }),
   });
 }
 

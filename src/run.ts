@@ -12,8 +12,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { arbitrate, type ArbiterDecision } from './arbiter.js';
 import { loadBacklog } from './backlog.js';
 import type { Clock, FetchLike } from './ci.js';
@@ -637,6 +637,28 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       if (wallclockTimer !== undefined) clearTimeout(wallclockTimer);
     };
 
+    // v02-e-drill: build the redact set from token_file content and CI env vars.
+    // The runner masks these in the event stream but never reads config or env itself.
+    const redact: string[] = [];
+    if (config.ci.token_file !== undefined) {
+      const raw = config.ci.token_file;
+      const tokenPath = raw.startsWith('~')
+        ? join(homedir(), raw.slice(1))
+        : isAbsolute(raw)
+          ? raw
+          : join(root, raw);
+      try {
+        const content = readFileSync(tokenPath, 'utf8').trim();
+        if (content !== '') redact.push(content);
+      } catch {
+        // File not found or unreadable: nothing to redact from it.
+      }
+    }
+    for (const key of ['GITHUB_TOKEN', 'GH_TOKEN'] as const) {
+      const val = process.env[key];
+      if (val !== undefined && val !== '') redact.push(val);
+    }
+
     try {
       const result = await runWorker(ctx.runner, config, batch, root, {
         ...(ctx.workerSignal === undefined ? {} : { signal: ctx.workerSignal }),
@@ -644,6 +666,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         onStarted,
         onPid,
         ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
+        ...(redact.length > 0 ? { redact } : {}),
       });
       cleanupTimers();
       // SPEC 11.7: track worker exit info for run.finished and progress.
