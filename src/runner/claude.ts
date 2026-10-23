@@ -235,6 +235,9 @@ export class ClaudeRunner implements AgentRunner {
         signal: options.signal,
       });
       workerPid = child.pid;
+      // SPEC 11.2 (v02-b05-fix): notify R2 of the worker pid immediately,
+      // before onStarted — the spawn hook fires during iteration, not at setup.
+      if (child.pid !== undefined) opts.onPid?.(child.pid);
       return child;
     };
 

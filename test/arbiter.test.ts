@@ -64,11 +64,11 @@ function input(
 }
 
 describe('arbiter: baseline', () => {
-  it('rule 9 keeps the reviewer verdict when every claim holds', () => {
+  it('rule 10 keeps the reviewer verdict when every claim holds', () => {
     expect(arbitrate(input())).toEqual({
       final: 'PASS',
       original: 'PASS',
-      rule: 9,
+      rule: 10,
       reason: 'all evidence agrees',
       mismatches: [],
       failedAcceptance: [],
@@ -76,10 +76,10 @@ describe('arbiter: baseline', () => {
     });
   });
 
-  it.each(['FIX', 'BLOCK'] as const)('rule 9 keeps an honest %s', (verdict) => {
+  it.each(['FIX', 'BLOCK'] as const)('rule 10 keeps an honest %s', (verdict) => {
     expect(arbitrate(input({ verdict: { verdict } }))).toMatchObject({
       final: verdict,
-      rule: 9,
+      rule: 10,
       downgraded: false,
     });
   });
@@ -126,7 +126,7 @@ describe('arbiter: rule 3, dependencies', () => {
       arbitrate(
         input({ evidence: { deps_diff: ['yaml', 'zod@^4.6.7', 'commander@15.0.0 (MIT)'] } }),
       ).rule,
-    ).toBe(9);
+    ).toBe(10);
   });
 
   it('blocks an unapproved dependency, naming it', () => {
@@ -194,9 +194,16 @@ describe('arbiter: rule 5, push claim', () => {
   });
 
   it('does not fire when the worker did not claim to have pushed', () => {
+    // Use FIX to bypass rule 9 (evidence missing only caps PASS).
     expect(
-      arbitrate(input({ claims: { pushed: false }, evidence: { remote_has_head: false } })).rule,
-    ).toBe(9);
+      arbitrate(
+        input({
+          claims: { pushed: false },
+          verdict: { verdict: 'FIX' },
+          evidence: { remote_has_head: false },
+        }),
+      ).rule,
+    ).toBe(10);
   });
 });
 
@@ -248,7 +255,7 @@ describe('arbiter: rule 6, test counts', () => {
         },
       }),
     );
-    expect(decision).toMatchObject({ final: 'FIX', rule: 9, downgraded: false });
+    expect(decision).toMatchObject({ final: 'FIX', rule: 10, downgraded: false });
   });
 });
 
@@ -265,13 +272,15 @@ describe('arbiter: rule 7, CI claim', () => {
   });
 
   it('does not fire when CI was not claimed green (missing ci_passed defaults to false)', () => {
+    // Use FIX verdict to bypass rule 9 (evidence missing only caps PASS).
     const decision = arbitrate(
       input({
         claims: { ci_passed: false },
+        verdict: { verdict: 'FIX' },
         evidence: { ci_branch_matched: null, ci_conclusion: 'unknown' },
       }),
     );
-    expect(decision.rule).toBe(9);
+    expect(decision.rule).toBe(10);
   });
 });
 
@@ -302,14 +311,96 @@ describe('arbiter: rule 8, acceptance not met', () => {
   it.each(['FIX', 'BLOCK'] as const)('leaves a reviewer %s as it is', (verdict) => {
     expect(arbitrate(input({ verdict: { verdict }, failed: failing }))).toMatchObject({
       final: verdict,
-      rule: 9,
+      rule: 10,
       downgraded: false,
       failedAcceptance: [],
     });
   });
 
   it('does not fire when every acceptance command was met', () => {
-    expect(arbitrate(input({ failed: [] })).rule).toBe(9);
+    expect(arbitrate(input({ failed: [] })).rule).toBe(10);
+  });
+});
+
+describe('arbiter: rule 9, evidence missing (SPEC 4.3 v02-b05)', () => {
+  it('downgrades PASS to FIX when remote_has_head is false (unpushed)', () => {
+    const decision = arbitrate(
+      input({ claims: { pushed: false }, evidence: { remote_has_head: false } }),
+    );
+    expect(decision).toMatchObject({
+      final: 'FIX',
+      original: 'PASS',
+      rule: 9,
+      downgraded: true,
+      mismatches: [],
+    });
+    expect(decision.reason).toContain('remote_has_head=false');
+  });
+
+  it('downgrades PASS to FIX when ci_conclusion is unknown', () => {
+    const decision = arbitrate(
+      input({
+        claims: { ci_passed: false },
+        evidence: { ci_conclusion: 'unknown', ci_branch_matched: null },
+      }),
+    );
+    expect(decision).toMatchObject({
+      final: 'FIX',
+      original: 'PASS',
+      rule: 9,
+      downgraded: true,
+      mismatches: [],
+    });
+    expect(decision.reason).toContain('ci_conclusion=unknown');
+  });
+
+  it('downgrades PASS to FIX when ci_branch_matched is not true', () => {
+    const decision = arbitrate(
+      input({
+        claims: { ci_passed: false },
+        evidence: { ci_branch_matched: false, ci_conclusion: 'success' },
+      }),
+    );
+    expect(decision).toMatchObject({
+      final: 'FIX',
+      original: 'PASS',
+      rule: 9,
+      downgraded: true,
+      mismatches: [],
+    });
+    expect(decision.reason).toContain('ci_branch_matched=false');
+  });
+
+  it('does not change an original FIX verdict', () => {
+    const decision = arbitrate(
+      input({
+        verdict: { verdict: 'FIX' },
+        claims: { pushed: false },
+        evidence: { remote_has_head: false },
+      }),
+    );
+    expect(decision).toMatchObject({
+      final: 'FIX',
+      original: 'FIX',
+      rule: 10,
+      downgraded: false,
+    });
+  });
+
+  it('does not change an original BLOCK verdict', () => {
+    const decision = arbitrate(
+      input({
+        verdict: { verdict: 'BLOCK' },
+        claims: { pushed: false },
+        evidence: { remote_has_head: false },
+      }),
+    );
+    expect(decision).toMatchObject({
+      final: 'BLOCK',
+      original: 'BLOCK',
+      rule: 10,
+      downgraded: false,
+    });
   });
 });
 

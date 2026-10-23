@@ -619,11 +619,15 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     };
     const onStarted = (handle: RunHandle): void => {
       workerHandle = handle;
-      // SPEC 11.3: add worker_pid to the already-written heartbeat when the runner provides one.
-      if (handle.pid !== undefined) {
-        updateHeartbeat(root, { worker_pid: handle.pid, updated_at: ctx.now().toISOString() });
-      }
+      // SPEC 11.2 (v02-b05-fix): worker_pid is set by the onPid callback below,
+      // not from handle.pid here — the spawn hook may fire after onStarted.
       monitor.start();
+    };
+    // SPEC 11.2 (v02-b05-fix): the spawn hook calls onPid as soon as the
+    // subprocess pid is known, which may be after onStarted. R2 writes it to
+    // the heartbeat here instead of reading handle.pid in onStarted.
+    const onPid = (pid: number): void => {
+      updateHeartbeat(root, { worker_pid: pid, updated_at: ctx.now().toISOString() });
     };
 
     const cleanupTimers = (): void => {
@@ -638,6 +642,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         ...(ctx.workerSignal === undefined ? {} : { signal: ctx.workerSignal }),
         onEvent,
         onStarted,
+        onPid,
         ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
       });
       cleanupTimers();

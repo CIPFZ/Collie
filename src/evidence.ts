@@ -256,9 +256,11 @@ export async function collectEvidence(input: EvidenceInput): Promise<CollectedEv
     verify_results: verify.map((r) => ({ cmd: r.cmd, exit_code: r.exit_code, summary: r.summary })),
     remote_has_head: remoteHasHead,
     ci_conclusion: 'error' in ci ? 'unknown' : foldConclusion(ci),
-    ci_run_url: 'error' in ci ? '' : (ci.runUrl ?? ''),
-    // null: the CI query itself failed, so the branch could not be established (SPEC 3.5).
-    ci_branch_matched: 'error' in ci ? null : ci.branchMatched,
+    // SPEC 3.5 (v02-b05-fix): when head_sha is not on the remote, CI evidence
+    // is not meaningful — set ci_run_url to empty and ci_branch_matched to null
+    // ("未能取证"), not false ("监听分支不一致").
+    ci_run_url: !remoteHasHead || 'error' in ci ? '' : (ci.runUrl ?? ''),
+    ci_branch_matched: !remoteHasHead || 'error' in ci ? null : ci.branchMatched,
     deps_diff: deps,
     spec_diff_lines: protectedDiff.added + protectedDiff.deleted,
   };

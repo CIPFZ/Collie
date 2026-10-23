@@ -115,6 +115,16 @@ describe('evidence: commits and push', () => {
     expect((await collect(head)).evidence.remote_has_head).toBe(false);
   });
 
+  it('sets ci_branch_matched to null when remote_has_head is false (SPEC 3.5 v02-b05-fix)', async () => {
+    write('src.ts', 'x\n');
+    const head = await commitAll('code');
+    // Head is not pushed, so CI evidence is not meaningful.
+    const collected = await collect(head);
+    expect(collected.evidence.remote_has_head).toBe(false);
+    expect(collected.evidence.ci_branch_matched).toBeNull();
+    expect(collected.evidence.ci_run_url).toBe('');
+  });
+
   it('reports remote_has_head=false with the reason when the remote is unreachable', async () => {
     write('src.ts', 'x\n');
     const head = await commitAll('code');
@@ -182,14 +192,21 @@ describe('evidence: CI', () => {
     return commitAll('code');
   }
 
+  /** head() + push so remote_has_head=true; used by tests that exercise CI branch matching. */
+  async function pushedHead(): Promise<string> {
+    const sha = await head();
+    await git(repo, ['push', '-q', 'origin', 'main']);
+    return sha;
+  }
+
   it('reports success on the expected branch', async () => {
-    const { evidence } = await collect(await head());
+    const { evidence } = await collect(await pushedHead());
     expect(evidence).toMatchObject({ ci_conclusion: 'success', ci_branch_matched: true });
     expect(evidence.ci_run_url).toContain('/actions/runs/1');
   });
 
   it('reports a green run on another branch as unmatched and unknown', async () => {
-    const { evidence } = await collect(await head(), ciFetch('master'));
+    const { evidence } = await collect(await pushedHead(), ciFetch('master'));
     expect(evidence).toMatchObject({
       ci_conclusion: 'unknown',
       ci_branch_matched: false,

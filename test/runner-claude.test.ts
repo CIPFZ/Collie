@@ -524,6 +524,49 @@ describe('runner-claude: spawnClaudeCodeProcess hook and worker pid (SPEC 11.2)'
     expect(calls[0]?.options?.spawnClaudeCodeProcess).toBeTypeOf('function');
   });
 
+  it('onPid callback fires after onStarted with the correct pid (SPEC 11.2 v02-b05-fix)', async () => {
+    const order: string[] = [];
+    let pidFromCallback: number | undefined;
+    let handleFromStarted: RunHandle | undefined;
+
+    // A query double that calls the spawn hook to simulate the SDK behaviour.
+    // The spawn hook fires during iteration, after onStarted.
+    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery requires AsyncIterable
+    const query: ClaudeQuery = async function* (params) {
+      // The SDK spawns a subprocess during iteration.
+      params.options?.spawnClaudeCodeProcess?.({
+        command: 'echo',
+        args: ['collie-test'],
+        env: { PATH: process.env.PATH ?? '' },
+        signal: AbortSignal.timeout(5000),
+      } satisfies SpawnOptions);
+      yield assistant('working');
+      yield success('done');
+    };
+
+    await new ClaudeRunner(config, { query }).run(
+      opts({
+        onStarted: (h) => {
+          order.push('onStarted');
+          handleFromStarted = h;
+        },
+        onPid: (pid) => {
+          order.push('onPid');
+          pidFromCallback = pid;
+        },
+      }),
+    );
+
+    // onStarted fires first (at query setup), then onPid fires (during iteration when spawn hook runs).
+    expect(order).toEqual(['onStarted', 'onPid']);
+    // The pid from the callback is a real process id.
+    expect(pidFromCallback).toBeTypeOf('number');
+    expect((pidFromCallback ?? 0) > 0).toBe(true);
+    // The handle's pid also reflects the spawned process.
+    expect(handleFromStarted).toBeDefined();
+    expect(handleFromStarted?.pid).toBe(pidFromCallback);
+  });
+
   it('spawnClaudeCodeProcess hook receives single SpawnOptions object and strips GITHUB_TOKEN from env (v02-b04-fix4)', async () => {
     // Spawn a real node subprocess that reports its own env keys via stdout.
     // This end-to-end test proves the hook strips CI tokens before passing env to spawn.

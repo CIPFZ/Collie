@@ -89,4 +89,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(schema).toContain('ci.resolved');
     expect(run).toContain('ci.resolved');
   });
+
+  it('RULE_DEFAULT = 10 in arbiter.ts (v02-b05-fix)', () => {
+    const content = readFileSync(join(ROOT, 'src/arbiter.ts'), 'utf8');
+    expect(content).toMatch(/RULE_DEFAULT = 10/);
+  });
 });

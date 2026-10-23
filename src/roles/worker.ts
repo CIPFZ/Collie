@@ -198,6 +198,7 @@ export async function runWorker(
     signal?: AbortSignal;
     onEvent?: (event: unknown) => void;
     onStarted?: (handle: RunHandle) => void;
+    onPid?: (pid: number) => void;
     resumeSessionId?: string;
   } = {},
 ): Promise<RunResult> {
@@ -212,6 +213,7 @@ export async function runWorker(
     ...(opts.signal === undefined ? {} : { signal: opts.signal }),
     ...(opts.onEvent === undefined ? {} : { onEvent: opts.onEvent }),
     ...(opts.onStarted === undefined ? {} : { onStarted: opts.onStarted }),
+    ...(opts.onPid === undefined ? {} : { onPid: opts.onPid }),
     ...(opts.resumeSessionId === undefined ? {} : { resumeSessionId: opts.resumeSessionId }),
   });
 }

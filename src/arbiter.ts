@@ -39,7 +39,7 @@ export interface ArbiterDecision {
   final: VerdictValue;
   /** The reviewer's own verdict, when it could be parsed. */
   original: VerdictValue | null;
-  /** 1-8, the rule that decided. */
+  /** 1-10, the rule that decided. */
   rule: number;
   reason: string;
   /**
@@ -62,7 +62,8 @@ const RULE_PUSH = 5;
 const RULE_TESTS = 6;
 const RULE_CI = 7;
 const RULE_ACCEPTANCE = 8;
-const RULE_DEFAULT = 9;
+const RULE_EVIDENCE_MISSING = 9;
+const RULE_DEFAULT = 10;
 /* eslint-enable no-restricted-syntax */
 
 /** Strong copyleft licences that block in any dependency tree (ADR-003). */
@@ -125,7 +126,7 @@ function decide(
   };
 }
 
-/** Applies SPEC 4.3 rules 1-8 in order; the first hit decides. */
+/** Applies SPEC 4.3 rules 1-10 in order; the first hit decides. */
 export function arbitrate(input: ArbiterInput): ArbiterDecision {
   // Rule 1: an unparseable verdict is never trusted.
   if (!input.verdict.ok) {
@@ -253,6 +254,24 @@ export function arbitrate(input: ArbiterInput): ArbiterDecision {
     };
   }
 
-  // Rule 9.
+  // Rule 9: evidence missing — unpushed, CI not proven green, or branch unverified.
+  // SPEC 4.3 (v02-b05): PASS requires push + CI green + branch matched; evidence
+  // gaps cap PASS at FIX but leave FIX and BLOCK untouched.
+  // This is "evidence missing", not "claim mismatch": record verdict.downgraded, not claim.mismatch.
+  if (
+    original === 'PASS' &&
+    (!evidence.remote_has_head ||
+      evidence.ci_conclusion !== 'success' ||
+      evidence.ci_branch_matched !== true)
+  ) {
+    const parts: string[] = [];
+    if (!evidence.remote_has_head) parts.push('remote_has_head=false');
+    if (evidence.ci_conclusion !== 'success') parts.push(`ci_conclusion=${evidence.ci_conclusion}`);
+    if (evidence.ci_branch_matched !== true)
+      parts.push(`ci_branch_matched=${String(evidence.ci_branch_matched)}`);
+    return decide(original, 'FIX', RULE_EVIDENCE_MISSING, parts.join(', '));
+  }
+
+  // Rule 10.
   return decide(original, original, RULE_DEFAULT, verdict.reason);
 }

@@ -42,6 +42,12 @@ export interface RunOptions {
   resumeSessionId?: string;
   /** Called once after the runner starts; hands R2 the control handle (SPEC 11.2). */
   onStarted?: (handle: RunHandle) => void;
+  /**
+   * Called as soon as the worker subprocess pid is known (SPEC 11.2, v02-b05-fix).
+   * The spawn hook fires after query() begins iterating, which may be after
+   * onStarted — R2 uses this, not handle.pid, for heartbeat worker_pid.
+   */
+  onPid?: (pid: number) => void;
 }
 
 export interface RunResult {
