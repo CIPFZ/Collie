@@ -685,3 +685,72 @@ describe('runner-claude: the real SDK is never loaded by these tests', () => {
     expect(() => new ClaudeRunner(config)).not.toThrow();
   });
 });
+
+describe('runner-claude: stream redaction (v02-e-drill)', () => {
+  /** Extracts the text from an assistant-shaped event for assertions. */
+  function textOf(event: unknown): string {
+    const e = event as { message?: { content?: { text?: string }[] } };
+    return e.message?.content?.[0]?.text ?? '';
+  }
+
+  it('redacts secrets from events passed to onEvent', async () => {
+    const SECRET = 'ghp_supersecrettoken12345';
+    const { query } = scripted([
+      assistant(`I found your token ${SECRET} in the env`),
+      { type: 'system', data: { key: SECRET } },
+      success(),
+    ]);
+    const seen: unknown[] = [];
+    await new ClaudeRunner(config, { query }).run(
+      opts({ onEvent: (e) => seen.push(e), redact: [SECRET] }),
+    );
+    // No event should contain the original secret anywhere.
+    const serialised = JSON.stringify(seen);
+    expect(serialised).not.toContain(SECRET);
+    // The mask should appear where the secret was.
+    expect(serialised).toContain('***');
+    // The assistant message text should be redacted.
+    expect(textOf(seen[0])).toBe('I found your token *** in the env');
+    // The system data key should be redacted.
+    const sys = seen[1] as { data: { key: string } };
+    expect(sys.data.key).toBe('***');
+  });
+
+  it('passes events through unchanged when redact is empty', async () => {
+    const { query } = scripted([assistant('visible secret ghp_reallylongtokenhere'), success()]);
+    const seen: unknown[] = [];
+    await new ClaudeRunner(config, { query }).run(
+      opts({ onEvent: (e) => seen.push(e), redact: [] }),
+    );
+    expect(textOf(seen[0])).toBe('visible secret ghp_reallylongtokenhere');
+  });
+
+  it('passes events through unchanged when redact is omitted', async () => {
+    const { query } = scripted([assistant('visible secret ghp_reallylongtokenhere'), success()]);
+    const seen: unknown[] = [];
+    await new ClaudeRunner(config, { query }).run(opts({ onEvent: (e) => seen.push(e) }));
+    expect(textOf(seen[0])).toBe('visible secret ghp_reallylongtokenhere');
+  });
+
+  it('skips values shorter than 8 characters', async () => {
+    const SHORT = 'abc1234'; // 7 chars — below the minimum
+    const { query } = scripted([assistant(`token ${SHORT} here`), success()]);
+    const seen: unknown[] = [];
+    await new ClaudeRunner(config, { query }).run(
+      opts({ onEvent: (e) => seen.push(e), redact: [SHORT] }),
+    );
+    // Short secret is NOT redacted.
+    expect(textOf(seen[0])).toContain(SHORT);
+  });
+
+  it('redacts multiple secrets', async () => {
+    const TOKEN_A = 'ghp_aaaaaaaaaa';
+    const TOKEN_B = 'gho_bbbbbbbbbb';
+    const { query } = scripted([assistant(`${TOKEN_A} and ${TOKEN_B}`), success()]);
+    const seen: unknown[] = [];
+    await new ClaudeRunner(config, { query }).run(
+      opts({ onEvent: (e) => seen.push(e), redact: [TOKEN_A, TOKEN_B] }),
+    );
+    expect(textOf(seen[0])).toBe('*** and ***');
+  });
+});
