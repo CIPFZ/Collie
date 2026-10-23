@@ -367,4 +367,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v02-b05-fix · r-20261023-060802 · PASS
+
+- 时间：2026-10-23T06:28:08.644Z
+- 裁定：规则 9，三个条目全部满足，全部验收命令通过，无受保护文件修改，无依赖变化。CI 以 R2 取证为准。
+- 提交：`34134d0`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，647 passed, 0 failed
+  - `grep -qE "RULE_DEFAULT = 10" src/arbiter.ts && grep -qE "remote_has_head: false" test/arbiter.test.ts` → exit 0，exit 0
+  - `grep -qE "onPid" src/runner/index.ts && grep -qE "onPid" src/runner/claude.ts && grep -qE "onPid" src/run.ts` → exit 0，exit 0
+  - `grep -qE "onPid" test/runner-claude.test.ts` → exit 0，exit 0
+  - `grep -qE "remote_has_head" test/evidence.test.ts && grep -qE "toBeNull" test/evidence.test.ts` → exit 0，exit 0
+  - `grep -qE "RULE_DEFAULT" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/39910961845
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
