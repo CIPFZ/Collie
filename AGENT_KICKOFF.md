@@ -161,6 +161,16 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
 - 任何对外动作（花费、推送）已获项目所有者批准，无需再问；但新增依赖、改规格由所有者定。
 - 回答用中文，提交信息英文。不写 ADR，不写总结文档。
 
+## 场景 E 真实演练（v02-e-drill 专用，一次性）
+
+1. 照常 `collie run v02-e-drill`。等 `git log` 看到 task 提交之后出现 worker 的第 1 个代码提交，再等 2 分钟。
+2. 记下心跳里的 `pid` 与 `worker_pid`，然后 `kill -9 <R2 pid>`。
+3. 立即每 2 秒采样：`worker_pid` 是否存活、工作区是否还在变化、持续多久。记录 claude 子进程最终是自行退出还是一直活着。
+   若 60 秒后仍活着，`kill -9 <worker_pid>` 并记录；这个结果本身就是 SPEC 11.3 要的数据。
+4. 确认没有残留进程后，再次 `collie run v02-e-drill`。期望：`run.orphaned`（含上次 run_id）、工作区有改动则 `worker.rescued` + wip 提交、
+   `task.md` 为 `attempt: 2` 且有「上一轮中断」一节与 `rescue_sha`、`resume_count` ≤ `resume_max` 时有 `worker.resumed`。
+5. 第 2 次 attempt 照常跑完，汇报时把 kill 前后的时间线、子进程行为、救援提交 sha、attempt 2 的 base_sha 是否等于 attempt 1 的，单独列一段。
+
 ## 已知环境问题
 
 - GitHub API 无 token 时会限流，R2 等 CI 最多 `ci_wait_secs`（1800 秒）后记 unknown，属正常行为。

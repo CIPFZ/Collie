@@ -31,7 +31,9 @@
 | 13 | v02-b04-fix2 | CI 证据与结构回归 | v02-b04-fix | passed |
 | 14 | v02-b04-fix3 | worker_pid、包装层 interrupt、原子心跳 | v02-b04-fix2 | passed |
 | 15 | v02-b04-fix4 | spawn 钩子按 SDK 签名、类型来自 SDK、collie smoke | v02-b04-fix3 | blocked |
-| 16 | v02-b05 | 中断标记与 resume | v02-b04-fix4 | pending |
+| 16 | v02-b05 | 中断标记与 resume | v02-b04-fix4 | passed |
+| 17 | v02-b05-fix | 规则 9、worker_pid 时序、CI 未取证措辞 | v02-b05 | pending |
+| 18 | v02-e-drill | stream.ndjson 密钥屏蔽（场景 E 真实 kill 演练） | v02-b05-fix | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -673,3 +675,75 @@ fix3 那轮实跑验证过）的 worktree 运行 R2。规格见 SPEC 11.2、11.3
 fix3 的 spawn 钩子签名与 SDK 不符（三参数 vs 单对象），claude 子进程没起来。R2 自身（fix3 代码）用 b04-fix 的兜底正常收尾，
 run.finished / progress / 心跳删除都执行了，无残留现场。修复批次 v02-b04-fix4 插在前面，本批次依赖改为它。
 这是第三次「手写 SDK 类型与真实 SDK 不一致、typecheck 与替身测试都过、真实运行才炸」，规则进 SPEC 11.2。
+第 2 次运行 r-20261022-161827 PASS（裁定 `3b56179`），10/10 验收通过，635 全过，R1 复核一致。
+但 worker 全程没有 `git push`（claims 如实 `pushed=false`，`remote_has_head=false`，CI 未取证），规则链无一命中，
+reviewer 原判 PASS 被采用。代码本身正确，PASS 维持；规格缺口（PASS 不要求已推送、不要求 CI success）由 v02-b05-fix 规则 9 补。
+smoke 首次真实运行通过（fix4 钩子能拉起子进程）。worker_pid 仍未进心跳：`onStarted` 先于 spawn 钩子触发。
+本批次新功能（中断标记、resume、ci.resolved、短 sha 展开、no_runs 转后代）要下一轮 R2 才真实生效。
+
+
+## v02-b05-fix 规则 9、worker_pid 时序、CI 未取证措辞
+
+优先级：17　依赖：v02-b05
+
+规格见 SPEC 4.3（规则 9 与来源）、11.3、3.5。
+
+条目：
+1. arbiter 规则 9：`remote_has_head=false` 或 `ci_conclusion≠success` 或 `ci_branch_matched≠true` 时，PASS 降为 FIX，
+   记 `verdict.downgraded`（字段 rule=9 / reason）；原「采用 verdict 原值」改为规则 10。`src/arbiter.ts` 的常量、
+   progress 与 `collie show` 的规则编号文字同步；`test/arbiter.test.ts` 加三个用例（未推送 / unknown / branch 不一致），
+   并断言 FIX 原判不被改动、BLOCK 不被改动
+2. worker_pid 时序：runner 选项加 `onPid?: (pid: number) => void`，spawn 钩子拿到 `child.pid` 时立刻回调；
+   R2 在回调里 `updateHeartbeat({ worker_pid })`，不再依赖 `onStarted` 时读 `handle.pid`。
+   `test/runner-claude.test.ts` 的真实顺序用例：`onStarted` 先触发、钩子后触发，断言心跳最终含 `worker_pid`
+3. CI 未取证措辞：`evidence.ts` 在 `remote_has_head=false` 或根本没查 CI 时 `ci_branch_matched` 为 `null`、`ci_run_url` 为空；
+   `progress.ts` 对 `null` 渲染「未能取证」，`false` 才渲染「监听分支不一致」。`test/evidence.test.ts` 加「未推送 → branch_matched 为 null」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 规则 9 进 arbiter 与测试 | `grep -qE "RULE_DEFAULT = 10" src/arbiter.ts && grep -qE "remote_has_head: false" test/arbiter.test.ts` | exit 0 |
+| onPid 接口存在且 R2 使用 | `grep -qE "onPid" src/runner/index.ts && grep -qE "onPid" src/runner/claude.ts && grep -qE "onPid" src/run.ts` | exit 0 |
+| 真实顺序有测试 | `grep -qE "onPid" test/runner-claude.test.ts` | exit 0 |
+| 未推送时 branch_matched 为 null 有测试 | `grep -qE "remote_has_head" test/evidence.test.ts && grep -qE "toBeNull" test/evidence.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "RULE_DEFAULT" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 放宽规则 1~8 的任何一条
+
+## v02-e-drill stream.ndjson 密钥屏蔽（场景 E 真实 kill 演练）
+
+优先级：18　依赖：v02-b05-fix
+
+规格见 SPEC 第 10 章 Q5、11.2。这是 v0.2 的收口演练：批次本身是小而真实的工作，**操作员会在 worker 阶段对 R2 发 SIGKILL**，
+验证场景 E 在真实运行里成立（孤儿检测、救援提交、attempt 递增、`task.md` 的「上一轮中断」一节、resume）。
+worker 不知道也不需要知道这件事；中断后第 2 次 attempt 的 worker 照手册 4.4 续做。
+
+条目：
+1. `src/runner/claude.ts` 落盘 `stream.ndjson` 前，把屏蔽集合中的每个值（非空且长度 ≥ 8）替换为 `***`；
+   屏蔽集合由 R2 用 `token_file` 文件内容与 `GITHUB_TOKEN` / `GH_TOKEN` 环境变量的值构造，
+   以 runner 选项 `redact: readonly string[]` 传入，runner 不读配置也不读环境变量
+2. `test/runner-claude.test.ts`：注入 fake query 产出含密钥字样的事件，断言落盘文件无原文、有 `***`；`redact` 为空时原样落盘
+3. `test/invariants.test.ts` 加一条：`src/runner/claude.ts` 含 `redact`，且 `src/run.ts`、`src/evidence.ts` 之外无任何文件读取 `token_file`
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| redact 选项存在 | `grep -qE "redact" src/runner/index.ts && grep -qE "redact" src/runner/claude.ts && grep -qE "redact" src/run.ts` | exit 0 |
+| 屏蔽有测试 | `grep -qE "redact" test/runner-claude.test.ts && grep -qE "\*\*\*" test/runner-claude.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "redact" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- runner 读取配置文件或环境变量来决定屏蔽什么（屏蔽集合只能来自 `redact` 选项）

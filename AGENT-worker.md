@@ -71,6 +71,11 @@ npm run lint && npm run typecheck && npm test
 直接提交 `main`，不开分支、不开 PR。小步提交，每个提交独立可构建。
 提交信息格式 `<scope>: <summary>`（英文），scope 取值见 `CONSTRAINTS.md` 铁律 20。
 
+**每个代码提交和 report 信封提交都必须 `git push origin main`。** 未推送的运行不可能 PASS：
+R2 实测 `remote_has_head=false` 时，SPEC 4.3 规则 9 会把 PASS 降为 FIX，你下一轮要做的只是推送，白费一轮。
+（v02-b05 第 2 次运行 worker 全程没推送，claims 如实写了 `pushed=false`，仍被判了 PASS，这条规则由此而来。）
+report 里 `pushed` 要在推送**之后**写，写了 `false` 就是在声明这轮不会通过。
+
 推送之后**不要等 CI、不要查 CI、不要探测 token**。CI 的结论由 R2 用自己的取证核对（SPEC 4.2），
 你的 report 里 `ci_passed` 一律省略或填 `false`；填 `true` 只会在 R2 取不到证据时被判 FIX。
 v02-b02 / b03 两次都有 worker 把最后的轮次花在等 CI 和 `echo $GITHUB_TOKEN` 上，直到轮数用满。
