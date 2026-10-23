@@ -1,11 +1,11 @@
 ---
 schema_version: 1
-run_id: r-20261023-082524
+run_id: r-20261023-083500
 batch_id: v02-e-drill
 base_sha: 83faebb4bb86828dd63454f03edbebf8f59ada4e
-created_at: 2026-10-23T08:25:24.050Z
-attempt: 1
-interrupted_at: null
+created_at: 2026-10-23T08:35:00.555Z
+attempt: 2
+interrupted_at: r-20261023-082524 unknown worker.started@2026-10-23T08:25:24.081Z
 issued_by: collie
 ---
 
@@ -49,3 +49,7 @@ issued_by: collie
 完成后写 `.collie/batches/v02-e-drill/report.md`：固定四段（做了什么 / 测试结果 / 偏离或疑问 / 下一步建议）
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v02-e-drill` 为提交信息单独提交并推送该文件。
+
+## 上一轮中断
+
+中断信息：`r-20261023-082524 unknown worker.started@2026-10-23T08:25:24.081Z`
