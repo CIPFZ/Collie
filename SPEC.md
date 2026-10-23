@@ -601,7 +601,7 @@ v0.1 不做下列内容，防止范围蔓延：
 | Q4 | 完成判定的四种判据，最终选哪个？ | 按用户要求保留全部，v0.5 起记录对比数据后再定 |
 | Q5 | `stream.ndjson` 原样落盘工具输出，环境里配了 token 后会以明文留在 `.collie/runs/` | 目录已 gitignore；token 已不进子进程环境（fix2），但 R2 自己的环境仍有。v02-e-drill 落盘时屏蔽 `token_file` 内容与 `GITHUB_TOKEN` / `GH_TOKEN` 的值 |
 | Q6 | 卡死检测以 SDK 事件为心跳，而 SDK 生成长输出时不发事件 | 权宜：`stall_secs=300`。候选：runner 开启 SDK 逐片输出（partial messages）并转成事件，让心跳粒度与输出无关。v0.2 收口后定。实测真正静默（无任何事件、无 thinking_tokens）：v02-b04 第 1 次推送后 90.5 秒（误判）；第 2 次推送→写 report 前 35.4 秒、report 推送后生成最后一段约 600 字回复 97.0 秒、心跳采样最大滞后 89.2 秒。带 thinking_tokens 的 277 秒 / 99 秒间隔不算静默。300 对已观测最大值留约 3 倍余量 |
-| Q7 | R2 只核对 worker `head_sha` 的 CI，不看自己裁定提交的 CI；裁定提交只改 docs，它的 CI 红只可能是随机失败的测试，但 Collie 记录里看不到（v02-b04 第 2 次 Run 81） | v02-b04-tests 去掉已知的随机失败；是否要 R2 在 `run.finished` 前回看自己裁定提交的 CI，v0.2 收口后定 |
+| Q7 | R2 只核对 worker `head_sha` 的 CI，不看自己裁定提交的 CI；裁定提交只改 docs，它的 CI 红只可能是随机失败的测试，但 Collie 记录里看不到（v02-b04 第 2 次 Run 81；v02-b05-fix Run 113 又一次） | 已定：v0.3 第一批。R2 推送裁定提交后不等待、只查一次该提交的 CI，结果记 `ci.verdict_commit`（字段 sha / conclusion / run_url），红则在 progress 行末追加「裁定提交 CI 红」；不改变本轮结论，但下一轮 `collie run` 启动时若上一条裁定提交 CI 红且未被后续绿覆盖，先打印警告。前提：推送裁定提交由 R2 自己做（现由操作员代推，v0.3 一并收回） |
 
 
 ## 11. v0.2 失败检测与恢复

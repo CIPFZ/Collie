@@ -32,7 +32,7 @@
 | 14 | v02-b04-fix3 | worker_pid、包装层 interrupt、原子心跳 | v02-b04-fix2 | passed |
 | 15 | v02-b04-fix4 | spawn 钩子按 SDK 签名、类型来自 SDK、collie smoke | v02-b04-fix3 | blocked |
 | 16 | v02-b05 | 中断标记与 resume | v02-b04-fix4 | passed |
-| 17 | v02-b05-fix | 规则 9、worker_pid 时序、CI 未取证措辞 | v02-b05 | pending |
+| 17 | v02-b05-fix | 规则 9、worker_pid 时序、CI 未取证措辞 | v02-b05 | passed |
 | 18 | v02-e-drill | stream.ndjson 密钥屏蔽（场景 E 真实 kill 演练） | v02-b05-fix | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
@@ -717,6 +717,12 @@ smoke 首次真实运行通过（fix4 钩子能拉起子进程）。worker_pid �
 - 为了让测试过而删除或跳过任何测试
 - 放宽规则 1~8 的任何一条
 
+记录：第 1 次运行 r-20261023-060802 PASS（裁定 `371815f`），8/8 验收通过，647 全过，R1 复核一致。
+b05 代码首次真实生效：`attempt` 从 1 起算正确；`ci.resolved` 首次出现且字段齐全（waited 1 秒、1 次轮询）；worker 推送了。
+裁定提交自己的 CI（Run 113）红：场景 C 两个用例清理沙箱时 ENOTEMPTY（`.git/objects/pack` 还有 git 子进程在写），
+代码提交的 Run 111 / 112 绿，本地与加压均复现不出。PASS 维持；沙箱清理并入 v02-e-drill 条目 3。
+短 sha 展开路径仍未被真实触发（worker 写了 40 位）。
+
 ## v02-e-drill stream.ndjson 密钥屏蔽（场景 E 真实 kill 演练）
 
 优先级：18　依赖：v02-b05-fix
@@ -730,7 +736,9 @@ worker 不知道也不需要知道这件事；中断后第 2 次 attempt 的 wor
    屏蔽集合由 R2 用 `token_file` 文件内容与 `GITHUB_TOKEN` / `GH_TOKEN` 环境变量的值构造，
    以 runner 选项 `redact: readonly string[]` 传入，runner 不读配置也不读环境变量
 2. `test/runner-claude.test.ts`：注入 fake query 产出含密钥字样的事件，断言落盘文件无原文、有 `***`；`redact` 为空时原样落盘
-3. `test/invariants.test.ts` 加一条：`src/runner/claude.ts` 含 `redact`，且 `src/run.ts`、`src/evidence.ts` 之外无任何文件读取 `token_file`
+3. `test/invariants.test.ts` 加一条：`src/runner/claude.ts` 含 `redact`，且 `src/run.ts`、`src/evidence.ts` 之外无任何文件读取 `token_file`。
+   顺带修场景 C 的随机 ENOTEMPTY（v02-b05-fix 裁定提交 Run 113）：`test/support/sandbox.ts` 的全局 gitconfig 加
+   `[gc]\n\tauto = 0`，`dispose()` 的 `rmSync` 加 `maxRetries: 5, retryDelay: 100`；不改任何场景测试的断言
 
 验收标准：
 
@@ -742,6 +750,7 @@ worker 不知道也不需要知道这件事；中断后第 2 次 attempt 的 wor
 | redact 选项存在 | `grep -qE "redact" src/runner/index.ts && grep -qE "redact" src/runner/claude.ts && grep -qE "redact" src/run.ts` | exit 0 |
 | 屏蔽有测试 | `grep -qE "redact" test/runner-claude.test.ts && grep -qE "\*\*\*" test/runner-claude.test.ts` | exit 0 |
 | 不变量同步 | `grep -qE "redact" test/invariants.test.ts` | exit 0 |
+| 沙箱清理不再裸删 | `grep -qE "maxRetries" test/support/sandbox.ts && grep -qE "auto = 0" test/support/sandbox.ts` | exit 0 |
 
 额外禁止：
 - 改动任何受保护路径
