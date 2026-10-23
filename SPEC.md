@@ -609,6 +609,14 @@ v0.1 不做下列内容，防止范围蔓延：
 目标（ROADMAP 第 4 节）：worker 在任何时刻被中断，信息零丢失，下一轮能正确接续。
 本章在 v0.1 的结构上只做追加；v0.1 的三场景与规则 1~9 不变。
 
+**v0.2 收口条件**（v02-e-drill 第 1 次演练 2026-10-23 后定）：真实 `kill -9` R2 一次，以下五条全部在真实运行里成立：
+1. R2 死后 worker 子进程在 5 秒内退出，不再提交（演练实测：worker 变孤儿后独自活了 78 秒、提交了一次）；
+2. 下一次启动记 `run.orphaned`，工作区脏则 `worker.rescued` + wip 提交且 `task.md` 有 `rescue_sha`（演练未触发：孤儿 worker 抢先提交了）；
+3. `task.md` 的 `interrupted_at` 结束原因为 `orphaned`、最后事件取自 `stream.ndjson`（演练实测写成 `unknown worker.started`）；
+4. attempt 2 的 R2 取证与 reviewer 范围为首次 `base_sha..head`，attempt 1 的提交在规则 2 / 3 范围内（演练实测只算了 attempt 2 自己的 task 提交之后）；
+5. 若孤儿 worker 仍存活，`collie run` 拒绝启动并退出码 1（演练未验证：操作员先补杀了）。
+演练已成立的：`worker_pid` 进心跳、孤儿检测、`attempt` 递增、「上一轮中断」一节、首次 `base_sha` 写进 frontmatter、下一轮能接着跑完。
+
 ### 11.1 新增配置（`[limits]`）
 
 ```toml
@@ -678,7 +686,12 @@ ROADMAP 写的 SIGINT → SIGTERM → SIGKILL 是子进程语义；Collie 只认
   不是只覆盖 worker（v02-b03 实测只覆盖了 worker，reviewer 与等 CI 的 36 分钟里并行启动不会被拒绝）。
   `phase` 取 `worker | reviewer | ci | arbiter`；worker 阶段每收到一条事件更新 `updated_at`，
   其他阶段每 `ci_poll_secs` 更新一次。`worker_pid` 为 `RunHandle.pid`，拿得到就记。
-  下一次 `collie run` 启动时若文件存在：`pid` 或 `worker_pid` 任一存活则拒绝启动（铁律 1），退出码 1；
+  worker 子进程必须随 R2 一起死：runner 用 `detached: true` 把子进程放进自己的进程组，R2 在 `exit` / `SIGTERM` / `SIGINT` 时对
+  `-worker_pid` 发 `SIGTERM`；R2 被 `SIGKILL` 没机会清理时，子进程靠 `prctl(PR_SET_PDEATHSIG)` 不可移植，改为 worker 侧
+  **父进程看门狗**：runner 给子进程的 env 加 `COLLIE_PARENT_PID`，并以 `--parent-watch` 之类方式让子进程每 2 秒 `kill(ppid, 0)`，
+  父进程不在就自杀——Claude Code 不接受这种参数，因此退而求其次：R2 启动一个极小的守护进程（`node -e`，与 R2 同组之外），
+  它持有 R2 pid 与 worker_pid，每 2 秒探测，R2 消失即对 worker_pid 发 `SIGKILL` 后自退。守护进程的 pid 也写进心跳（`guard_pid`）。
+  下一次 `collie run` 启动时若文件存在：`pid` / `worker_pid` / `guard_pid` 任一存活则拒绝启动（铁律 1），退出码 1；
   两者都不存活判定「上一次被 kill」：记 `run.orphaned`（字段 run_id / batch_id / phase / updated_at），
   执行 11.4 的救援，再删除该文件。
 
@@ -745,6 +758,10 @@ v0.1 的 `wallclock_secs` 超时从「直接 abort + 记 crashed」改为走本�
 
 - `task.md` frontmatter：`attempt` 递增；`interrupted_at` 填
   `"<上次 run_id> <结束原因> <最后一条事件类型>@<时间>"`；若有救援提交，加 `rescue_sha`。
+  结束原因的来源按序：`run.finished.worker_stop_reason` → `run.finished.result` → 本轮有 `run.orphaned` 则 `orphaned` → `unknown`；
+  最后一条事件在 journal 没有 `run.finished` 时取 `stream.ndjson` 的最后一行（SDK 事件类型与时间），journal 的 `worker.started` 不算。
+- 取证范围：attempt ≥ 2 时 R2 的 `evidence` 与 reviewer 的 `base_sha` 一律用 frontmatter 里沿用的首次 `base_sha`，不是本次 task 提交；
+  `commits_actual` 因此含上一轮的提交。
 - `task.md` 正文追加一节「上一轮中断」：原样写出上述信息，并写明
   「请先核实 `rescue_sha` 中的半成品是否完整，不要把它当作已完成」。这段只有 R2 知道，worker 自己说不出来。
 - 若上次 `RunResult.sessionId` 存在且本批次累计 resume 次数 < `resume_max`：
