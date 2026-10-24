@@ -183,9 +183,12 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
 
 ## 已知环境问题
 
-- GitHub API 无 token 时会限流，R2 等 CI 最多 `ci_wait_secs`（1800 秒）后记 unknown，属正常行为。
-  若环境有 `GITHUB_TOKEN`，确认它对 `collie run` 的子进程可见。
-- git 推送配置在本仓库 `.git/config`，不要用全局环境变量改 remote（会污染测试里的临时仓库）。
+- CI 证据靠 `ci.token_file`（SPEC 3.1），不要把 token 放进环境变量；R2 读文件，worker 子进程看不到它。
+- git 的 fetch 与 push **都走 ssh**：`remote.origin.url = git@github.com:CIPFZ/Collie.git`，不设 `pushurl`，密钥在本仓库
+  `.git/config` 的 `core.sshCommand`。不要让 fetch 走 https：R2 判「已推送」要先 `git fetch origin`（`src/git.ts` `remoteContains`），
+  https 凭据一失效（全局 `credential.helper store` 里的旧凭据）fetch 就 401，`remote_has_head` 变 false，规则 9 直接 FIX，
+  CI 也不会去查（2026-10-23 e-fix 开跑前发现）。开跑前的自检加一条：`git fetch --quiet origin` 应在 5 秒内成功。
+- 不要用全局环境变量改 remote 或 git 配置（会污染测试里的临时仓库）。
 
 ## 第一步
 
