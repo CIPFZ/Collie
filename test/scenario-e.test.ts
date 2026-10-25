@@ -1,9 +1,12 @@
 // Scenario E (SPEC 11.9): fake worker writes files, then gets killed (effect
 // calls handle.stop('kill')). Front half: rescue commit. Back half (v02-b05):
 // attempt=2, interrupted_at, rescue_sha, base_sha reuse across attempts.
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { git } from '../src/git.js';
-import { batchHistory } from '../src/run.js';
+import { EVENTS_FILE_NAME, RUNS_RELATIVE_DIR } from '../src/journal.js';
+import { batchHistory, STREAM_FILE_NAME } from '../src/run.js';
 import type { FakeScene, FakeSceneContext } from '../src/runner/fake.js';
 import { FakeRunner } from '../src/runner/fake.js';
 import {
@@ -286,5 +289,126 @@ describe('scenario E: evidence base_sha reuse (SPEC 11.7)', () => {
     expect(downgraded).toBeDefined();
     expect(downgraded?.rule).toBe(2);
     expect(downgraded?.to).toBe('BLOCK');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scenario E: interrupted_at sources and orphaned detection (SPEC 11.7 v02-e-fix)
+// ---------------------------------------------------------------------------
+
+/**
+ * Helper: write a raw journal event to a run's events.ndjson.
+ * Each call appends one line; events must be valid per EventSchema.
+ */
+function writeJournalEvent(root: string, runId: string, event: Record<string, unknown>): void {
+  const dir = join(root, RUNS_RELATIVE_DIR, runId);
+  mkdirSync(dir, { recursive: true });
+  appendFileSync(join(dir, EVENTS_FILE_NAME), JSON.stringify(event) + '\n');
+}
+
+/**
+ * Helper: write a raw event line to a run's stream.ndjson.
+ */
+function writeStreamEvent(root: string, runId: string, event: Record<string, unknown>): void {
+  const dir = join(root, RUNS_RELATIVE_DIR, runId);
+  mkdirSync(dir, { recursive: true });
+  appendFileSync(join(dir, STREAM_FILE_NAME), JSON.stringify(event) + '\n');
+}
+
+describe('scenario E: interrupted_at orphaned and stream.ndjson fallback (SPEC 11.7)', () => {
+  it('orphaned run: interrupted_at contains orphaned and event type from stream.ndjson', () => {
+    // Simulate a crashed R2: write journal events (no run.finished) and
+    // stream.ndjson with a later event.
+    const orphanRunId = 'r-20260101-000000';
+
+    // Journal for the orphaned run: batch.selected and worker.started, but no run.finished.
+    writeJournalEvent(box.root, orphanRunId, {
+      ts: '2026-01-01T00:00:00.000Z',
+      run_id: orphanRunId,
+      batch_id: BATCH,
+      event: 'batch.selected',
+      base_sha: 'aaaa000000000000000000000000000000000000',
+    });
+    writeJournalEvent(box.root, orphanRunId, {
+      ts: '2026-01-01T00:00:01.000Z',
+      run_id: orphanRunId,
+      batch_id: BATCH,
+      event: 'worker.started',
+    });
+
+    // Stream.ndjson: worker produced some events before R2 crashed.
+    // The last event has a type that is NOT worker.started.
+    writeStreamEvent(box.root, orphanRunId, {
+      type: 'content_block_delta',
+      ts: '2026-01-01T00:01:00.000Z',
+    });
+    writeStreamEvent(box.root, orphanRunId, {
+      type: 'tool_use',
+      ts: '2026-01-01T00:02:00.000Z',
+    });
+
+    const h = batchHistory(box.root, BATCH);
+    expect(h.attempt).toBe(2);
+    expect(h.interruptedAt).toBeDefined();
+    // Must contain 'orphaned' as the stop reason.
+    expect(h.interruptedAt).toContain('orphaned');
+    // The event type must come from stream.ndjson, NOT be 'worker.started'.
+    expect(h.interruptedAt).not.toContain('worker.started');
+    // The stream event type should appear in interrupted_at.
+    expect(h.interruptedAt).toContain('tool_use');
+  });
+
+  it('orphaned run without stream.ndjson falls back to journal last event', () => {
+    const orphanRunId = 'r-20260101-000001';
+
+    // Journal only, no stream.ndjson.
+    writeJournalEvent(box.root, orphanRunId, {
+      ts: '2026-01-01T00:00:00.000Z',
+      run_id: orphanRunId,
+      batch_id: BATCH,
+      event: 'batch.selected',
+      base_sha: 'bbbb000000000000000000000000000000000000',
+    });
+    writeJournalEvent(box.root, orphanRunId, {
+      ts: '2026-01-01T00:00:01.000Z',
+      run_id: orphanRunId,
+      batch_id: BATCH,
+      event: 'worker.started',
+    });
+
+    const h = batchHistory(box.root, BATCH);
+    expect(h.interruptedAt).toContain('orphaned');
+    // Without stream.ndjson, falls back to journal last event.
+    expect(h.interruptedAt).toContain('worker.started');
+  });
+
+  it('renderInterruptSection shows fallback text when no rescue_sha', async () => {
+    // Run 1: worker killed with a clean workspace (no rescue commit).
+    const cleanKill: FakeScene = {
+      expectRole: 'worker',
+      // No files written — workspace stays clean, so no rescue commit.
+      effect: async ({ handle }: FakeSceneContext) => {
+        await handle.stop('kill');
+      },
+      result: { exitCode: 1 },
+    };
+    const r1 = new FakeRunner([cleanKill]);
+    await box.run(r1);
+
+    // Verify no rescue_sha in history.
+    const h = batchHistory(box.root, BATCH);
+    expect(h.rescueSha).toBeUndefined();
+
+    // Run 2: check that the task.md includes the fallback text.
+    const r2 = new FakeRunner([
+      workerScene(box, { passing: 5, failing: 0, push: true, claims: honestClaims(5, true) }),
+      fooledReviewerScene(box),
+    ]);
+    await box.run(r2);
+
+    const taskContent = box.read(`.collie/batches/${BATCH}/task.md`);
+    expect(taskContent).toContain('## 上一轮中断');
+    expect(taskContent).toContain('上一轮未留下救援提交');
+    expect(taskContent).toContain('git log');
   });
 });

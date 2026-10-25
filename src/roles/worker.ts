@@ -135,6 +135,10 @@ function renderInterruptSection(ctx: TaskContext): string {
     lines.push(`救援提交：\`${ctx.rescue_sha}\``);
     lines.push('');
     lines.push(`请先核实 \`${ctx.rescue_sha}\` 中的半成品是否完整，不要把它当作已完成。`);
+  } else {
+    // SPEC 11.7 (v02-e-fix): fallback when no rescue commit was created.
+    lines.push('');
+    lines.push('上一轮未留下救援提交，请从 `git log` 核实已完成到哪一步。');
   }
   lines.push('');
   return lines.join('\n');

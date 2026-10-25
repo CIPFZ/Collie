@@ -224,6 +224,39 @@ function appendStream(root: string, runId: string, event: unknown): void {
 }
 
 /**
+ * SPEC 11.7 (v02-e-fix): reads the last line of stream.ndjson for a run,
+ * extracting an event type and timestamp.  Used as a fallback when the journal
+ * has no `run.finished` (R2 crashed before writing it).
+ */
+function readStreamLastEvent(
+  root: string,
+  runId: string,
+): { type: string; ts: string } | undefined {
+  const streamPath = join(root, RUNS_RELATIVE_DIR, runId, STREAM_FILE_NAME);
+  let content: string;
+  try {
+    content = readFileSync(streamPath, 'utf8').trimEnd();
+  } catch {
+    return undefined;
+  }
+  if (content === '') return undefined;
+  const lastLine = content.split('\n').at(-1);
+  if (lastLine === undefined || lastLine.trim() === '') return undefined;
+  try {
+    const parsed: unknown = JSON.parse(lastLine);
+    if (typeof parsed === 'object' && parsed !== null) {
+      const obj = parsed as Record<string, unknown>;
+      const type = typeof obj.type === 'string' ? obj.type : 'unknown';
+      const ts = typeof obj.ts === 'string' ? obj.ts : '';
+      return { type, ts };
+    }
+  } catch {
+    // Corrupted last line: ignore.
+  }
+  return undefined;
+}
+
+/**
  * Dirty-workspace rescue (SPEC 11.4): if the working tree is not clean after
  * the worker exits, `git add -A && git commit -m "wip(collie): <batch_id> rescue"`.
  * Returns the rescue sha and file list, or undefined when the tree was clean.
@@ -449,16 +482,38 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
       // Build interrupted_at from the last run's info.
       const finished = batchEvents.findLast((e) => e.event === 'run.finished');
       const workerFinished = batchEvents.findLast((e) => e.event === 'worker.finished');
-      const lastEvent = batchEvents.at(-1);
-      const runId = lastEvent?.run_id ?? '';
+
+      // SPEC 11.7 (v02-e-fix): end reason priority:
+      // worker_stop_reason → result → orphaned → unknown.
+      // When there is no run.finished (R2 crashed), the run was orphaned.
       const stopReason =
         typeof finished?.worker_stop_reason === 'string'
           ? finished.worker_stop_reason
           : typeof finished?.result === 'string'
             ? finished.result
-            : 'unknown';
-      const lastType = lastEvent?.event ?? 'unknown';
-      const lastTs = lastEvent?.ts ?? '';
+            : finished === undefined
+              ? 'orphaned'
+              : 'unknown';
+
+      // SPEC 11.7 (v02-e-fix): when journal has no run.finished, fall back to
+      // stream.ndjson for the last event (worker events streamed in real-time).
+      let lastType: string;
+      let lastTs: string;
+      if (finished === undefined) {
+        const streamEvent = readStreamLastEvent(root, runId);
+        if (streamEvent !== undefined) {
+          lastType = streamEvent.type;
+          lastTs = streamEvent.ts;
+        } else {
+          const journalLast = batchEvents.at(-1);
+          lastType = journalLast?.event ?? 'unknown';
+          lastTs = journalLast?.ts ?? '';
+        }
+      } else {
+        const journalLast = batchEvents.at(-1);
+        lastType = journalLast?.event ?? 'unknown';
+        lastTs = journalLast?.ts ?? '';
+      }
       interruptedAt = `${runId} ${stopReason} ${lastType}@${lastTs}`;
 
       // Session ID from worker.finished for resume eligibility.
