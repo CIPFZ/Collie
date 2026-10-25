@@ -100,6 +100,18 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(content).toContain('redact');
   });
 
+  it('src/runner/claude.ts uses detached: true for worker subprocess (v02-e-fix)', () => {
+    const content = readFileSync(join(ROOT, 'src/runner/claude.ts'), 'utf8');
+    expect(content).toContain('detached: true');
+  });
+
+  it('src/run.ts does not use baseSha: taskSha for evidence (v02-e-fix)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    // SPEC 11.7: evidence and reviewer must use the first run's base_sha,
+    // not the task commit sha. This pattern must not appear.
+    expect(content).not.toMatch(/baseSha: taskSha/);
+  });
+
   it('only src/run.ts and src/evidence.ts access .token_file (v02-e-drill)', () => {
     let output: string;
     try {

@@ -14,6 +14,7 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
+import { spawn } from 'node:child_process';
 import { arbitrate, type ArbiterDecision } from './arbiter.js';
 import { loadBacklog } from './backlog.js';
 import type { Clock, FetchLike } from './ci.js';
@@ -274,6 +275,90 @@ function realDelay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+/**
+ * SPEC 11.3: guard daemon interval in milliseconds. The daemon polls every
+ * GUARD_POLL_MS to check if R2 is still alive; when it's gone, it kills the
+ * worker subprocess and exits.
+ */
+// eslint-disable-next-line no-restricted-syntax -- SPEC 11.3: guard daemon poll interval, not a tunable threshold
+const GUARD_POLL_MS = 2000;
+
+/**
+ * SPEC 11.3: spawns a guard daemon that watches R2's pid and the worker's pid.
+ * The daemon is a minimal `node -e` script, detached from R2's process group,
+ * so it survives R2 being SIGKILL'd. It polls every 2 seconds; if R2 (r2Pid)
+ * disappears, it sends SIGKILL to workerPid and exits.
+ * Returns the daemon's pid so it can be written to the heartbeat.
+ */
+export function spawnGuardDaemon(r2Pid: number, workerPid: number): number {
+  const script = [
+    `const r2 = ${String(r2Pid)}, w = ${String(workerPid)};`,
+    `const iv = setInterval(() => {`,
+    `  try { process.kill(r2, 0); } catch {`,
+    `    try { process.kill(w, 'SIGKILL'); } catch {}`,
+    `    clearInterval(iv);`,
+    `    process.exit(0);`,
+    `  }`,
+    `}, ${String(GUARD_POLL_MS)});`,
+  ].join(' ');
+  const child = spawn(process.execPath, ['-e', script], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+  const pid = child.pid;
+  if (pid === undefined) throw new Error('guard daemon did not start (no pid)');
+  return pid;
+}
+
+/**
+ * SPEC 11.3: kills the guard daemon cleanly when no longer needed.
+ */
+function killGuard(guardPid: number | undefined): void {
+  if (guardPid === undefined) return;
+  try {
+    process.kill(guardPid, 'SIGTERM');
+  } catch {
+    // Already dead — expected.
+  }
+}
+
+/**
+ * SPEC 11.3: R2 registers exit/signal handlers to send SIGTERM to the worker
+ * process group (-pid) when R2 is exiting normally or via SIGTERM/SIGINT.
+ * Returns a cleanup function that removes the handlers.
+ */
+function registerWorkerKillHandlers(getWorkerPid: () => number | undefined): () => void {
+  const killWorkerGroup = (): void => {
+    const pid = getWorkerPid();
+    if (pid === undefined) return;
+    try {
+      // Negative pid sends to the process group (detached: true gives the
+      // worker its own group).
+      process.kill(-pid, 'SIGTERM');
+    } catch {
+      // Process (group) already dead — expected.
+    }
+  };
+
+  const onExit = (): void => {
+    killWorkerGroup();
+  };
+  const onSignal = (): void => {
+    killWorkerGroup();
+  };
+
+  process.on('exit', onExit);
+  process.on('SIGTERM', onSignal);
+  process.on('SIGINT', onSignal);
+
+  return () => {
+    process.removeListener('exit', onExit);
+    process.removeListener('SIGTERM', onSignal);
+    process.removeListener('SIGINT', onSignal);
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -626,8 +711,21 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     // SPEC 11.2 (v02-b05-fix): the spawn hook calls onPid as soon as the
     // subprocess pid is known, which may be after onStarted. R2 writes it to
     // the heartbeat here instead of reading handle.pid in onStarted.
+    // SPEC 11.3 (v02-e-fix): also starts the guard daemon and registers
+    // signal handlers so the worker dies with R2.
+    let guardPid: number | undefined;
+    let removeKillHandlers: (() => void) | undefined;
     const onPid = (pid: number): void => {
       updateHeartbeat(root, { worker_pid: pid, updated_at: ctx.now().toISOString() });
+      // SPEC 11.3: R2 registers exit/SIGTERM/SIGINT handlers to kill the worker group.
+      removeKillHandlers = registerWorkerKillHandlers(() => workerHandle?.pid);
+      // SPEC 11.3: spawn a guard daemon that kills the worker if R2 is SIGKILL'd.
+      try {
+        guardPid = spawnGuardDaemon(process.pid, pid);
+        updateHeartbeat(root, { guard_pid: guardPid, updated_at: ctx.now().toISOString() });
+      } catch {
+        // Guard daemon failed to start — not fatal, signal handlers still work for normal exits.
+      }
     };
 
     const cleanupTimers = (): void => {
@@ -635,6 +733,9 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       workerExitResolve?.();
       monitor.stop();
       if (wallclockTimer !== undefined) clearTimeout(wallclockTimer);
+      // SPEC 11.3 (v02-e-fix): clean up guard and signal handlers after worker exits.
+      removeKillHandlers?.();
+      killGuard(guardPid);
     };
 
     // v02-e-drill: build the redact set from token_file content and CI env vars.
@@ -722,8 +823,13 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
 
     // Worker output is taskSha..head_sha: the task commit is R2's, not the worker's (SPEC 3.3).
     const outcome = await withHeadWorktree(root, batchId, report.head_sha, async (tree) => {
-      // SPEC 11.3: heartbeat transitions to reviewer phase.
-      updateHeartbeat(root, { phase: 'reviewer', updated_at: ctx.now().toISOString() });
+      // SPEC 11.3 (v02-e-fix): reviewer phase clears worker_pid from heartbeat —
+      // the worker is done, so its pid is no longer relevant for orphan detection.
+      updateHeartbeat(root, {
+        phase: 'reviewer',
+        worker_pid: null,
+        updated_at: ctx.now().toISOString(),
+      });
 
       // E5: the reviewer works in the head_sha worktree, where report.md does not exist (SPEC 3.5).
       let finalText: string | undefined;
@@ -734,7 +840,9 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
           config,
           {
             batch_id: batchId,
-            base_sha: taskSha,
+            // SPEC 11.7 (v02-e-fix): use the first run's base_sha for the reviewer,
+            // not taskSha. This means attempt ≥ 2 diffs include prior attempt commits.
+            base_sha: baseSha,
             head_sha: report.head_sha,
             items: batch.items,
             acceptance: batch.acceptance,
@@ -761,7 +869,12 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         root,
         verifyCwd: tree,
         remote: ctx.remote,
-        baseSha: taskSha,
+        // SPEC 11.7 (v02-e-fix): use the first run's base_sha for commits_actual,
+        // not taskSha. attempt ≥ 2 evidence thus includes prior attempt commits.
+        baseSha,
+        // SPEC 11.7 (v02-e-fix): protectedDiff and deps use the current run's
+        // taskSha so R2's own progress commits don't trigger arbiter rule 2.
+        taskSha,
         headSha: report.head_sha,
         commands: verifyCommands(config.verify.commands, batch),
         config,

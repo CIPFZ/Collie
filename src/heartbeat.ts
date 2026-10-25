@@ -18,6 +18,8 @@ export const HeartbeatSchema = z.strictObject({
   pid: z.number().int().positive(),
   /** SPEC 11.3: RunHandle.pid of the worker subprocess, if available. */
   worker_pid: z.number().int().positive().optional(),
+  /** SPEC 11.3: pid of the guard daemon that kills the worker when R2 dies. */
+  guard_pid: z.number().int().positive().optional(),
   /** SPEC 11.3: current pipeline phase (worker | reviewer | ci | arbiter). */
   phase: HeartbeatPhaseSchema,
   started_at: z.iso.datetime({ offset: true }),
@@ -70,7 +72,12 @@ export function touchHeartbeat(root: string, updatedAt: string): void {
  */
 export function updateHeartbeat(
   root: string,
-  updates: { phase?: HeartbeatPhase; worker_pid?: number; updated_at: string },
+  updates: {
+    phase?: HeartbeatPhase;
+    worker_pid?: number | null;
+    guard_pid?: number;
+    updated_at: string;
+  },
 ): void {
   const hbFile = heartbeatPath(root);
   let raw: string;
@@ -81,19 +88,23 @@ export function updateHeartbeat(
     return;
   }
   const data = HeartbeatSchema.parse(JSON.parse(raw));
-  atomicWrite(
-    hbFile,
-    JSON.stringify(
-      {
-        ...data,
-        ...(updates.phase !== undefined ? { phase: updates.phase } : {}),
-        ...(updates.worker_pid !== undefined ? { worker_pid: updates.worker_pid } : {}),
-        updated_at: updates.updated_at,
-      },
-      null,
-      JSON_INDENT,
-    ) + '\n',
-  );
+  // worker_pid=null means "remove the field" (SPEC 11.3: reviewer phase clears worker_pid).
+  const merged = {
+    ...data,
+    ...(updates.phase !== undefined ? { phase: updates.phase } : {}),
+    ...(updates.worker_pid === null
+      ? {}
+      : updates.worker_pid !== undefined
+        ? { worker_pid: updates.worker_pid }
+        : {}),
+    ...(updates.guard_pid !== undefined ? { guard_pid: updates.guard_pid } : {}),
+    updated_at: updates.updated_at,
+  };
+  // If worker_pid is explicitly set to null, remove it from the merged object.
+  if (updates.worker_pid === null) {
+    delete (merged as Record<string, unknown>).worker_pid;
+  }
+  atomicWrite(hbFile, JSON.stringify(merged, null, JSON_INDENT) + '\n');
 }
 
 /** Removes the heartbeat file (called when a run finishes normally). */
@@ -146,9 +157,12 @@ export function checkHeartbeat(root: string): HeartbeatCheck {
     return { status: 'none' };
   }
   const data = parsed.data;
-  // SPEC 11.3: if either the R2 pid or the worker subprocess pid is alive,
+  // SPEC 11.3: if any of pid / worker_pid / guard_pid is alive,
   // another instance is running — refuse to start.
   const pidAlive = isProcessAlive(data.pid);
   const workerPidAlive = data.worker_pid !== undefined && isProcessAlive(data.worker_pid);
-  return pidAlive || workerPidAlive ? { status: 'alive', data } : { status: 'orphan', data };
+  const guardPidAlive = data.guard_pid !== undefined && isProcessAlive(data.guard_pid);
+  return pidAlive || workerPidAlive || guardPidAlive
+    ? { status: 'alive', data }
+    : { status: 'orphan', data };
 }

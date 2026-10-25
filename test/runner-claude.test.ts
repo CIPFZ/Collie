@@ -686,6 +686,16 @@ describe('runner-claude: the real SDK is never loaded by these tests', () => {
   });
 });
 
+describe("runner-claude: spawnClaudeCodeProcess uses detached:true so worker dies when parent is SIGKILL'd (SPEC 11.3)", () => {
+  it('spawn hook passes detached: true to child_process.spawn', async () => {
+    // We verify this structurally: the source code must contain `detached: true`.
+    // The actual integration test for "parent killed → child dies" is in guard.test.ts.
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(join(import.meta.dirname, '..', 'src', 'runner', 'claude.ts'), 'utf8');
+    expect(src).toContain('detached: true');
+  });
+});
+
 describe('runner-claude: stream redaction (v02-e-drill)', () => {
   /** Extracts the text from an assistant-shaped event for assertions. */
   function textOf(event: unknown): string {

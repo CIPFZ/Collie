@@ -42,6 +42,16 @@ export const PROTECTED_PATHS: readonly string[] = [
   '.collie/collie.toml',
 ];
 
+/**
+ * SPEC 11.7 (v02-e-fix): protected paths minus those R2 itself writes between
+ * runs.  Used for the baseSha..taskSha range of multi-attempt evidence so that
+ * R2's own progress commits don't falsely trigger arbiter rule 2, while rescue-
+ * committed SPEC.md (etc.) changes still count.
+ */
+const PROTECTED_MINUS_R2: readonly string[] = PROTECTED_PATHS.filter(
+  (p) => p !== 'docs/progress.md',
+);
+
 // eslint-disable-next-line no-restricted-syntax -- unit conversion, not a threshold
 const MS_PER_SECOND = 1000;
 const STRONG_COPYLEFT = /\b(?:A?GPL|SSPL)\b/i;
@@ -53,7 +63,18 @@ export interface EvidenceInput {
   /** Where acceptance commands run; defaults to root. R2 passes a head_sha worktree. */
   verifyCwd?: string;
   remote: string;
+  /**
+   * SPEC 11.7 (v02-e-fix): base for commits_actual — the first run's base_sha
+   * so that attempt ≥ 2 evidence includes prior attempt commits.
+   */
   baseSha: string;
+  /**
+   * SPEC 11.7 (v02-e-fix): base for protected-path diff and dependency diff.
+   * Uses the current run's task commit so R2's own progress commits (between
+   * baseSha and taskSha) do not trigger arbiter rule 2.  Falls back to baseSha
+   * when omitted (single-attempt runs where baseSha === taskSha).
+   */
+  taskSha?: string;
   headSha: string;
   /** Global verify commands first, then the batch acceptance (SPEC 3.1 [verify]). */
   commands: readonly Acceptance[];
@@ -157,7 +178,27 @@ export async function collectEvidence(input: EvidenceInput): Promise<CollectedEv
   const headSha = await revParse(root, input.headSha);
 
   const commits = await log(root, baseSha, headSha);
-  const protectedDiff = await diffStat(root, baseSha, headSha, PROTECTED_PATHS);
+
+  // SPEC 11.7 (v02-e-fix): for multi-attempt runs, split the protected-path
+  // diff into two ranges so R2's own progress.md commits (between baseSha and
+  // taskSha) don't trigger arbiter rule 2, while rescue-committed SPEC.md
+  // changes from prior attempts still count.
+  let specDiffLines: number;
+  if (input.taskSha !== undefined && input.taskSha !== baseSha) {
+    // Prior attempts (baseSha..taskSha): exclude docs/progress.md (R2 writes it).
+    const priorProtected = await diffStat(root, baseSha, input.taskSha, PROTECTED_MINUS_R2);
+    // Current attempt (taskSha..headSha): all protected paths.
+    const currentProtected = await diffStat(root, input.taskSha, headSha, PROTECTED_PATHS);
+    specDiffLines =
+      priorProtected.added +
+      priorProtected.deleted +
+      currentProtected.added +
+      currentProtected.deleted;
+  } else {
+    const protectedDiff = await diffStat(root, baseSha, headSha, PROTECTED_PATHS);
+    specDiffLines = protectedDiff.added + protectedDiff.deleted;
+  }
+
   const deps = await dependencyDiff(root, baseSha, headSha);
 
   let remoteHasHead = false;
@@ -262,7 +303,7 @@ export async function collectEvidence(input: EvidenceInput): Promise<CollectedEv
     ci_run_url: !remoteHasHead || 'error' in ci ? '' : (ci.runUrl ?? ''),
     ci_branch_matched: !remoteHasHead || 'error' in ci ? null : ci.branchMatched,
     deps_diff: deps,
-    spec_diff_lines: protectedDiff.added + protectedDiff.deleted,
+    spec_diff_lines: specDiffLines,
   };
   return {
     evidence,

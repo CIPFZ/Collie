@@ -145,6 +145,18 @@ describe('heartbeat: checkHeartbeat', () => {
     const result = checkHeartbeat(root);
     expect(result.status).toBe('orphan');
   });
+
+  it('returns "alive" when guard_pid is alive even if pid and worker_pid are dead (SPEC 11.3)', () => {
+    writeHeartbeat(root, validData({ pid: 999999, worker_pid: 999998, guard_pid: process.pid }));
+    const result = checkHeartbeat(root);
+    expect(result.status).toBe('alive');
+  });
+
+  it('returns "orphan" when pid, worker_pid, and guard_pid are all dead', () => {
+    writeHeartbeat(root, validData({ pid: 999999, worker_pid: 999998, guard_pid: 999997 }));
+    const result = checkHeartbeat(root);
+    expect(result.status).toBe('orphan');
+  });
 });
 
 describe('heartbeat: updateHeartbeat changes phase and worker_pid', () => {

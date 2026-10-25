@@ -260,6 +260,8 @@ export class ClaudeRunner implements AgentRunner {
         cwd: options.cwd,
         env: cleanEnv,
         signal: options.signal,
+        // SPEC 11.3: detached so R2 can send SIGTERM to the process group.
+        detached: true,
       });
       workerPid = child.pid;
       // SPEC 11.2 (v02-b05-fix): notify R2 of the worker pid immediately,
