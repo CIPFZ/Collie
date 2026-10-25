@@ -406,4 +406,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v02-e-fix · r-20261025-083535 · PASS
+
+- 时间：2026-10-25T09:13:10.873Z
+- 裁定：规则 10，All 8 acceptance commands pass (exit code 0). All three items fully implemented with tests. Commits pushed to origin/main. No protected files modified, no dependency changes. CI unavailable (no GH credentials) — ci_conclusion: unknown, CI 以 R2 取证为准.
+- 提交：`e67a2f6` `6d777f6`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，670 passed, 0 failed
+  - `npm test -- test/scenario-e.test.ts` → exit 0，13 passed, 0 failed
+  - `grep -qE "detached: true" src/runner/claude.ts && grep -qE "guard_pid" src/heartbeat.ts && grep -qiE "parent.*(killed|dies|SIGKILL)" test/runner-claude.test.ts test/guard.test.ts` → exit 0，exit 0
+  - `! grep -qE "baseSha: taskSha" src/run.ts && grep -qE "commits_actual" test/scenario-e.test.ts` → exit 0，exit 0
+  - `grep -qE "orphaned" test/scenario-e.test.ts && grep -qE "stream\.ndjson|appendStream|readStream" src/run.ts` → exit 0，exit 0
+  - `grep -qE "detached: true|baseSha: taskSha" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/40179384604
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
