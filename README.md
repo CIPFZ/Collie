@@ -79,4 +79,10 @@ TypeScript + Node 22 LTS + ESM。选型理由见 [ADR-001](./docs/decisions/ADR-
 并行写入、多项目共享状态、让 Agent 自判是否求助、自建编排框架、
 工具级审批交给人、可观测框架。理由见 [ROADMAP.md](./ROADMAP.md) 第 11 节。
 
+## 中断与恢复
+
+Worker 被 kill 后，Collie 自动以 `wip(collie): <batch_id> rescue` 提交保存脏工作区，下一轮的 `task.md` 会标注中断位置与 `rescue_sha`。
+新一轮 worker 启动时读取上一轮的 `session_id`，以 `--resume` 恢复会话上下文继续执行。
+如需查看中断详情，运行 `collie show <batch_id>`，末尾的「中断链」段按 attempt 列出 `run.orphaned` / `worker.rescued` / `worker.resumed` 事件。
+
 Collie 用 Collie 跑过的第一个批次：v01-b05-smoke
