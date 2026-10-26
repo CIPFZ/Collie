@@ -198,4 +198,23 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(content).toContain('escalated');
     expect(content).toContain('queue.finished');
   });
+
+  it('src/cli.ts does not contain "rule 0" (v03-b03-fix)', () => {
+    const content = readFileSync(join(ROOT, 'src/cli.ts'), 'utf8');
+    // SPEC 4.3: escalation path is not "rule 0", it's "上報：無 report".
+    expect(content).not.toMatch(/rule 0/);
+  });
+
+  it('src/evidence.ts contains report(collie) in R2 commit prefixes (v03-b03-fix)', () => {
+    const content = readFileSync(join(ROOT, 'src/evidence.ts'), 'utf8');
+    // SPEC 11.7: evidence filtering must recognise report(collie) commits.
+    expect(content).toContain('report(collie)');
+  });
+
+  it('src/run.ts contains sdk_stop_reason for ladder-overridden stops (v03-b03-fix)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    // SPEC 11.7: when the signal ladder fires, the SDK's original stop_reason
+    // goes into sdk_stop_reason.
+    expect(content).toContain('sdk_stop_reason');
+  });
 });

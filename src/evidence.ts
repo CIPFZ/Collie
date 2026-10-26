@@ -43,14 +43,21 @@ export const PROTECTED_PATHS: readonly string[] = [
 ];
 
 /**
- * SPEC 11.7 (v02-e-fix): protected paths minus those R2 itself writes between
- * runs.  Used for the baseSha..taskSha range of multi-attempt evidence so that
- * R2's own progress commits don't falsely trigger arbiter rule 2, while rescue-
- * committed SPEC.md (etc.) changes still count.
+ * SPEC 11.7 (v03-b03-fix): commit-message prefixes of R2/operator envelope
+ * commits. These are not worker output and must be skipped in commits_actual
+ * and per-commit diffs for arbiter rules 2 and 3.
  */
-const PROTECTED_MINUS_R2: readonly string[] = PROTECTED_PATHS.filter(
-  (p) => p !== 'docs/progress.md',
-);
+export const R2_COMMIT_PREFIXES: readonly string[] = [
+  'docs: issue ',
+  'progress: ',
+  'report(collie): ',
+  'ops: ',
+];
+
+/** True when the commit subject starts with an R2/operator prefix (SPEC 11.7 v03-b03-fix). */
+export function isR2Commit(subject: string): boolean {
+  return R2_COMMIT_PREFIXES.some((prefix) => subject.startsWith(prefix));
+}
 
 // eslint-disable-next-line no-restricted-syntax -- unit conversion, not a threshold
 const MS_PER_SECOND = 1000;
@@ -179,24 +186,20 @@ export async function collectEvidence(input: EvidenceInput): Promise<CollectedEv
 
   const commits = await log(root, baseSha, headSha);
 
-  // SPEC 11.7 (v02-e-fix): for multi-attempt runs, split the protected-path
-  // diff into two ranges so R2's own progress.md commits (between baseSha and
-  // taskSha) don't trigger arbiter rule 2, while rescue-committed SPEC.md
-  // changes from prior attempts still count.
-  let specDiffLines: number;
-  if (input.taskSha !== undefined && input.taskSha !== baseSha) {
-    // Prior attempts (baseSha..taskSha): exclude docs/progress.md (R2 writes it).
-    const priorProtected = await diffStat(root, baseSha, input.taskSha, PROTECTED_MINUS_R2);
-    // Current attempt (taskSha..headSha): all protected paths.
-    const currentProtected = await diffStat(root, input.taskSha, headSha, PROTECTED_PATHS);
-    specDiffLines =
-      priorProtected.added +
-      priorProtected.deleted +
-      currentProtected.added +
-      currentProtected.deleted;
-  } else {
-    const protectedDiff = await diffStat(root, baseSha, headSha, PROTECTED_PATHS);
-    specDiffLines = protectedDiff.added + protectedDiff.deleted;
+  // SPEC 11.7 (v03-b03-fix): filter out R2/operator commits from commits_actual
+  // and from the per-commit diffs for arbiter rules 2 and 3.
+  const workerCommits = commits.filter((c) => !isR2Commit(c.subject));
+
+  // SPEC 11.7 (v03-b03-fix): protected-path diff is computed per worker commit,
+  // skipping R2 commits entirely. This replaces the prior two-range approach
+  // (baseSha..taskSha with PROTECTED_MINUS_R2, then taskSha..headSha with
+  // PROTECTED_PATHS) because it is both simpler and more correct: any R2 commit
+  // (not just progress) is excluded, and rescue-committed SPEC.md changes still
+  // count because rescue commits have the "wip(collie):" prefix, not an R2 prefix.
+  let specDiffLines = 0;
+  for (const c of workerCommits) {
+    const stat = await diffStat(root, `${c.sha}^`, c.sha, PROTECTED_PATHS);
+    specDiffLines += stat.added + stat.deleted;
   }
 
   const deps = await dependencyDiff(root, baseSha, headSha);
@@ -293,7 +296,8 @@ export async function collectEvidence(input: EvidenceInput): Promise<CollectedEv
   const testCommand = verify.find((r) => r.tests !== undefined)?.cmd;
 
   const evidence: Evidence = {
-    commits_actual: commits.map((c) => c.sha),
+    // SPEC 11.7 (v03-b03-fix): only worker commits, R2/operator commits excluded.
+    commits_actual: workerCommits.map((c) => c.sha),
     verify_results: verify.map((r) => ({ cmd: r.cmd, exit_code: r.exit_code, summary: r.summary })),
     remote_has_head: remoteHasHead,
     ci_conclusion: 'error' in ci ? 'unknown' : foldConclusion(ci),

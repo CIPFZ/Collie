@@ -20,6 +20,7 @@ import { BACKLOG_RELATIVE_PATH, loadBacklog, setBatchStatus } from './backlog.js
 import { queryCi, type Clock, type FetchLike } from './ci.js';
 import { loadConfig } from './config.js';
 import { collectEvidence, type Evidence } from './evidence.js';
+import { isR2Commit } from './evidence.js';
 import {
   addWorktree,
   commit,
@@ -507,6 +508,12 @@ export interface BatchHistory {
   lastSessionId: string | undefined;
   /** Number of times resume has been used for this batch. */
   resumeCount: number;
+  /**
+   * SPEC 11.7 (v03-b03-fix): true when the last interrupted run exited cleanly
+   * (worker.finished present, no worker.rescued). When true and the remote
+   * contains the last non-R2 commit, the session should NOT be resumed.
+   */
+  lastRunClean: boolean;
 }
 
 /** All journal events of every run that touched `batchId`, oldest run first. */
@@ -538,6 +545,7 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
   let rescueSha: string | undefined;
   let lastSessionId: string | undefined;
   let resumeCount = 0;
+  let lastRunClean = false;
 
   // SPEC 11.7 (v02-e-fix2): the excluded run (the current run) may contain
   // run.orphaned events with heartbeat updated_at timestamps, and worker.rescued
@@ -590,17 +598,22 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
       const finished = batchEvents.findLast((e) => e.event === 'run.finished');
       const workerFinished = batchEvents.findLast((e) => e.event === 'worker.finished');
 
-      // SPEC 11.7 (v02-e-fix): end reason priority:
-      // worker_stop_reason → result → orphaned → unknown.
-      // When there is no run.finished (R2 crashed), the run was orphaned.
+      // SPEC 11.7 (v03-b03-fix): end reason priority:
+      // worker.signaled.reason → worker_stop_reason → result → orphaned → unknown.
+      // When the signal ladder fired, its reason (wallclock / stalled / idling) is
+      // the true cause; the SDK's stop_reason is a side effect of the interrupt.
+      const signaled = batchEvents.findLast((e) => e.event === 'worker.signaled');
+      const signaledReason = typeof signaled?.reason === 'string' ? signaled.reason : undefined;
+
       const stopReason =
-        typeof finished?.worker_stop_reason === 'string'
+        signaledReason ??
+        (typeof finished?.worker_stop_reason === 'string'
           ? finished.worker_stop_reason
           : typeof finished?.result === 'string'
             ? finished.result
             : finished === undefined
               ? 'orphaned'
-              : 'unknown';
+              : 'unknown');
 
       // SPEC 11.7 (v02-e-fix): when journal has no run.finished, fall back to
       // stream.ndjson for the last event (worker events streamed in real-time).
@@ -633,11 +646,18 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
       // Rescue sha from worker.rescued event in this run's journal.
       const rescued = batchEvents.findLast((e) => e.event === 'worker.rescued');
       rescueSha = typeof rescued?.sha === 'string' ? rescued.sha : undefined;
+
+      // SPEC 11.7 (v03-b03-fix): when the worker finished normally (worker.finished
+      // exists) and workspace was clean (no worker.rescued), the code is already
+      // complete. Resuming the session is wasteful — set lastRunClean so runBatch
+      // can skip resume after confirming the commits are on the remote.
+      lastRunClean = workerFinished !== undefined && rescued === undefined;
     } else {
       // PASS run: reset interrupt context, attempt does not increment.
       interruptedAt = undefined;
       rescueSha = undefined;
       lastSessionId = undefined;
+      lastRunClean = false;
     }
   }
 
@@ -648,7 +668,7 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
     rescueSha = currentRunRescueSha;
   }
 
-  return { attempt, baseSha, interruptedAt, rescueSha, lastSessionId, resumeCount };
+  return { attempt, baseSha, interruptedAt, rescueSha, lastSessionId, resumeCount, lastRunClean };
 }
 
 /**
@@ -969,10 +989,34 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
 
     // SPEC 11.7: determine resume eligibility.
     const resumeMax = config.limits.resume_max;
-    const resumeSessionId =
+    let resumeSessionId =
       history.lastSessionId !== undefined && history.resumeCount < resumeMax
         ? history.lastSessionId
         : undefined;
+
+    // SPEC 11.7 (v03-b03-fix): skip resume when the last run already pushed code
+    // and left a clean workspace (only missing report). Resuming the session is
+    // wasteful — the new worker just needs to write the report.
+    if (resumeSessionId !== undefined && history.lastRunClean) {
+      try {
+        const allCommits = await log(root, baseSha, await revParse(root, 'HEAD'));
+        const workerCommits = allCommits.filter((c) => !isR2Commit(c.subject));
+        const lastWorkerCommit = workerCommits.at(-1);
+        if (lastWorkerCommit !== undefined) {
+          const onRemote = await remoteContains(
+            root,
+            ctx.remote,
+            config.ci.expected_branch,
+            lastWorkerCommit.sha,
+          );
+          if (onRemote) {
+            resumeSessionId = undefined;
+          }
+        }
+      } catch {
+        // Remote check failed; keep the resume decision as-is.
+      }
+    }
 
     const task = buildTask(batch, {
       run_id: runId,
@@ -1006,12 +1050,16 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       workerExitResolve = r;
     });
     let ladderRunning = false;
+    // SPEC 11.7 (v03-b03-fix): the ladder reason (wallclock / stalled / idling)
+    // is the true stop_reason when the signal ladder is active.
+    let ladderReason: LadderReason | undefined;
     const graceSecs = config.limits.grace_secs;
     const ladderDelay = ctx.ladderDelay ?? realDelay;
 
     function startLadder(reason: LadderReason): void {
       if (ladderRunning || workerExited || workerHandle === undefined) return;
       ladderRunning = true;
+      ladderReason = reason;
       if (reason === 'stalled') rec.record('worker.stalled');
       if (reason === 'idling') rec.record('worker.idling');
       void runLadder({
@@ -1041,6 +1089,22 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
             startLadder('wallclock');
           }, wallclockMs)
         : undefined;
+
+    // When an external workerSignal replaces the internal timer, its abort
+    // triggers the wallclock ladder (SPEC 11.6).
+    if (ctx.workerSignal !== undefined) {
+      if (ctx.workerSignal.aborted) {
+        startLadder('wallclock');
+      } else {
+        ctx.workerSignal.addEventListener(
+          'abort',
+          () => {
+            startLadder('wallclock');
+          },
+          { once: true },
+        );
+      }
+    }
 
     // Liveness monitor (SPEC 11.5).
     const monitor = new LivenessMonitor({
@@ -1121,16 +1185,24 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         ...(redact.length > 0 ? { redact } : {}),
       });
       cleanupTimers();
-      // SPEC 11.7: track worker exit info for run.finished and progress.
+      // SPEC 11.7 (v03-b03-fix): when the signal ladder was active, the true
+      // stop_reason is the ladder reason (wallclock / stalled / idling), not the
+      // SDK's value (which is typically 'error' or 'stopped' as a side effect of
+      // the soft interrupt). The SDK's value goes into sdk_stop_reason.
+      const effectiveStopReason = ladderReason ?? result.stopReason;
       workerExitCode = result.exitCode;
-      workerStopReason = result.stopReason;
+      workerStopReason = effectiveStopReason;
       rec.record('worker.finished', {
         exit_code: result.exitCode,
         // SPEC 3.6: without it a zero-output exit cannot be explained (v01-b05-smoke).
         ...(result.finalText === undefined
           ? {}
           : { final_text: truncate(result.finalText, FINAL_TEXT_MAX) }),
-        ...(result.stopReason === undefined ? {} : { stop_reason: result.stopReason }),
+        ...(effectiveStopReason === undefined ? {} : { stop_reason: effectiveStopReason }),
+        // SPEC 11.7 (v03-b03-fix): SDK's original stop_reason when overridden by ladder.
+        ...(ladderReason !== undefined && result.stopReason !== undefined
+          ? { sdk_stop_reason: result.stopReason }
+          : {}),
         // SPEC 11.7: session_id for resume eligibility in the next attempt.
         ...(result.sessionId === undefined ? {} : { session_id: result.sessionId }),
       });
@@ -1164,11 +1236,21 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     } catch (error) {
       return await escalate(`no valid report: ${message(error)}`, baseSha);
     }
-    // head_sha is itself a claim: it must be a commit built on top of the task commit.
-    const headOk = await isAncestor(root, taskSha, report.head_sha).catch(() => false);
-    if (!headOk)
+    // SPEC 11.7 (v03-b03-fix): head_sha must descend from the first base_sha
+    // (not the current task commit — attempt 2 may reference an attempt 1 commit
+    // that is earlier than the current task commit) AND be an ancestor of or equal
+    // to the current HEAD.
+    const headDescendsFromBase = await isAncestor(root, baseSha, report.head_sha).catch(
+      () => false,
+    );
+    const resolvedHead = await revParse(root, report.head_sha).catch(() => '');
+    const currentHead = await revParse(root, 'HEAD').catch(() => '');
+    const headIsAncestorOfHEAD =
+      resolvedHead === currentHead ||
+      (await isAncestor(root, report.head_sha, currentHead).catch(() => false));
+    if (!headDescendsFromBase || !headIsAncestorOfHEAD)
       return await escalate(
-        `report head_sha ${report.head_sha} does not descend from the task commit ${taskSha}`,
+        `report head_sha ${report.head_sha} is not a descendant of base_sha ${baseSha} or not an ancestor of HEAD`,
         baseSha,
       );
 

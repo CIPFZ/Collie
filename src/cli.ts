@@ -162,10 +162,14 @@ async function run(
       ? {}
       : { livenessFingerprint: deps.livenessFingerprint }),
   });
+  // SPEC 4.3 (v03-b03-fix): escalation path (RULE_ESCALATED=0) does not prefix
+  // the summary with "rule N:"; the decision.reason already has the full message.
   const how =
     outcome.decision === undefined
       ? (outcome.escalation ?? '')
-      : `rule ${String(outcome.decision.rule)}: ${outcome.decision.reason}`;
+      : outcome.decision.rule === 0
+        ? outcome.decision.reason
+        : `rule ${String(outcome.decision.rule)}: ${outcome.decision.reason}`;
   deps.out(`${batchId} ${runId}: ${outcome.final} (${how})\n`);
   return outcome.exitCode;
 }
@@ -377,11 +381,12 @@ function audit(deps: CliDeps, runId: string): number {
   try {
     content = readFileSync(streamPath, 'utf8');
   } catch {
-    deps.err(`${REVIEWER_STREAM_FILE_NAME} not found for run ${runId}\n`);
+    // SPEC (v03-b03-fix): escalation path or worker crash means no reviewer ran.
+    deps.err(`no reviewer in run ${runId} (escalation path or worker crash); nothing to audit\n`);
     return AUDIT_EXIT.NO_DATA;
   }
   if (content.trim() === '') {
-    deps.err(`${REVIEWER_STREAM_FILE_NAME} is empty for run ${runId}\n`);
+    deps.err(`no reviewer in run ${runId} (escalation path or worker crash); nothing to audit\n`);
     return AUDIT_EXIT.NO_DATA;
   }
 

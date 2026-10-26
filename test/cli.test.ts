@@ -117,6 +117,18 @@ describe('cli: init, show and the R2 commits', () => {
     });
   });
 
+  it('escalation path summary does not print "rule 0:" (v03-b03-fix)', async () => {
+    // A worker that produces no report triggers the escalation path.
+    const r = new FakeRunner([{ result: { exitCode: 0 } }]);
+    const code = await box.run(r);
+    expect(code).toBe(20);
+    const output = box.output.join('');
+    // Must NOT contain "rule 0:" in the summary line.
+    expect(output).not.toContain('rule 0:');
+    // Must contain the new "上报：无 report" format.
+    expect(output).toContain('上报：无 report');
+  });
+
   it('run rejects an unknown --runner', async () => {
     expect(await box.cli(['run', BATCH, '--runner', 'gpt'], undefined)).toBe(1);
     expect(box.output.join('')).toContain('unknown runner "gpt"');
@@ -194,7 +206,8 @@ describe('cli: audit reviewer tool whitelist (SPEC 11.2 v03-b02)', () => {
 
   it('exit 2 when reviewer.stream.ndjson is missing', async () => {
     expect(await box.cli(['audit', RUN_ID], undefined)).toBe(AUDIT_EXIT.NO_DATA);
-    expect(box.output.join('')).toContain('not found');
+    // SPEC (v03-b03-fix): message says "nothing to audit" for escalation/crash path.
+    expect(box.output.join('')).toContain('nothing to audit');
   });
 
   it('exit 2 when no init message exists in the stream', async () => {

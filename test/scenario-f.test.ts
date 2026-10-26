@@ -2,8 +2,9 @@
 // an interrupt, R2 decides whether to pass resumeSessionId based on resume_max.
 // The 4th attempt (resume_max=2 by default) must NOT pass a session id.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { git } from '../src/git.js';
 import { batchHistory } from '../src/run.js';
-import type { FakeSceneContext } from '../src/runner/fake.js';
+import type { FakeScene, FakeSceneContext } from '../src/runner/fake.js';
 import { FakeRunner } from '../src/runner/fake.js';
 import {
   BATCH,
@@ -150,5 +151,41 @@ describe('scenario F: resume_max gating (SPEC 11.7)', { timeout: 30_000 }, () =>
     expect(h.resumeCount).toBe(0);
     expect(h.interruptedAt).toBeUndefined();
     expect(h.lastSessionId).toBeUndefined();
+  });
+
+  it('does not resume when last run pushed code and only report is missing (v03-b03-fix)', async () => {
+    // Run 1: worker pushes code, gets killed without writing report.
+    // worker.finished is recorded, no worker.rescued (workspace clean).
+    const workerPushNoReport: FakeScene = {
+      expectRole: 'worker',
+      effect: async ({ cwd, handle }: FakeSceneContext) => {
+        box.write('feature.txt', 'feature\n', cwd);
+        box.write('tests/t000.sh', 'exit 0\n', cwd);
+        await box.commitAll('feat: add feature with tests', cwd);
+        await git(cwd, ['push', '-q', 'origin', 'main']);
+        // Killed without writing report — workspace is clean.
+        await handle.stop('kill');
+      },
+      result: { exitCode: 1, sessionId: 'sess-pushed-clean' },
+    };
+    const r1 = new FakeRunner([workerPushNoReport]);
+    const code1 = await box.run(r1);
+    expect(code1).toBe(20); // BLOCK: no report
+
+    // History should show lastRunClean=true.
+    const h = batchHistory(box.root, BATCH);
+    expect(h.lastRunClean).toBe(true);
+    expect(h.lastSessionId).toBe('sess-pushed-clean');
+
+    // Run 2: should NOT receive resumeSessionId because the code is already
+    // pushed and workspace was clean.
+    const r2 = new FakeRunner([
+      workerScene(box, { passing: 1, failing: 0, push: true, claims: honestClaims(1, true) }),
+      fooledReviewerScene(box),
+    ]);
+    await box.run(r2);
+
+    // The worker in run 2 should NOT have received resumeSessionId.
+    expect(r2.calls[0]?.resumeSessionId).toBeUndefined();
   });
 });

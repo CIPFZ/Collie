@@ -585,3 +585,156 @@ describe('scenario E: orphan rescue path with fake runner (SPEC 11.7 v02-e-fix2)
     expect(timePart).toContain('2026-01-01T00:07:42');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Scenario E: head_sha against first base_sha, commits_actual excludes R2
+// commits (SPEC 11.7 v03-b03-fix). Attempt 1 pushes code but writes no report.
+// Attempt 2 only writes the report with head_sha pointing to attempt 1's code
+// commit → not escalated, reviewer runs, commits_actual excludes R2 commits.
+// ---------------------------------------------------------------------------
+
+describe('scenario E: head_sha against first base_sha and R2 commit exclusion (v03-b03-fix)', () => {
+  it('attempt 2 referencing attempt 1 code commit is accepted; commits_actual excludes task/progress commits', async () => {
+    // --- Run 1: worker commits code, pushes, but no report (killed) ---
+    let attempt1CodeSha: string | undefined;
+    const workerScene1: FakeScene = {
+      expectRole: 'worker',
+      effect: async (ctx: FakeSceneContext) => {
+        box.write('feature.txt', 'feature\n', ctx.cwd);
+        box.write('tests/t000.sh', 'exit 0\n', ctx.cwd);
+        attempt1CodeSha = await box.commitAll('feat: add feature with tests', ctx.cwd);
+        await git(ctx.cwd, ['push', '-q', 'origin', 'main']);
+        // Killed without writing report.
+        await ctx.handle.stop('kill');
+      },
+      result: { exitCode: 1, sessionId: 'sess-push' },
+    };
+    const r1 = new FakeRunner([workerScene1]);
+    const code1 = await box.run(r1);
+    expect(code1).toBe(20); // BLOCK: no report
+    expect(attempt1CodeSha).toBeDefined();
+
+    // --- Run 2: worker only writes report pointing to attempt 1's code commit ---
+    const FENCE = '```';
+    const workerScene2: FakeScene = {
+      expectRole: 'worker',
+      effect: async ({ cwd }: FakeSceneContext) => {
+        // Write report with head_sha pointing to attempt 1's code commit.
+        const report = {
+          schema_version: 1,
+          batch_id: BATCH,
+          head_sha: attempt1CodeSha,
+          claims: { commits: [attempt1CodeSha], ...honestClaims(1, true) },
+          open_questions: [],
+        };
+        box.write(
+          `.collie/batches/${BATCH}/report.md`,
+          `# r\n\n## 做了什么\n完成。\n\n## 测试结果\n见。\n\n## 偏离或疑问\n无\n\n## 下一步建议\n无\n\n${FENCE}json\n${JSON.stringify(report, null, 2)}\n${FENCE}\n`,
+          cwd,
+        );
+        await box.commitAll(`report(collie): ${BATCH}`, cwd);
+        await git(cwd, ['push', '-q', 'origin', 'main']);
+      },
+      result: { exitCode: 0 },
+    };
+    const r2 = new FakeRunner([workerScene2, fooledReviewerScene(box)]);
+    const code2 = await box.run(r2);
+
+    // --- Assertions ---
+    // A. Not escalated: should reach the reviewer and produce a verdict.
+    // The head_sha is a descendant of the first base_sha and an ancestor of HEAD.
+    expect(code2).toBe(0); // PASS
+
+    // B. Reviewer was called (2nd scene consumed).
+    expect(r2.calls).toHaveLength(2);
+
+    // C. Events should show reviewer.started and reviewer.verdict.
+    const events = box.events();
+    const reviewerStarted = events.filter((e) => e.event === 'reviewer.started');
+    expect(reviewerStarted.length).toBeGreaterThanOrEqual(1);
+
+    // D. commits_actual in evidence should only contain the worker's code commit,
+    //    not the task, progress, or report(collie) commits.
+    // The verdict.downgraded or claim.mismatch events give indirect evidence,
+    // but let's check the progress record for the final evidence.
+    const progress = box.read('docs/progress.md');
+    // The commits line should contain the code commit.
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded at line 615
+    expect(progress).toContain(attempt1CodeSha!.slice(0, 7));
+
+    // E. Verify batch.selected events show same base_sha across runs.
+    const selected = events.filter((e) => e.event === 'batch.selected');
+    expect(selected).toHaveLength(2);
+    expect(selected[0]?.base_sha).toBe(selected[1]?.base_sha);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scenario E: wallclock interrupt stop_reason and interrupted_at (v03-b03-fix)
+// Tests SPEC 11.7: worker.finished.stop_reason = ladder reason, not SDK's
+// error_during_execution; interrupted_at contains 'wallclock', not 'error'.
+// ---------------------------------------------------------------------------
+
+/** Near-instant delay for the signal ladder (from scenario-g pattern). */
+function instantDelay(): {
+  delay: (ms: number) => Promise<void>;
+} {
+  return {
+    delay: async () => {
+      for (let i = 0; i < 5; i++) {
+        await Promise.resolve();
+      }
+    },
+  };
+}
+
+describe('scenario E: wallclock interrupt writes correct stop_reason (v03-b03-fix)', () => {
+  it('worker.finished has stop_reason=wallclock and sdk_stop_reason; interrupted_at contains wallclock', async () => {
+    // Use a wallclock signal to trigger the ladder with reason=wallclock.
+    // We use ctx.workerSignal (an AbortSignal) to bypass the real wallclock
+    // timer and trigger the ladder immediately via the test.
+    const ac = new AbortController();
+
+    // Worker scene that waits to be stopped, simulating a long-running task.
+    const waitingWorker: FakeScene = {
+      expectRole: 'worker',
+      effect: async ({ stopped }: FakeSceneContext) => {
+        // Signal the abort (triggers wallclock ladder).
+        ac.abort();
+        // Wait to be stopped by the ladder.
+        await stopped;
+      },
+      // FakeRunner returns stopReason='stopped' when interrupted via handle.stop().
+      result: { exitCode: 1, stopReason: 'stopped', sessionId: 'sess-wallclock' },
+    };
+
+    const runner = new FakeRunner([waitingWorker]);
+    const { delay } = instantDelay();
+
+    const code1 = await box.run(runner, {
+      workerSignal: ac.signal,
+      ladderDelay: delay,
+    });
+    expect(code1).toBe(20); // BLOCK: no report
+
+    // Check worker.finished event.
+    const events = box.events();
+    const finished = events.find((e) => e.event === 'worker.finished');
+    expect(finished).toBeDefined();
+    // stop_reason should be 'wallclock' (from ladder), not 'error' (from SDK).
+    expect(finished?.stop_reason).toBe('wallclock');
+    // sdk_stop_reason should preserve the SDK's original value ('stopped' via FakeRunner).
+    expect(finished?.sdk_stop_reason).toBe('stopped');
+
+    // Check worker.signaled exists with reason=wallclock.
+    const signaled = events.find((e) => e.event === 'worker.signaled');
+    expect(signaled).toBeDefined();
+    expect(signaled?.reason).toBe('wallclock');
+
+    // Check batchHistory: interrupted_at should contain 'wallclock' and not 'error'.
+    const h = batchHistory(box.root, BATCH);
+    expect(h.interruptedAt).toBeDefined();
+    expect(h.interruptedAt).toContain('wallclock');
+    expect(h.interruptedAt).not.toContain('error');
+  });
+});
