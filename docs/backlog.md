@@ -41,6 +41,7 @@
 | 23 | v03-b01-fix | 启动补推只认失败的裁定提交，且先于救援 | v03-b01 | passed |
 | 24 | v03-b02 | 工具白名单真正生效：tools 选项、reviewer Bash 黑名单 | v03-b01-fix | passed |
 | 25 | v03-b03 | 队列消费与分流：--continue、fix_max 返工闸、backlog 状态列 | v03-b02 | pending |
+| 26 | v03-b03-fix | 中断原因取阶梯 reason、CLI 总结行、audit 区分无 reviewer | v03-b03 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -1049,4 +1050,41 @@ PASS 之后操作员改用 `--continue` 连跑，不再逐批说「跑」。
 - 为了让测试过而删除或跳过任何测试
 - 单批次模式 `collie run <batch>` 改写 backlog
 - 批次之间复用 runner、守护进程或心跳
+
+记录：第 1 次运行 r-20261026-114631 BLOCK（上报：无 report，裁定 `2ae7c51` R2 自推）。worker 跑满 2700 秒墙钟：代码 `c62deb2`、`09f229c`
+已在到期前 62 秒推送，随后又跑了 37 秒全量验证，差 5 秒没写 report。两次上下文压缩耗时约 4 分钟。信号阶梯首次真实触发，soft 后 47 毫秒退出，R2 完整收尾。
+b02 白名单在 R2 上首次生效：worker 工具清单正好 6 个。reviewer 未拉起，`collie audit` 退出码 2，硬条件未能检验。成本 $18.13。
+操作员补测 9/9 验收通过、741 全过；R1 复核 741 全过、受保护路径零改动。裁定：`wallclock_secs` 2700→3600（八处镜像）；worker 手册加「最后推送后立刻写 report、剩 10 分钟停下写」；
+对 v03-b03 跑 attempt 2（沿用 `base_sha=556049e`，两个提交进审核范围），这是「墙钟中断 → attempt 2」首次真实走通；`stop_reason` / CLI「rule 0」/ audit 语义进 v03-b03-fix。
+
+## v03-b03-fix 中断原因取阶梯 reason、CLI 总结行、audit 区分无 reviewer
+
+优先级：26　依赖：v03-b03
+
+v03-b03 第 1 次运行暴露的三处小问题。规格见 SPEC 11.7（结束原因来源）、4.3（上报措辞）、11.2（audit）。
+
+条目：
+1. `run.ts`：本轮有 `worker.signaled` 时，`worker.finished` 的 `stop_reason` 记阶梯 reason（`wallclock` / `stalled` / `idling`），SDK 原值放 `sdk_stop_reason`；
+   `batchHistory` 构造 `interrupted_at` 时按 SPEC 11.7 新顺序（`worker.signaled.reason` 最优先）。`test/scenario-g.test.ts` 或 `scenario-e` 加断言：
+   soft 中断后 `interrupted_at` 含 `wallclock` 且不含 `error`
+2. `cli.ts` 总结行：上报路径不打印 `rule 0:`，打印 `上报：无 report — <原因>`；`test/cli.test.ts` 断言输出不含 `rule 0`
+3. `collie audit`：无 reviewer 事件流时退出码仍为 2，但输出改为 `no reviewer in run <run_id> (escalation path or worker crash); nothing to audit`，
+   并在 `AGENT_KICKOFF.md` 之外不改任何文档；`test/cli.test.ts` 断言该文案。`test/invariants.test.ts` 加「`src/cli.ts` 不含字符串 `rule 0`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| stop_reason 取阶梯 | `grep -qE "sdk_stop_reason" src/run.ts && grep -qE "wallclock" test/scenario-*.test.ts` | exit 0 |
+| CLI 无 rule 0 | `! grep -qE "rule 0" src/cli.ts && grep -qE "rule 0" test/cli.test.ts` | exit 0 |
+| audit 文案 | `grep -qE "nothing to audit" src/cli.ts && grep -qE "nothing to audit" test/cli.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "rule 0\|sdk_stop_reason" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 改动信号阶梯的触发条件或 soft / hard / kill 的实现
 

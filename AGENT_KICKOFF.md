@@ -165,6 +165,8 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
 - **R1 → 你**：指令在 `docs/ops/next.md`，R1 每轮改写它并推送。你每轮开始先 `git pull --ff-only`，读 `docs/ops/next.md`，
   里面写着这一轮要跑什么、重点看什么、有没有一次性动作。它写的「基准提交」不是 HEAD 的祖先（`git merge-base --is-ancestor <sha> HEAD` 失败）就停下报告。
 - 中间人对你只会说一个字「拉」（= pull、读 next.md、照做），对 R1 只会说「看」。没有别的话就是没有别的指令。
+- `collie audit <run_id>` 的读法：退出码 0 = reviewer 工具清单等于白名单；1 = 越权，**停下、不进下一批**；
+  2 = 本轮没有 reviewer 事件流（上报路径或 worker 崩溃），不是失败，照常写汇报。
 - `docs/ops/` 是你唯一可写的仓库路径，只放这两类文件；不在里面写总结、不改别人的文件。
 
 ## 边界

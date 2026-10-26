@@ -301,7 +301,7 @@ max_turns = 10
 [limits]
 stall_secs = 300
 progress_secs = 900
-wallclock_secs = 2700
+wallclock_secs = 3600
 resume_max = 2
 fix_max = 2
 dry_k = 2

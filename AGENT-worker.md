@@ -76,6 +76,11 @@ R2 实测 `remote_has_head=false` 时，SPEC 4.3 规则 9 会把 PASS 降为 FIX
 （v02-b05 第 2 次运行 worker 全程没推送，claims 如实写了 `pushed=false`，仍被判了 PASS，这条规则由此而来。）
 report 里 `pushed` 要在推送**之后**写，写了 `false` 就是在声明这轮不会通过。
 
+**最后一次代码推送之后，立刻写 report 并推送信封，中间不再跑任何验证。** claims 里的测试数取自你提交前那次运行；
+推送后再跑一遍 lint / typecheck / test 只是重复 R2 马上要做的事（v03-b03 第 1 次：推送后又跑了 37 秒全量验证，
+墙钟到期时差 5 秒没写 report，整轮 BLOCK）。墙钟是 `wallclock_secs`（3600 秒），**剩 10 分钟时无论做到哪一步都停下写 report**，
+没做完的条目如实写进「偏离或疑问」——一个诚实的 FIX 比没有 report 的 BLOCK 好得多。
+
 推送之后**不要等 CI、不要查 CI、不要探测 token**。CI 的结论由 R2 用自己的取证核对（SPEC 4.2），
 你的 report 里 `ci_passed` 一律省略或填 `false`；填 `true` 只会在 R2 取不到证据时被判 FIX。
 v02-b02 / b03 两次都有 worker 把最后的轮次花在等 CI 和 `echo $GITHUB_TOKEN` 上，直到轮数用满。

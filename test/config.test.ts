@@ -30,7 +30,7 @@ bash_deny = ["^\\\\s*git\\\\s+(push|commit|add|reset|checkout|rebase|merge|cherr
 [limits]
 stall_secs = 300
 progress_secs = 900
-wallclock_secs = 2700
+wallclock_secs = 3600
 resume_max = 2
 fix_max = 2
 dry_k = 2
@@ -96,7 +96,7 @@ describe('config: the repository .collie/collie.toml', () => {
     expect(config.limits).toEqual({
       stall_secs: 300,
       progress_secs: 900,
-      wallclock_secs: 2700,
+      wallclock_secs: 3600,
       resume_max: 2,
       fix_max: 2,
       dry_k: 2,
@@ -239,7 +239,7 @@ describe('config: loadConfig file handling', () => {
     const root = tempRoot();
     mkdirSync(join(root, '.collie'));
     writeFileSync(join(root, '.collie', 'collie.toml'), VALID_TOML);
-    expect(loadConfig(root).limits.wallclock_secs).toBe(2700);
+    expect(loadConfig(root).limits.wallclock_secs).toBe(3600);
   });
 
   it('throws ConfigError naming the path when the file is missing', () => {
