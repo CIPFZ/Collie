@@ -141,4 +141,16 @@ describe('structural invariants (SPEC 3.2)', () => {
     // SPEC 11.7: task body must contain the 请先核实 sentence when rescue_sha exists.
     expect(worker).toContain('请先核实');
   });
+
+  it('src/git.ts exports push function (v03-b01)', () => {
+    const content = readFileSync(join(ROOT, 'src/git.ts'), 'utf8');
+    expect(content).toMatch(/export async function push\(/);
+  });
+
+  it('scenario-h.test.ts exists (v03-b01)', () => {
+    const content = readFileSync(join(ROOT, 'test/scenario-h.test.ts'), 'utf8');
+    expect(content).toContain('scenario H');
+    expect(content).toContain('verdict.downgraded');
+    expect(content).toContain('rule');
+  });
 });
