@@ -168,6 +168,10 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
 - `collie audit <run_id>` 的读法：退出码 0 = reviewer 工具清单等于白名单；1 = 越权，**停下、不进下一批**；
   2 = 本轮没有 reviewer 事件流（上报路径或 worker 崩溃），不是失败，照常写汇报。
 - `docs/ops/` 是你唯一可写的仓库路径，只放这两类文件；不在里面写总结、不改别人的文件。
+- **R1 的约束（你可以据此拒绝 next.md）**：同一批次在 attempt 之间，R1 不得往 main 推受保护路径（SPEC / CONSTRAINTS / 手册 / toml / backlog）的改动，
+  否则下一次 attempt 的取证范围会把 R1 的 diff 算到 worker 头上。next.md 若让你对一个已有 attempt 的批次再跑一次，
+  先 `git log --oneline <首次 base_sha>..HEAD -- SPEC.md CONSTRAINTS.md AGENT-*.md .collie/collie.toml docs/backlog.md`，
+  有 `r1:` 提交就停下报告，不跑。
 
 ## 边界
 
