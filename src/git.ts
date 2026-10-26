@@ -247,6 +247,11 @@ export async function diffNameOnly(cwd: string, base: string, head: string): Pro
   return out.split(NUL).filter((path) => path !== '');
 }
 
+/** Pushes `branch` to `remote` (SPEC 12.1). */
+export async function push(cwd: string, remote: string, branch: string): Promise<void> {
+  await git(cwd, ['push', '--quiet', '--end-of-options', remote, branch]);
+}
+
 /** Contents of `path` at `rev`, or undefined when the file does not exist there. */
 export async function showFile(
   cwd: string,

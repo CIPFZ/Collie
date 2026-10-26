@@ -156,6 +156,12 @@ export const EVENT_TYPES = [
   'worker.resumed',
   // v0.2 (SPEC 3.6): CI evidence successfully collected (R2's own measurement).
   'ci.resolved',
+  // v0.3 (SPEC 12.1): R2 pushes the verdict commit after progress is written.
+  'verdict.pushed',
+  // v0.3 (SPEC 12.1): push failed (network, rejected); does not alter the verdict.
+  'verdict.push_failed',
+  // v0.3 (SPEC 12.1): startup CI check of the previous verdict commit.
+  'ci.verdict_commit',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);

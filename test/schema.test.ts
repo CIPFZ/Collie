@@ -200,8 +200,8 @@ describe('schema: Event round-trip', () => {
     expect(issuePaths(EventSchema, { ...validEvent, event })).toEqual(['event']);
   });
 
-  it('defines the v0.1 event types plus v0.2 types added so far', () => {
-    expect(EVENT_TYPES).toHaveLength(21);
+  it('defines the v0.1 event types plus v0.2 and v0.3 types added so far', () => {
+    expect(EVENT_TYPES).toHaveLength(24);
     expect(EVENT_TYPES).toContain('ci.wait_timeout');
     expect(EVENT_TYPES).toContain('acceptance.failed');
     // v0.2 additions (SPEC 11.3–11.6)
@@ -213,6 +213,10 @@ describe('schema: Event round-trip', () => {
     // v0.2 additions (SPEC 11.7, 3.6)
     expect(EVENT_TYPES).toContain('worker.resumed');
     expect(EVENT_TYPES).toContain('ci.resolved');
+    // v0.3 additions (SPEC 12.1)
+    expect(EVENT_TYPES).toContain('verdict.pushed');
+    expect(EVENT_TYPES).toContain('verdict.push_failed');
+    expect(EVENT_TYPES).toContain('ci.verdict_commit');
   });
 
   it.each(['../escape', 'a/b', '', '.hidden', 'r 1'])('rejects unsafe run_id %j', (run_id) => {

@@ -17,7 +17,7 @@ import { dirname, isAbsolute, join, relative } from 'node:path';
 import { spawn } from 'node:child_process';
 import { arbitrate, type ArbiterDecision } from './arbiter.js';
 import { loadBacklog } from './backlog.js';
-import type { Clock, FetchLike } from './ci.js';
+import { queryCi, type Clock, type FetchLike } from './ci.js';
 import { loadConfig } from './config.js';
 import { collectEvidence, type Evidence } from './evidence.js';
 import {
@@ -26,6 +26,7 @@ import {
   git,
   isAncestor,
   log,
+  push,
   remoteContains,
   removeWorktree,
   revParse,
@@ -75,6 +76,9 @@ export const FINAL_TEXT_MAX = 2000;
 /** Raw event stream from the agent (SPEC 11.3), separate from Collie's own journal. */
 export const STREAM_FILE_NAME = 'stream.ndjson';
 
+/** Raw event stream from the reviewer (SPEC 12.1), same format and redaction as worker. */
+export const REVIEWER_STREAM_FILE_NAME = 'reviewer.stream.ndjson';
+
 /**
  * Dependencies approved by SPEC 2.2 and ADR-002, plus the platform SDK of the
  * Claude runner (ADR-004, named by the runner itself); rule 3 blocks anything else.
@@ -106,6 +110,8 @@ export interface RunContext {
   remote: string;
   /** Injected clock for deterministic envelopes and journal timestamps. */
   now: () => Date;
+  /** Diagnostic output for stderr (SPEC 12.1: startup CI warning). */
+  err?: (text: string) => void;
   /** Override for tests; when set, disables the internal wallclock timer. */
   workerSignal?: AbortSignal;
   /** Time source for the CI wait; tests pass a fake one. */
@@ -215,12 +221,17 @@ function persistVerdict(
   }
 }
 
-/** Appends one raw event line to .collie/runs/<run_id>/stream.ndjson (SPEC 11.3). */
-function appendStream(root: string, runId: string, event: unknown): void {
+/** Appends one raw event line to .collie/runs/<run_id>/<fileName> (SPEC 11.3, 12.1). */
+function appendStream(
+  root: string,
+  runId: string,
+  event: unknown,
+  fileName = STREAM_FILE_NAME,
+): void {
   const dir = join(root, RUNS_RELATIVE_DIR, runId);
   mkdirSync(dir, { recursive: true });
   // Raw dump: JSON.stringify never emits bare newlines, so each line is one event.
-  appendFileSync(join(dir, STREAM_FILE_NAME), JSON.stringify(event) + '\n');
+  appendFileSync(join(dir, fileName), JSON.stringify(event) + '\n');
 }
 
 /**
@@ -635,6 +646,48 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
   return { attempt, baseSha, interruptedAt, rescueSha, lastSessionId, resumeCount };
 }
 
+/**
+ * Reads the CI token from `config.ci.token_file` (SPEC 3.1).
+ * Returns undefined when the file is not configured, missing, or empty.
+ */
+function readCiToken(config: { ci: { token_file?: string } }, root: string): string | undefined {
+  if (config.ci.token_file === undefined) return undefined;
+  const raw = config.ci.token_file;
+  const tokenPath = raw.startsWith('~')
+    ? join(homedir(), raw.slice(1))
+    : isAbsolute(raw)
+      ? raw
+      : join(root, raw);
+  try {
+    const content = readFileSync(tokenPath, 'utf8').trim();
+    return content === '' ? undefined : content;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * SPEC 12.1: scans all journal events across all runs and returns the sha from
+ * the most recent `verdict.pushed` event. Returns undefined when no such event
+ * exists (first run, or all previous pushes failed).
+ */
+function findLastVerdictPushedSha(root: string): string | undefined {
+  const runsDir = join(root, RUNS_RELATIVE_DIR);
+  if (!existsSync(runsDir)) return undefined;
+  const journal = createJournal(root);
+  let lastSha: string | undefined;
+  for (const dir of readdirSync(runsDir).sort()) {
+    if (!RunIdSchema.safeParse(dir).success || !existsSync(join(runsDir, dir, EVENTS_FILE_NAME)))
+      continue;
+    for (const event of journal.replay(dir)) {
+      if (event.event === 'verdict.pushed' && typeof event.sha === 'string') {
+        lastSha = event.sha;
+      }
+    }
+  }
+  return lastSha;
+}
+
 /** Runs one batch end to end. Never throws for agent misbehaviour; only for Collie's own failures. */
 export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   const { root, batchId, runId } = ctx;
@@ -665,6 +718,14 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     removeHeartbeat(root);
   }
 
+  // SPEC 12.1: if local branch is ahead of remote, push before continuing.
+  // This catches up from a previous run whose push failed.
+  try {
+    await push(root, ctx.remote, config.ci.expected_branch);
+  } catch {
+    // Best effort: if push fails, the batch continues anyway.
+  }
+
   rec.record('run.started');
 
   // SPEC 11.3: heartbeat covers the entire run (worker → reviewer → ci → arbiter),
@@ -677,6 +738,46 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     started_at: ctx.now().toISOString(),
     updated_at: ctx.now().toISOString(),
   });
+
+  // SPEC 12.1: check CI of the most recent verdict.pushed commit at startup.
+  const lastVerdictSha = findLastVerdictPushedSha(root);
+  if (lastVerdictSha !== undefined) {
+    try {
+      const ciToken = readCiToken(config, root);
+      const ciResult = await queryCi(
+        {
+          repo: config.project.repo,
+          sha: lastVerdictSha,
+          expectedBranch: config.ci.expected_branch,
+          ...(ciToken !== undefined ? { token: ciToken } : {}),
+        },
+        ctx.fetch,
+      );
+      if (ciResult.state === 'completed' && ciResult.conclusion !== null) {
+        if (ciResult.conclusion === 'failure' || ciResult.conclusion === 'cancelled') {
+          const runUrl = ciResult.runUrl ?? '';
+          ctx.err?.(
+            `warning: previous verdict commit ${lastVerdictSha} CI ${ciResult.conclusion} (${runUrl})\n`,
+          );
+          rec.record('ci.verdict_commit', {
+            sha: lastVerdictSha,
+            conclusion: ciResult.conclusion,
+            run_url: runUrl,
+          });
+        } else if (ciResult.conclusion === 'success') {
+          rec.record('ci.verdict_commit', {
+            sha: lastVerdictSha,
+            conclusion: 'success',
+            run_url: ciResult.runUrl ?? '',
+          });
+        }
+        // Other completed conclusions: not specified, skip.
+      }
+      // no_runs, pending, rate_limited: don't record, don't warn (SPEC 12.1).
+    } catch {
+      // Best effort: CI check failure doesn't block startup.
+    }
+  }
 
   // Track the worker's exit info for run.finished and progress (SPEC 11.7).
   let workerExitCode: number | undefined;
@@ -737,6 +838,23 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       workerStopReason,
     });
     await commit(root, `progress: ${batchId} ${decision.final}`, [relative(root, progressPath)]);
+
+    // SPEC 12.1: push the escalation commit to remote.
+    try {
+      await push(root, ctx.remote, config.ci.expected_branch);
+      const pushSha = await revParse(root, 'HEAD');
+      rec.record('verdict.pushed', {
+        sha: pushSha,
+        remote: ctx.remote,
+        branch: config.ci.expected_branch,
+      });
+    } catch (pushError) {
+      rec.record('verdict.push_failed', {
+        sha: await revParse(root, 'HEAD').catch(() => 'unknown'),
+        error: message(pushError),
+      });
+    }
+
     return finish('BLOCK', { escalation: reason, decision });
   };
 
@@ -897,20 +1015,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     // v02-e-drill: build the redact set from token_file content and CI env vars.
     // The runner masks these in the event stream but never reads config or env itself.
     const redact: string[] = [];
-    if (config.ci.token_file !== undefined) {
-      const raw = config.ci.token_file;
-      const tokenPath = raw.startsWith('~')
-        ? join(homedir(), raw.slice(1))
-        : isAbsolute(raw)
-          ? raw
-          : join(root, raw);
-      try {
-        const content = readFileSync(tokenPath, 'utf8').trim();
-        if (content !== '') redact.push(content);
-      } catch {
-        // File not found or unreadable: nothing to redact from it.
-      }
-    }
+    const ciTokenValue = readCiToken(config, root);
+    if (ciTokenValue !== undefined) redact.push(ciTokenValue);
     for (const key of ['GITHUB_TOKEN', 'GH_TOKEN'] as const) {
       const val = process.env[key];
       if (val !== undefined && val !== '') redact.push(val);
@@ -990,6 +1096,10 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       // E5: the reviewer works in the head_sha worktree, where report.md does not exist (SPEC 3.5).
       let finalText: string | undefined;
       rec.record('reviewer.started', { head_sha: report.head_sha });
+      // SPEC 12.1: reviewer event stream falls to reviewer.stream.ndjson with redaction.
+      const reviewerOnEvent = (event: unknown): void => {
+        appendStream(root, runId, event, REVIEWER_STREAM_FILE_NAME);
+      };
       try {
         const reviewer = await runReviewer(
           ctx.runner,
@@ -1005,6 +1115,10 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
             spec_paths: ['SPEC.md', 'CONSTRAINTS.md'],
           },
           tree,
+          {
+            onEvent: reviewerOnEvent,
+            ...(redact.length > 0 ? { redact } : {}),
+          },
         );
         finalText = reviewer.finalText;
       } catch (error) {
@@ -1137,6 +1251,24 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     if (existsSync(verdictPath(root, batchId)))
       envelopes.push(relative(root, verdictPath(root, batchId)));
     await commit(root, `progress: ${batchId} ${decision.final}`, envelopes);
+
+    // SPEC 12.1: push the verdict commit to remote.
+    try {
+      await push(root, ctx.remote, config.ci.expected_branch);
+      const pushSha = await revParse(root, 'HEAD');
+      rec.record('verdict.pushed', {
+        sha: pushSha,
+        remote: ctx.remote,
+        branch: config.ci.expected_branch,
+      });
+    } catch (pushError) {
+      rec.record('verdict.push_failed', {
+        sha: await revParse(root, 'HEAD').catch(() => 'unknown'),
+        error: message(pushError),
+      });
+      // SPEC 12.1: push failure does not alter the conclusion or throw.
+    }
+
     return finish(decision.final, { decision });
   } catch (outerError) {
     // SPEC 11.3: exception fallback. Any unexpected error after heartbeat write
@@ -1174,6 +1306,12 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         workerStopReason,
       });
       await commit(root, `progress: ${batchId} ${decision.final}`, [relative(root, progressPath)]);
+      // SPEC 12.1: push the exception progress commit to remote.
+      try {
+        await push(root, ctx.remote, config.ci.expected_branch);
+      } catch {
+        // Best effort inside exception handler.
+      }
     } catch {
       // Best effort: if progress commit fails, continue cleanup.
     }

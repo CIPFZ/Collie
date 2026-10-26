@@ -149,6 +149,7 @@ async function run(
     fetch: deps.fetch,
     remote: deps.remote ?? 'origin',
     now: deps.now,
+    err: deps.err,
     ...(deps.workerSignal === undefined ? {} : { workerSignal: deps.workerSignal }),
     ...(deps.clock === undefined ? {} : { clock: deps.clock }),
     ...(deps.ladderDelay === undefined ? {} : { ladderDelay: deps.ladderDelay }),

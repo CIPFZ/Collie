@@ -135,7 +135,11 @@ export async function runReviewer(
   cfg: CollieConfig,
   input: ReviewerInput,
   root: string,
-  opts: { signal?: AbortSignal } = {},
+  opts: {
+    signal?: AbortSignal;
+    onEvent?: (event: unknown) => void;
+    redact?: readonly string[];
+  } = {},
 ): Promise<RunResult> {
   const tools = cfg.agent.reviewer.allowed_tools;
   const writable = tools.filter((t) => WRITE_TOOLS.includes(t));
@@ -152,6 +156,8 @@ export async function runReviewer(
     cwd: root,
     maxTurns: cfg.agent.reviewer.max_turns,
     ...(opts.signal === undefined ? {} : { signal: opts.signal }),
+    ...(opts.onEvent === undefined ? {} : { onEvent: opts.onEvent }),
+    ...(opts.redact !== undefined && opts.redact.length > 0 ? { redact: [...opts.redact] } : {}),
   });
 }
 
