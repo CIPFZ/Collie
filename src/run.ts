@@ -688,6 +688,37 @@ function findLastVerdictPushedSha(root: string): string | undefined {
   return lastSha;
 }
 
+/**
+ * SPEC 12.1 (v03-b01-fix): scans all journal events and returns the sha from
+ * the most recent `verdict.push_failed` event that has not been subsequently
+ * resolved by a `verdict.pushed` with the same sha. Returns undefined when
+ * there is no unresolved push failure.
+ */
+function findLastVerdictPushFailedSha(root: string): string | undefined {
+  const runsDir = join(root, RUNS_RELATIVE_DIR);
+  if (!existsSync(runsDir)) return undefined;
+  const journal = createJournal(root);
+  let failedSha: string | undefined;
+  for (const dir of readdirSync(runsDir).sort()) {
+    if (!RunIdSchema.safeParse(dir).success || !existsSync(join(runsDir, dir, EVENTS_FILE_NAME)))
+      continue;
+    for (const event of journal.replay(dir)) {
+      if (event.event === 'verdict.push_failed' && typeof event.sha === 'string') {
+        failedSha = event.sha;
+      }
+      // A successful push resolves the failure: no catch-up needed.
+      if (
+        event.event === 'verdict.pushed' &&
+        typeof event.sha === 'string' &&
+        event.sha === failedSha
+      ) {
+        failedSha = undefined;
+      }
+    }
+  }
+  return failedSha;
+}
+
 /** Runs one batch end to end. Never throws for agent misbehaviour; only for Collie's own failures. */
 export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   const { root, batchId, runId } = ctx;
@@ -695,6 +726,49 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   const batch = findBatch(root, batchId);
   const journal = createJournal(root);
   const rec = new Recorder(journal, runId, batchId, ctx.now);
+
+  // SPEC 12.1 (v03-b01-fix): catch-up push for a failed verdict commit.
+  // Must run BEFORE orphan detection (11.3) and rescue (11.4) so that a rescue
+  // commit is never accidentally pushed to remote.
+  const pushFailedSha = findLastVerdictPushFailedSha(root);
+  if (pushFailedSha !== undefined) {
+    try {
+      const headSha = await revParse(root, 'HEAD');
+      if (headSha !== pushFailedSha) {
+        // HEAD moved (rescue commit, worker commit, etc.) — not the verdict.
+        rec.record('verdict.push_skipped', { head: headSha, reason: 'head_is_not_verdict' });
+      } else {
+        // HEAD is the verdict commit; check remote before pushing.
+        let onRemote = false;
+        try {
+          onRemote = await remoteContains(root, ctx.remote, config.ci.expected_branch, headSha);
+        } catch {
+          // Remote unreachable: assume not on remote and attempt push.
+        }
+        if (onRemote) {
+          rec.record('verdict.push_skipped', { head: headSha, reason: 'already_on_remote' });
+        } else {
+          // verdict.push_failed sha matches HEAD and is not on remote: push it.
+          try {
+            await push(root, ctx.remote, config.ci.expected_branch);
+            rec.record('verdict.pushed', {
+              sha: headSha,
+              remote: ctx.remote,
+              branch: config.ci.expected_branch,
+            });
+          } catch (pushError) {
+            rec.record('verdict.push_failed', {
+              sha: headSha,
+              error: message(pushError),
+            });
+          }
+        }
+      }
+    } catch {
+      // Best effort: if any git command fails during catch-up, continue.
+    }
+  }
+  // No verdict.push_failed → no push, no event (SPEC 12.1).
 
   // SPEC 11.3: orphan detection — if a heartbeat file exists and the pid is dead,
   // the previous run was killed. If the pid is alive, refuse to start (铁律 7).
@@ -716,14 +790,6 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       rec.record('worker.rescued', { sha: rescue.sha, files: rescue.files });
     }
     removeHeartbeat(root);
-  }
-
-  // SPEC 12.1: if local branch is ahead of remote, push before continuing.
-  // This catches up from a previous run whose push failed.
-  try {
-    await push(root, ctx.remote, config.ci.expected_branch);
-  } catch {
-    // Best effort: if push fails, the batch continues anyway.
   }
 
   rec.record('run.started');
@@ -839,7 +905,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     });
     await commit(root, `progress: ${batchId} ${decision.final}`, [relative(root, progressPath)]);
 
-    // SPEC 12.1: push the escalation commit to remote.
+    // SPEC 12.1: push the verdict commit to remote (escalation path).
     try {
       await push(root, ctx.remote, config.ci.expected_branch);
       const pushSha = await revParse(root, 'HEAD');
@@ -1306,12 +1372,10 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         workerStopReason,
       });
       await commit(root, `progress: ${batchId} ${decision.final}`, [relative(root, progressPath)]);
-      // SPEC 12.1: push the exception progress commit to remote.
-      try {
-        await push(root, ctx.remote, config.ci.expected_branch);
-      } catch {
-        // Best effort inside exception handler.
-      }
+      // SPEC 12.1 (v03-b01-fix): exception-path commits are not pushed at
+      // this point.  The next startup's verdict.push_failed catch-up handles
+      // the normal-path failure; exception-path commits stay local until a
+      // successful run pushes the branch forward.
     } catch {
       // Best effort: if progress commit fails, continue cleanup.
     }

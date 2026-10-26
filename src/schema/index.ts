@@ -160,6 +160,8 @@ export const EVENT_TYPES = [
   'verdict.pushed',
   // v0.3 (SPEC 12.1): push failed (network, rejected); does not alter the verdict.
   'verdict.push_failed',
+  // v0.3 (SPEC 12.1): startup catch-up push skipped (fields: head, reason).
+  'verdict.push_skipped',
   // v0.3 (SPEC 12.1): startup CI check of the previous verdict commit.
   'ci.verdict_commit',
 ] as const;
