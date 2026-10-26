@@ -84,6 +84,7 @@ describe('config: the repository .collie/collie.toml', () => {
       allowed_tools: ['Read', 'Glob', 'Grep', 'Bash'],
       max_turns: 60,
       permission_mode: 'bypassPermissions',
+      bash_deny: [],
     });
   });
 

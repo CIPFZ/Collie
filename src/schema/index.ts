@@ -49,13 +49,43 @@ export const RunIdSchema = z.string().regex(RUN_ID_PATTERN, 'invalid run_id');
 export const PermissionModeSchema = z.enum(['default', 'acceptEdits', 'bypassPermissions']);
 export type PermissionMode = z.infer<typeof PermissionModeSchema>;
 
-export const AgentConfigSchema = z.strictObject({
+/** Base agent config shared by worker and reviewer (SPEC 3.1). */
+const AgentConfigBase = {
   model: NonEmptyString,
   allowed_tools: z.array(NonEmptyString),
   max_turns: z.number().int().positive(),
   permission_mode: PermissionModeSchema.optional(),
-});
+};
+
+export const AgentConfigSchema = z.strictObject(AgentConfigBase);
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
+
+/**
+ * Reviewer-specific config extends the base with bash_deny (SPEC 11.2, v03-b02).
+ * Each entry is a regex string; invalid regex is rejected at parse time.
+ */
+export const ReviewerAgentConfigSchema = z.strictObject({
+  ...AgentConfigBase,
+  /** SPEC 11.2: Bash command deny patterns (regex). Absent or empty = no hook. */
+  bash_deny: z
+    .array(z.string())
+    .optional()
+    .default([])
+    .refine(
+      (patterns) => {
+        for (const p of patterns) {
+          try {
+            new RegExp(p);
+          } catch {
+            return false;
+          }
+        }
+        return true;
+      },
+      { message: 'bash_deny contains an invalid regular expression' },
+    ),
+});
+export type ReviewerAgentConfig = z.infer<typeof ReviewerAgentConfigSchema>;
 
 export const LimitsSchema = z.strictObject({
   stall_secs: z.number().int().positive(),
@@ -81,7 +111,7 @@ export const CollieConfigSchema = z.strictObject({
   }),
   agent: z.strictObject({
     worker: AgentConfigSchema,
-    reviewer: AgentConfigSchema,
+    reviewer: ReviewerAgentConfigSchema,
   }),
   limits: LimitsSchema,
   verify: z.strictObject({
@@ -164,6 +194,8 @@ export const EVENT_TYPES = [
   'verdict.push_skipped',
   // v0.3 (SPEC 12.1): startup CI check of the previous verdict commit.
   'ci.verdict_commit',
+  // v0.3 (SPEC 11.2, v03-b02): PreToolUse hook denied a tool call.
+  'tool.denied',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);

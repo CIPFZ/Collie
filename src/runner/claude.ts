@@ -8,7 +8,7 @@
 // and derived with Pick / indexed access. Hand-written copies drift silently.
 import { spawn } from 'node:child_process';
 // prettier-ignore
-import type { Options as SdkOptions, SpawnOptions as SdkSpawnOptions, SpawnedProcess as SdkSpawnedProcess } from '@anthropic-ai/claude-agent-sdk';
+import type { Options as SdkOptions, SpawnOptions as SdkSpawnOptions, SpawnedProcess as SdkSpawnedProcess, HookInput as SdkHookInput, HookJSONOutput as SdkHookJSONOutput } from '@anthropic-ai/claude-agent-sdk';
 import type { CollieConfig } from '../schema/index.js';
 import type { AgentRunner, RunHandle, RunOptions, RunResult, Usage } from './index.js';
 
@@ -21,7 +21,9 @@ export type ClaudeQueryOptions = Pick<
   | 'model'
   | 'maxTurns'
   | 'systemPrompt'
+  | 'tools'
   | 'allowedTools'
+  | 'disallowedTools'
   | 'cwd'
   | 'abortController'
   | 'permissionMode'
@@ -30,11 +32,15 @@ export type ClaudeQueryOptions = Pick<
   | 'resume'
   | 'env'
   | 'spawnClaudeCodeProcess'
+  | 'hooks'
 >;
 
 /** Re-export SDK spawn types for test doubles (SPEC 11.2). */
 export type SpawnOptions = SdkSpawnOptions;
 export type SpawnedProcess = SdkSpawnedProcess;
+/** Re-export SDK hook types for test doubles (SPEC 11.2, v03-b02). */
+export type HookInput = SdkHookInput;
+export type HookJSONOutput = SdkHookJSONOutput;
 
 export interface ClaudeQueryParams {
   prompt: string;
@@ -270,6 +276,61 @@ export class ClaudeRunner implements AgentRunner {
       return child;
     };
 
+    /**
+     * SPEC 11.2 (v03-b02): tools the reviewer must never have, even if
+     * allowedTools accidentally included them. Matches roles/reviewer.ts WRITE_TOOLS.
+     */
+    const REVIEWER_DISALLOWED_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
+
+    /**
+     * SPEC 11.2 (v03-b02): PreToolUse hook for the reviewer's Bash command deny list.
+     * Matches each Bash command against bash_deny regexes; returns 'deny' on match.
+     */
+    const reviewerConfig = opts.role === 'reviewer' ? this.config.agent.reviewer : undefined;
+    const bashDeny: RegExp[] = (reviewerConfig?.bash_deny ?? []).map((p) => new RegExp(p));
+    const hooks: ClaudeQueryOptions['hooks'] =
+      opts.role === 'reviewer' && bashDeny.length > 0
+        ? {
+            PreToolUse: [
+              {
+                matcher: 'Bash',
+                hooks: [
+                  // eslint-disable-next-line @typescript-eslint/require-await -- SDK HookCallback requires Promise return
+                  async (input: SdkHookInput): Promise<SdkHookJSONOutput> => {
+                    const toolInput = (input as { tool_input?: unknown }).tool_input;
+                    const command =
+                      typeof toolInput === 'object' &&
+                      toolInput !== null &&
+                      typeof (toolInput as Record<string, unknown>).command === 'string'
+                        ? ((toolInput as Record<string, unknown>).command as string)
+                        : '';
+                    for (const pattern of bashDeny) {
+                      if (pattern.test(command)) {
+                        // SPEC 11.2: emit tool.denied to the event stream.
+                        opts.onEvent?.({
+                          event: 'tool.denied',
+                          role: opts.role,
+                          tool: (input as { tool_name?: string }).tool_name ?? 'Bash',
+                          command,
+                          pattern: pattern.source,
+                        });
+                        return {
+                          hookSpecificOutput: {
+                            hookEventName: 'PreToolUse' as const,
+                            permissionDecision: 'deny' as const,
+                            permissionDecisionReason: `command matches bash_deny pattern /${pattern.source}/`,
+                          },
+                        };
+                      }
+                    }
+                    return {};
+                  },
+                ],
+              },
+            ],
+          }
+        : undefined;
+
     const queryOptions: ClaudeQueryOptions = {
       // SDK isolation mode: no CLAUDE.md, settings files or hooks from the machine.
       settingSources: [],
@@ -277,7 +338,12 @@ export class ClaudeRunner implements AgentRunner {
       // The role config is authoritative; RunOptions.maxTurns may only lower it.
       maxTurns: Math.min(opts.maxTurns, agent.max_turns),
       systemPrompt: opts.systemPrompt,
+      // SPEC 11.2 (v03-b02): tools restricts the available set; allowedTools bypasses permission
+      // prompts for those tools; both must be the same list.
+      tools: [...opts.allowedTools],
       allowedTools: [...opts.allowedTools],
+      // SPEC 11.2 (v03-b02): reviewer gets disallowedTools to physically block write tools.
+      ...(opts.role === 'reviewer' ? { disallowedTools: REVIEWER_DISALLOWED_TOOLS } : {}),
       cwd: opts.cwd,
       abortController: controller,
       // SPEC 3.1: the role's permission_mode; the SDK refuses bypass without the explicit opt-in.
@@ -291,6 +357,8 @@ export class ClaudeRunner implements AgentRunner {
       env: sanitizedEnv,
       // SPEC 11.2 (v02-b04-fix3): custom subprocess spawner to capture worker pid.
       spawnClaudeCodeProcess: spawnHook,
+      // SPEC 11.2 (v03-b02): reviewer bash command deny hook.
+      ...(hooks === undefined ? {} : { hooks }),
     };
 
     // Soft stop calls interrupt() on the query iterable (SPEC 11.2 v02-b03: SDK-level
