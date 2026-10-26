@@ -371,6 +371,9 @@ type EventType =
   | 'escalated'
   | 'ci.wait_timeout'    // 等 CI 超过 ci_wait_secs 仍无结论；字段 head_sha / waited_secs / last_state
   | 'ci.resolved'        // 取到 CI 结论；字段 head_sha / conclusion / branch_matched / run_url / waited_secs / polls / attributed_sha（采信后代时）
+  | 'verdict.pushed'     // v0.3：R2 推送裁定提交；字段 sha / remote / branch
+  | 'verdict.push_failed' // v0.3：推送失败；字段 sha / error；不改变本轮结论
+  | 'ci.verdict_commit'  // v0.3：启动时核查上一条裁定提交的 CI；字段 sha / conclusion / run_url
   | 'acceptance.failed'   // 规则 8：实测验收未满足；字段 cmd / exit_code / expect
   | 'run.orphaned' | 'worker.stalled' | 'worker.idling'
   | 'worker.signaled' | 'worker.rescued' | 'worker.resumed';  // v0.2，见第 11 章
@@ -601,7 +604,7 @@ v0.1 不做下列内容，防止范围蔓延：
 | Q4 | 完成判定的四种判据，最终选哪个？ | 按用户要求保留全部，v0.5 起记录对比数据后再定 |
 | Q5 | `stream.ndjson` 原样落盘工具输出，环境里配了 token 后会以明文留在 `.collie/runs/` | 目录已 gitignore；token 已不进子进程环境（fix2），但 R2 自己的环境仍有。v02-e-drill 落盘时屏蔽 `token_file` 内容与 `GITHUB_TOKEN` / `GH_TOKEN` 的值 |
 | Q6 | 卡死检测以 SDK 事件为心跳，而 SDK 生成长输出时不发事件 | 权宜：`stall_secs=300`。候选：runner 开启 SDK 逐片输出（partial messages）并转成事件，让心跳粒度与输出无关。v0.2 收口后定。实测真正静默（无任何事件、无 thinking_tokens）：v02-b04 第 1 次推送后 90.5 秒（误判）；第 2 次推送→写 report 前 35.4 秒、report 推送后生成最后一段约 600 字回复 97.0 秒、心跳采样最大滞后 89.2 秒。带 thinking_tokens 的 277 秒 / 99 秒间隔不算静默。300 对已观测最大值留约 3 倍余量 |
-| Q7 | R2 只核对 worker `head_sha` 的 CI，不看自己裁定提交的 CI；裁定提交只改 docs，它的 CI 红只可能是随机失败的测试，但 Collie 记录里看不到（v02-b04 第 2 次 Run 81；v02-b05-fix Run 113 又一次） | 已定：v0.3 第一批。R2 推送裁定提交后不等待、只查一次该提交的 CI，结果记 `ci.verdict_commit`（字段 sha / conclusion / run_url），红则在 progress 行末追加「裁定提交 CI 红」；不改变本轮结论，但下一轮 `collie run` 启动时若上一条裁定提交 CI 红且未被后续绿覆盖，先打印警告。前提：推送裁定提交由 R2 自己做（现由操作员代推，v0.3 一并收回） |
+| Q7 | R2 只核对 worker `head_sha` 的 CI，不看自己裁定提交的 CI；裁定提交只改 docs，它的 CI 红只可能是随机失败的测试，但 Collie 记录里看不到（v02-b04 第 2 次 Run 81；v02-b05-fix Run 113） | 已定并签入 v03-b01（SPEC 12.1）：R2 自己推送裁定提交，**下一次启动时**查一次该提交的 CI（推送当下必然 no_runs，不在那时查），红则打印警告并记 `ci.verdict_commit` |
 
 
 ## 11. v0.2 失败检测与恢复
@@ -624,6 +627,7 @@ v0.1 不做下列内容，防止范围蔓延：
 **收口改为**：v02-e-fix2 修这两处并用 fake runner 的场景 E 测试覆盖（孤儿救援路径下 `rescue_sha` 进 frontmatter、正文含「请先核实」；
 `interrupted_at` 时间非空且事件类型来自 SDK 消息的 `timestamp` / 心跳 `updated_at`），第 5 条以 `heartbeat.test.ts` 现有单测为准，
 不再做第 3 次真实演练。e-fix2 PASS 即 v0.2 收口。
+**v0.2 已收口**（2026-10-26，v02-e-fix2 裁定 `cfee4dc`）。未在真实运行里验证、留到 v0.3 运行中自然观察的：规则 9 的触发；守护进程存活时拒绝启动；孤儿路径下 `rescue_sha` 进 task。
 
 ### 11.1 新增配置（`[limits]`）
 
@@ -804,3 +808,39 @@ v0.1 的 `wallclock_secs` 超时从「直接 abort + 记 crashed」改为走本�
 变体：fake 不响应 soft，期望 `signaled(hard)` 继续出现。
 
 补充：场景 E/F/G 的 `collie show` 输出必须能按顺序还原事件链。
+
+## 12. v0.3 连续
+
+目标（ROADMAP 第 5 节）：无人干预连跑多个批次，只在该打扰人时打扰。通过标准：零误放行；被打扰次数 ≤ 应打扰次数 + 1。
+本章在 v0.2 的结构上只做追加；规则 1~10 不变。三个批次：12.1 收回人工动作，12.2 队列与分流，12.3 放行与停表。
+
+### 12.1 收回人工动作（v03-b01）
+
+v0.2 期间每轮有两个人工动作：操作员推送 R2 的裁定提交、操作员转发汇报。前者从本批次起由 R2 自己做，后者是 v0.4 的事。
+
+- **R2 推送裁定提交**：写完 progress 与信封、提交之后，`git push --quiet origin <expected_branch>`，记 `verdict.pushed`。
+  推送失败（网络、拒绝）记 `verdict.push_failed`（字段 error），**不改变本轮结论、不重试、不抛出**，退出码照旧；
+  下一次启动时若本地 `expected_branch` 领先远端，先尝试推送一次再继续。推送用的 remote 与凭据和 worker 相同（`.git/config`）。
+- **启动时核查上一条裁定提交的 CI**（Q7）：`collie run` 启动阶段，取 journal 里最近一条 `verdict.pushed.sha`，
+  用 token 查一次它的 CI（`queryCi`，不等待）：`failure` / `cancelled` 则 stderr 打印
+  `warning: previous verdict commit <sha> CI <conclusion> (<run_url>)`，并记 `ci.verdict_commit`；
+  `success` 只记事件；`no_runs` / `pending` / 限流不记、不警告。警告不阻止启动——裁定提交只改 docs，红只可能是随机失败的测试，
+  但人必须能在 journal 与 stderr 看见。
+- **reviewer 事件流落盘**：`.collie/runs/<run_id>/reviewer.stream.ndjson`，与 worker 的 `stream.ndjson` 同一套写入与 `redact` 屏蔽。
+  目的：AGENT-reviewer.md 要求「行为要求必须实跑」，没有落盘就只能信 reviewer 自述（v02-e-fix2 操作员无法独立确认）。
+- **规则 9 的场景测试**（场景 H）：fake worker 产出 `claims.pushed=false` 且远端确实没有 head，reviewer 判 PASS；
+  期望 arbiter 降为 FIX，journal 有 `verdict.downgraded`（rule=9）。规则 9 在 v0.2 期间从未真实触发，场景 H 是它唯一的回归证据。
+
+### 12.2 队列与分流（v03-b02，待签）
+
+`collie run --continue`：按 backlog 优先级取第一个 `pending` 且依赖已 `passed` 的批次；PASS → 标 passed、取下一个；
+FIX → 同批次返工计数 +1，≤ `fix_max` 则立即重跑，否则 BLOCK；BLOCK / 上报 → 停下、退出码 20。
+依赖未满足的批次跳过并记 `batch.skipped`；全部不可执行则 `escalated`。backlog 的状态列由 R2 写（这是 backlog 唯一允许 R2 改的内容，R1 仍是唯一的条目作者）。
+每批次结束后仍执行 11.3 的清理与 12.1 的推送；批次之间不共享任何进程。
+
+### 12.3 放行与停表（v03-b03，待签）
+
+分级放行白名单（ROADMAP）：PASS 且 `claim_mismatches` 空、CI success、diff 范围在条目内、`deps_diff` 空、无许可证变化 → 自动进下一批。
+停表清单：`spec_diff_lines > 0`、`deps_diff` 非空、受保护路径改动、规则 9 连续两次、reviewer `gaps` 非空、同批次第 2 次 BLOCK → 停下等人。
+reviewer JSON 格式错（规则 1）单独处理：同批次只因规则 1 BLOCK 一次时自动重跑一次，第 2 次才停。
+

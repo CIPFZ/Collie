@@ -145,7 +145,8 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
    不在运行中干预，不重跑，不手改任何文件。
 3. 结束后看退出码（0 PASS / 10 FIX / 20 BLOCK / 1 错误），`collie show <batch>`，
    读 `.collie/batches/<batch>/report.md` 与 `verdict.md`，读 `.collie/runs/<run_id>/events.ndjson`。
-4. 推送 R2 的裁定提交（`progress: <batch> ...`），确认 CI。
+4. 推送 R2 的裁定提交（`progress: <batch> ...`），确认 CI。**v03-b01 PASS 之后这一步由 R2 自己做**：你只看 journal 里有没有 `verdict.pushed`，
+   有 `verdict.push_failed` 才手动推送并报告原因；启动时 stderr 若有 `warning: previous verdict commit`，原样写进汇报。
 5. 汇报，固定五段，每段只写事实、带 sha 和数字：
    - worker 做了什么（提交、改动范围、用时、是否推送、claims 内容）
    - R2 实测了什么（验收逐条退出码、测试数、受保护文件行数、依赖、CI 结论）

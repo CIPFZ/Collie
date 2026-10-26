@@ -36,7 +36,8 @@
 | 18 | v02-e-drill | stream.ndjson 密钥屏蔽（场景 E 真实 kill 演练） | v02-b05-fix | passed |
 | 19 | v02-e-fix | worker 随 R2 死、取证沿用首次 base_sha、interrupted_at | v02-e-drill | passed |
 | 20 | v02-e-drill2 | 场景 E 第 2 次演练（脏工作区 + 不补杀） | v02-e-fix | passed |
-| 21 | v02-e-fix2 | rescue_sha 跨轮查找、interrupted_at 时间 | v02-e-drill2 | pending |
+| 21 | v02-e-fix2 | rescue_sha 跨轮查找、interrupted_at 时间 | v02-e-drill2 | passed |
+| 22 | v03-b01 | 收回人工动作：R2 推送裁定提交、启动核查其 CI、reviewer 流落盘、场景 H | v02-e-fix2 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -875,3 +876,44 @@ v0.2 的最后一批。规格见 SPEC 11.7（`rescue_sha` 来源、`interrupted_
 - 改动任何受保护路径
 - 为了让测试过而删除或跳过任何测试
 - 改动守护进程、取证范围、规则链的任何实现
+
+记录：第 1 次运行 r-20261026-035021 PASS（裁定 `cfee4dc`），7/7 验收通过，677 全过，场景 E 15 个，R1 复核一致。
+reviewer 阶段心跳 `worker_pid` 已清（142 次采样无数字 pid），`guard_pid` 保留到 ci 阶段结束。
+reviewer 按新手册对行为要求贴了实跑输出，但其事件流不落盘，操作员无法独立确认（进 v03-b01）。**v0.2 收口。**
+
+## v03-b01 收回人工动作：R2 推送裁定提交、启动核查其 CI、reviewer 流落盘、场景 H
+
+优先级：22　依赖：v02-e-fix2
+
+v0.3 第一批。规格见 SPEC 12.1、3.6（三个新事件）。
+
+条目：
+1. R2 推送裁定提交与启动核查（12.1）：`git.ts` 加 `push(cwd, remote, branch)`；`run.ts` 在 progress 提交之后推送，记 `verdict.pushed`，
+   失败记 `verdict.push_failed` 且不改变结论、不抛出；启动阶段若本地领先远端先推送一次；启动阶段取最近一条 `verdict.pushed.sha`
+   用 `queryCi` 查一次（不等待），`failure` / `cancelled` 打印 `warning: previous verdict commit ...` 并记 `ci.verdict_commit`，
+   `success` 只记事件，其余不记。`schema` 加三个事件。测试：fake 场景里断言推送后远端含裁定提交；注入 fetch 替身返回 failure 时 stderr 有 warning
+2. reviewer 事件流落盘（12.1）：`reviewer.stream.ndjson`，复用 worker 的写入与 `redact`；`test/reviewer-isolation.test.ts` 或新测试断言文件存在、
+   含 reviewer 的事件、密钥已屏蔽
+3. 场景 H（12.1）：`test/scenario-h.test.ts`，fake worker `pushed=false` 且远端无 head、reviewer PASS → arbiter FIX、`verdict.downgraded` rule=9；
+   `test/invariants.test.ts` 加「`src/git.ts` 有 `push`」「`scenario-h.test.ts` 存在」两条
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 场景 H | `npm test -- test/scenario-h.test.ts` | exit 0 |
+| 三个事件进 schema | `grep -qE "verdict\.pushed" src/schema/index.ts && grep -qE "verdict\.push_failed" src/schema/index.ts && grep -qE "ci\.verdict_commit" src/schema/index.ts` | exit 0 |
+| R2 推送且失败不抛 | `grep -qE "export async function push\(" src/git.ts && grep -qE "verdict\.push_failed" src/run.ts` | exit 0 |
+| 启动核查有警告 | `grep -qE "previous verdict commit" src/run.ts && grep -qE "previous verdict commit" test/*.test.ts` | exit 0 |
+| reviewer 流落盘 | `grep -qE "reviewer\.stream\.ndjson" src/run.ts && grep -qE "reviewer\.stream\.ndjson" test/*.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "scenario-h" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 推送失败时重试、抛出或改变本轮退出码
+- 改动规则 1~10 的实现（场景 H 只是测试）
+
