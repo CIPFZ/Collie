@@ -443,4 +443,23 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v02-e-fix2 · r-20261026-035021 · PASS
+
+- 时间：2026-10-26T04:17:41.750Z
+- 裁定：规则 10，7/7 acceptance commands pass, 677 tests pass, no protected file changes, no dependency changes, all three task items implemented correctly with proper test coverage. CI unavailable — CI 以 R2 取证为准。
+- 提交：`1687021` `43e22ec`
+- 验收命令：7/7 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，677 passed, 0 failed
+  - `npm test -- test/scenario-e.test.ts` → exit 0，15 passed, 0 failed
+  - `grep -qE "rescue_sha" test/scenario-e.test.ts && grep -qE "请先核实" test/scenario-e.test.ts` → exit 0，exit 0
+  - `grep -qE "interrupted_at" test/scenario-e.test.ts && grep -qE "toBeTruthy|toHaveLength|toMatch" test/scenario-e.test.ts && grep -qE "tool_use" src/run.ts` → exit 0，exit 0
+  - `grep -qE "请先核实|rescue_sha" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/40267746580
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
