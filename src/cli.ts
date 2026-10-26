@@ -212,6 +212,45 @@ function section(title: string, body: string | undefined): string {
   return `== ${title} ==\n${body === undefined ? '(none)\n' : body.endsWith('\n') ? body : `${body}\n`}\n`;
 }
 
+/** Interrupt-related event types for the 中断链 section (SPEC 11.7, 11.8). */
+const INTERRUPT_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'run.orphaned',
+  'worker.rescued',
+  'worker.resumed',
+]);
+
+/**
+ * Builds the 中断链 (interrupt chain) for `collie show` output.
+ * Groups run.orphaned / worker.rescued / worker.resumed events by run_id,
+ * returns undefined when no interruptions exist (SPEC 11.7).
+ */
+function interruptChain(events: Event[]): string | undefined {
+  const filtered = events.filter((e) => INTERRUPT_EVENT_TYPES.has(e.event));
+  if (filtered.length === 0) return undefined;
+
+  // Group by run_id, preserving chronological order.
+  const groups = new Map<string, Event[]>();
+  for (const e of filtered) {
+    const list = groups.get(e.run_id) ?? [];
+    list.push(e);
+    groups.set(e.run_id, list);
+  }
+
+  const lines: string[] = [];
+  for (const [runId, runEvents] of groups) {
+    const resumed = runEvents.find((e) => e.event === 'worker.resumed');
+    const attemptLabel =
+      typeof resumed?.attempt === 'number'
+        ? ` (attempt ${String(resumed.attempt)})`
+        : '';
+    lines.push(`${runId}${attemptLabel}:`);
+    for (const e of runEvents) {
+      lines.push(`  ${describeEvent(e)}`);
+    }
+  }
+  return lines.join('\n');
+}
+
 function show(deps: CliDeps, batchId: string): number {
   const batch = loadBacklog(deps.cwd).find((b) => b.id === batchId);
   if (batch === undefined) {
