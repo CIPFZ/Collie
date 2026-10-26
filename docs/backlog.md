@@ -35,7 +35,8 @@
 | 17 | v02-b05-fix | 规则 9、worker_pid 时序、CI 未取证措辞 | v02-b05 | passed |
 | 18 | v02-e-drill | stream.ndjson 密钥屏蔽（场景 E 真实 kill 演练） | v02-b05-fix | passed |
 | 19 | v02-e-fix | worker 随 R2 死、取证沿用首次 base_sha、interrupted_at | v02-e-drill | passed |
-| 20 | v02-e-drill2 | 场景 E 第 2 次演练（脏工作区 + 不补杀） | v02-e-fix | pending |
+| 20 | v02-e-drill2 | 场景 E 第 2 次演练（脏工作区 + 不补杀） | v02-e-fix | passed |
+| 21 | v02-e-fix2 | rescue_sha 跨轮查找、interrupted_at 时间 | v02-e-drill2 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -835,3 +836,42 @@ v0.2 收口演练第 2 次。批次工作本身很小；操作员按 AGENT_KICKO
 额外禁止：
 - 改动任何受保护路径
 - 为了让测试过而删除或跳过任何测试
+
+记录：两次运行。第 1 次 r-20261026-025529 在工作区脏、尚无提交时被操作员 `kill -9` R2（授权演练，不补杀）：
+守护进程 1 秒内杀掉 worker 并自退。第 2 次 r-20261026-025925 PASS（裁定 `f40284c`）：`run.orphaned` → `worker.rescued`（`6158611`）
+→ `attempt: 2` → 接续完成三条目，5/5 验收通过，672 全过，取证范围 `7f93939..b076c7b` 含救援提交，R1 复核一致。
+不成立：`task.md` 无 `rescue_sha`，正文写成「上一轮未留下救援提交」（孤儿救援记在本轮 journal，生成 task 只查上一轮）；
+`interrupted_at` 最后事件为 `user@`、时间空。未验证：守护进程存活时拒绝启动（守护太快）。
+PASS 维持；缺口进 v02-e-fix2，e-fix2 PASS 即 v0.2 收口，不做第 3 次演练。attempt 2 用 47 轮，`max_turns` 200 不变。
+
+## v02-e-fix2 rescue_sha 跨轮查找、interrupted_at 时间
+
+优先级：21　依赖：v02-e-drill2
+
+v0.2 的最后一批。规格见 SPEC 11.7（`rescue_sha` 来源、`interrupted_at` 事件与时间）。
+
+条目：
+1. `run.ts` 生成 task 时，`worker.rescued` 同时在上一轮 journal 与本轮 journal（`run.orphaned` 之后）查找，取最后一条；
+   有 `rescue_sha` 时 frontmatter 写入且正文含「请先核实」句，没有时正文含「上一轮未留下救援提交」句
+2. `readStreamLastEvent`：事件类型按 SPEC 11.7 细化（`type/subtype` 或 `tool_use` 的 `name`），时间取消息 `timestamp`，
+   缺失则向前找最近一条有 `timestamp` 的行，再缺失用心跳 `updated_at`；返回的时间不得为空串
+3. `test/scenario-e.test.ts` 用 fake runner 覆盖孤儿救援路径：第 1 轮写脏文件后模拟 R2 被 kill（心跳遗留、无 `run.finished`、
+   `stream.ndjson` 末行是无 `timestamp` 的 `user` 消息），第 2 轮启动后断言 `task.md` 的 `rescue_sha` 等于 `worker.rescued.sha`、
+   正文含「请先核实」、`interrupted_at` 含 `orphaned` 且时间非空且事件类型不是裸的 `user`
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 场景 E 完整 | `npm test -- test/scenario-e.test.ts` | exit 0 |
+| 孤儿路径 rescue_sha 有断言 | `grep -qE "rescue_sha" test/scenario-e.test.ts && grep -qE "请先核实" test/scenario-e.test.ts` | exit 0 |
+| interrupted_at 时间非空有断言 | `grep -qE "interrupted_at" test/scenario-e.test.ts && grep -qE "toBeTruthy\|toHaveLength\|toMatch" test/scenario-e.test.ts && grep -qE "tool_use" src/run.ts` | exit 0 |
+| 不变量同步 | `grep -qE "请先核实\|rescue_sha" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 改动守护进程、取证范围、规则链的任何实现
