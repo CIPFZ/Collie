@@ -240,9 +240,7 @@ function interruptChain(events: Event[]): string | undefined {
   for (const [runId, runEvents] of groups) {
     const resumed = runEvents.find((e) => e.event === 'worker.resumed');
     const attemptLabel =
-      typeof resumed?.attempt === 'number'
-        ? ` (attempt ${String(resumed.attempt)})`
-        : '';
+      typeof resumed?.attempt === 'number' ? ` (attempt ${String(resumed.attempt)})` : '';
     lines.push(`${runId}${attemptLabel}:`);
     for (const e of runEvents) {
       lines.push(`  ${describeEvent(e)}`);
@@ -280,6 +278,14 @@ function show(deps: CliDeps, batchId: string): number {
       events.length === 0 ? undefined : events.map(describeEvent).join('\n'),
     ),
   );
+
+  // 中断链 (SPEC 11.7, 11.8): show interrupt events grouped by attempt.
+  // Omitted when no interruptions exist.
+  const chain = interruptChain(events);
+  if (chain !== undefined) {
+    deps.out(section('中断链', chain));
+  }
+
   return EXIT_CODES.PASS;
 }
 

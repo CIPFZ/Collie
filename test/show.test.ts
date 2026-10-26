@@ -143,6 +143,37 @@ describe('collie show: scenario G event chain (idle worker)', () => {
   });
 });
 
+describe('collie show: 中断链 (interrupt chain section)', () => {
+  it('shows 中断链 section with rescue_sha after an interrupted run', async () => {
+    // Run 1: worker killed → generates run.orphaned + worker.rescued events.
+    const killedWorker: ReturnType<typeof workerScene> = {
+      expectRole: 'worker',
+      files: { 'dirty.txt': 'partial\n' },
+      effect: async ({ handle }: FakeSceneContext) => {
+        await handle.stop('kill');
+      },
+      result: { exitCode: 1, sessionId: 'sess-chain1' },
+    };
+    await box.run(new FakeRunner([killedWorker]));
+
+    const out = await showOutput();
+    expect(out).toContain('== 中断链 ==');
+    expect(out).toContain('worker.rescued');
+  });
+
+  it('omits 中断链 section when there are no interruptions', async () => {
+    // A clean PASS run has no interrupt events → no 中断链 section.
+    const r = new FakeRunner([
+      workerScene(box, { passing: 5, failing: 0, push: true, claims: honestClaims(5, true) }),
+      fooledReviewerScene(box),
+    ]);
+    expect(await box.run(r)).toBe(0);
+
+    const out = await showOutput();
+    expect(out).not.toContain('中断链');
+  });
+});
+
 describe('collie show: ci.resolved in a normal PASS run', () => {
   it('shows ci.resolved event when CI resolves successfully', async () => {
     const r = new FakeRunner([
