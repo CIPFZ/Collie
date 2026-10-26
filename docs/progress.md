@@ -548,4 +548,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v03-b03-fix · r-20261026-161002 · FIX
+
+- 时间：2026-10-26T16:51:58.396Z
+- 裁定：规则 10，9/10 验收命令通过，#6 因 grep 模式与实际测试代码的标识符大小写不匹配而失败。功能实现正确（5/5 scenario-f tests passed），仅需微调测试文本以满足 grep 验收。CI 以 R2 取证为准。
+- 提交：`3f722dc` `2196fc6`
+- 验收命令：9/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，750 passed, 0 failed
+  - `! grep -qE "does not descend from the task commit" src/run.ts && grep -qE "commits_actual" test/scenario-*.test.ts` → exit 0，exit 0
+  - `grep -qE "report\(collie\)" src/evidence.ts && grep -qE "progress: " src/evidence.ts` → exit 0，exit 0
+  - `grep -qE "session_id.*null|sessionId.*undefined" test/scenario-f.test.ts` → exit 1，exit 1
+  - `grep -qE "sdk_stop_reason" src/run.ts && grep -qE "wallclock" test/scenario-*.test.ts` → exit 0，exit 0
+  - `! grep -qE "rule 0" src/cli.ts && grep -qE "rule 0" test/cli.test.ts` → exit 0，exit 0
+  - `grep -qE "nothing to audit" src/cli.ts && grep -qE "nothing to audit" test/cli.test.ts` → exit 0，exit 0
+  - `grep -qE "rule 0|sdk_stop_reason" test/invariants.test.ts && grep -qE "report\(collie\)" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/40360846576
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
