@@ -196,6 +196,12 @@ export const EVENT_TYPES = [
   'ci.verdict_commit',
   // v0.3 (SPEC 11.2, v03-b02): a bash-deny hook denied a tool call.
   'tool.denied',
+  // v0.3 (SPEC 12.2): dependency not satisfied during --continue queue selection.
+  'batch.skipped',
+  // v0.3 (SPEC 12.2): R2 updated a backlog status column during --continue mode.
+  'batch.status',
+  // v0.3 (SPEC 12.2): --continue queue finished; reason = exhausted / blocked / escalated / fix_max / limit.
+  'queue.finished',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);

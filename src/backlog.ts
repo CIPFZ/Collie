@@ -513,6 +513,37 @@ export function parseBacklog(text: string, source: string = BACKLOG_RELATIVE_PAT
   });
 }
 
+/**
+ * SPEC 12.2: pure function that modifies the overview table's status column
+ * for a given batch. Only changes the last cell of the matching row; every
+ * other byte stays the same. Returns `{ changed: false }` when the batch id
+ * is not found or the row format does not match.
+ */
+export function setBatchStatus(
+  text: string,
+  id: string,
+  status: BatchStatus,
+): { text: string; changed: boolean; from?: string } {
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line === undefined || !isTableLine(line.trim())) continue;
+    const cells = splitRow(line);
+    // Overview table: columns are 优先级 | 批次 | 标题 | 依赖 | 状态 (index 1 = id)
+    if (cells[1]?.trim() !== id) continue;
+    // Found the matching row. Locate the last cell boundary.
+    const lastPipe = line.lastIndexOf('|');
+    if (lastPipe <= 0) continue;
+    const prevPipe = line.lastIndexOf('|', lastPipe - 1);
+    if (prevPipe < 0) continue;
+    const from = line.substring(prevPipe + 1, lastPipe).trim();
+    // Replace only the last cell content, preserving surrounding structure.
+    lines[i] = `${line.substring(0, prevPipe + 1)} ${status} ${line.substring(lastPipe)}`;
+    return { text: lines.join('\n'), changed: true, from };
+  }
+  return { text, changed: false };
+}
+
 /** Reads and parses `<root>/docs/backlog.md`. */
 export function loadBacklog(root: string): Batch[] {
   const path = join(root, BACKLOG_RELATIVE_PATH);

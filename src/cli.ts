@@ -14,7 +14,7 @@ import type { Clock, FetchLike } from './ci.js';
 import { CONFIG_RELATIVE_PATH, parseConfig } from './config.js';
 import { git } from './git.js';
 import { createJournal, EVENTS_FILE_NAME, RUNS_RELATIVE_DIR } from './journal.js';
-import { EXIT_CODES, readEnvelope, REVIEWER_STREAM_FILE_NAME, runBatch } from './run.js';
+import { EXIT_CODES, readEnvelope, REVIEWER_STREAM_FILE_NAME, runBatch, runQueue } from './run.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { AgentRunner } from './runner/index.js';
 import { RunIdSchema, type Event } from './schema/index.js';
@@ -167,6 +167,44 @@ async function run(
       ? (outcome.escalation ?? '')
       : `rule ${String(outcome.decision.rule)}: ${outcome.decision.reason}`;
   deps.out(`${batchId} ${runId}: ${outcome.final} (${how})\n`);
+  return outcome.exitCode;
+}
+
+/**
+ * SPEC 12.2: --continue mode. Runs pending batches from the backlog in
+ * priority order until exhausted, blocked, fix_max exceeded, or --max reached.
+ */
+async function runContinue(
+  deps: CliDeps,
+  runnerChoice?: RunnerChoice,
+  max?: number,
+): Promise<number> {
+  const runner = resolveRunner(runnerChoice ?? deps.runner, deps.cwd);
+  if (runner === undefined) {
+    deps.err('no agent runner is available\n');
+    return EXIT_CODES.ERROR;
+  }
+  const outcome = await runQueue({
+    root: deps.cwd,
+    runner,
+    fetch: deps.fetch,
+    remote: deps.remote ?? 'origin',
+    now: deps.now,
+    err: deps.err,
+    ...(max === undefined ? {} : { max }),
+    ...(deps.workerSignal === undefined ? {} : { workerSignal: deps.workerSignal }),
+    ...(deps.clock === undefined ? {} : { clock: deps.clock }),
+    ...(deps.ladderDelay === undefined ? {} : { ladderDelay: deps.ladderDelay }),
+    ...(deps.livenessIntervalMs === undefined
+      ? {}
+      : { livenessIntervalMs: deps.livenessIntervalMs }),
+    ...(deps.livenessNow === undefined ? {} : { livenessNow: deps.livenessNow }),
+    ...(deps.livenessSetTimer === undefined ? {} : { livenessSetTimer: deps.livenessSetTimer }),
+    ...(deps.livenessFingerprint === undefined
+      ? {}
+      : { livenessFingerprint: deps.livenessFingerprint }),
+  });
+  deps.out(`queue: ${outcome.reason} (batches: ${outcome.batches.join(', ') || 'none'})\n`);
   return outcome.exitCode;
 }
 
@@ -416,18 +454,41 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
     .description(
       'run one batch: worker -> reviewer -> arbiter (exit 0 PASS / 10 FIX / 20 BLOCK / 1 error)',
     )
-    .argument('<batch_id>')
+    .argument('[batch_id]', 'specific batch to run (omit with --continue for queue mode)')
     .option('--runner <kind>', 'agent runner: claude (default) or fake')
-    .action(async (batchId: string, opts: { runner?: string }) => {
-      const kind = opts.runner;
-      if (kind !== undefined && kind !== 'claude' && kind !== 'fake') {
-        deps.err(`unknown runner ${JSON.stringify(kind)}; use claude or fake\n`);
-        code = EXIT_CODES.ERROR;
-        return;
-      }
-      // Without the flag, the runner the caller wired in (the real one from the entry point).
-      code = await run(deps, batchId, kind === undefined ? undefined : { kind });
-    });
+    .option('--continue', 'queue mode: run pending batches by priority until blocked or exhausted')
+    .option('--max <n>', 'max batches to run in --continue mode', parseInt)
+    .action(
+      async (
+        batchId: string | undefined,
+        opts: { runner?: string; continue?: boolean; max?: number },
+      ) => {
+        const kind = opts.runner;
+        if (kind !== undefined && kind !== 'claude' && kind !== 'fake') {
+          deps.err(`unknown runner ${JSON.stringify(kind)}; use claude or fake\n`);
+          code = EXIT_CODES.ERROR;
+          return;
+        }
+
+        if (opts.continue === true) {
+          if (batchId !== undefined) {
+            deps.err('--continue does not take a batch_id argument\n');
+            code = EXIT_CODES.ERROR;
+            return;
+          }
+          code = await runContinue(deps, kind === undefined ? undefined : { kind }, opts.max);
+          return;
+        }
+
+        if (batchId === undefined) {
+          deps.err('batch_id is required (or use --continue for queue mode)\n');
+          code = EXIT_CODES.ERROR;
+          return;
+        }
+        // Without the flag, the runner the caller wired in (the real one from the entry point).
+        code = await run(deps, batchId, kind === undefined ? undefined : { kind });
+      },
+    );
   program
     .command('show')
     .description('print task / report / verdict and the decision trail of a batch')

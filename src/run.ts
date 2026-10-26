@@ -16,7 +16,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { spawn } from 'node:child_process';
 import { arbitrate, type ArbiterDecision } from './arbiter.js';
-import { loadBacklog } from './backlog.js';
+import { BACKLOG_RELATIVE_PATH, loadBacklog, setBatchStatus } from './backlog.js';
 import { queryCi, type Clock, type FetchLike } from './ci.js';
 import { loadConfig } from './config.js';
 import { collectEvidence, type Evidence } from './evidence.js';
@@ -126,6 +126,11 @@ export interface RunContext {
   livenessSetTimer?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>;
   /** Injected fingerprint function for the liveness monitor (SPEC 11.5, v02-b04-fix). */
   livenessFingerprint?: (root: string) => Promise<string>;
+  /**
+   * SPEC 12.2: when true (--continue mode), runBatch updates the backlog
+   * status column as part of the verdict commit. Single-batch mode never sets this.
+   */
+  updateBacklogStatus?: boolean;
 }
 
 export interface RunOutcome {
@@ -140,7 +145,7 @@ class Recorder {
   constructor(
     private readonly journal: Journal,
     private readonly runId: string,
-    private readonly batchId: string,
+    private readonly batchId: string | undefined,
     private readonly now: () => Date,
   ) {}
 
@@ -148,7 +153,7 @@ class Recorder {
     this.journal.append({
       ts: this.now().toISOString(),
       run_id: this.runId,
-      batch_id: this.batchId,
+      ...(this.batchId !== undefined ? { batch_id: this.batchId } : {}),
       event,
       ...fields,
     });
@@ -903,7 +908,25 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       workerExitCode,
       workerStopReason,
     });
-    await commit(root, `progress: ${batchId} ${decision.final}`, [relative(root, progressPath)]);
+    const escalateEnvelopes = [relative(root, progressPath)];
+    // SPEC 12.2: --continue mode updates the backlog status column in this commit.
+    if (ctx.updateBacklogStatus === true) {
+      const backlogFile = join(root, BACKLOG_RELATIVE_PATH);
+      try {
+        const backlogText = readFileSync(backlogFile, 'utf8');
+        const result = setBatchStatus(backlogText, batchId, 'blocked');
+        if (result.changed) {
+          writeFileSync(backlogFile, result.text);
+          escalateEnvelopes.push(BACKLOG_RELATIVE_PATH);
+          rec.record('batch.status', { batch_id: batchId, from: result.from ?? '', to: 'blocked' });
+        } else {
+          rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
+        }
+      } catch {
+        rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
+      }
+    }
+    await commit(root, `progress: ${batchId} ${decision.final}`, escalateEnvelopes);
 
     // SPEC 12.1: push the verdict commit to remote (escalation path).
     try {
@@ -1316,6 +1339,24 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     const envelopes = [relative(root, progressPath)];
     if (existsSync(verdictPath(root, batchId)))
       envelopes.push(relative(root, verdictPath(root, batchId)));
+    // SPEC 12.2: --continue mode updates the backlog status column in this commit.
+    if (ctx.updateBacklogStatus === true) {
+      const backlogFile = join(root, BACKLOG_RELATIVE_PATH);
+      try {
+        const backlogText = readFileSync(backlogFile, 'utf8');
+        const newStatus = decision.final === 'PASS' ? 'passed' : 'blocked';
+        const result = setBatchStatus(backlogText, batchId, newStatus);
+        if (result.changed) {
+          writeFileSync(backlogFile, result.text);
+          envelopes.push(BACKLOG_RELATIVE_PATH);
+          rec.record('batch.status', { batch_id: batchId, from: result.from ?? '', to: newStatus });
+        } else {
+          rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
+        }
+      } catch {
+        rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
+      }
+    }
     await commit(root, `progress: ${batchId} ${decision.final}`, envelopes);
 
     // SPEC 12.1: push the verdict commit to remote.
@@ -1413,5 +1454,181 @@ export function readEnvelope(root: string, batchId: string, name: string): strin
     return readFileSync(join(dirname(verdictPath(root, batchId)), name), 'utf8');
   } catch {
     return undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Queue mode: --continue (SPEC 12.2)
+// ---------------------------------------------------------------------------
+
+export interface QueueContext {
+  root: string;
+  runner: AgentRunner;
+  fetch: FetchLike;
+  remote: string;
+  now: () => Date;
+  err?: (text: string) => void;
+  /** Maximum batches to run; undefined = no limit (SPEC 12.2 --max). */
+  max?: number;
+  /** Test hook: override for worker wall-clock signal. */
+  workerSignal?: AbortSignal;
+  clock?: Clock;
+  ladderDelay?: (ms: number) => Promise<void>;
+  livenessIntervalMs?: number;
+  livenessNow?: () => number;
+  livenessSetTimer?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  livenessFingerprint?: (root: string) => Promise<string>;
+}
+
+export interface QueueOutcome {
+  /** Combined exit code: 0 for exhausted/limit, 20 for blocked/fix_max/escalated. */
+  exitCode: number;
+  /** Why the queue stopped. */
+  reason: string;
+  /** Batches that ran (in order). */
+  batches: string[];
+}
+
+/**
+ * SPEC 12.2: selects the first `pending` batch whose dependencies are all
+ * `passed`. Returns the selected batch, plus any that were skipped because
+ * their dependencies are not met.
+ */
+function selectNextBatch(batches: readonly Batch[]): {
+  selected: Batch | undefined;
+  skipped: { id: string; missing: string[] }[];
+} {
+  const statusMap = new Map(batches.map((b) => [b.id, b.status]));
+  const skipped: { id: string; missing: string[] }[] = [];
+  // Batches are already sorted by priority from parseBacklog.
+  for (const batch of batches) {
+    if (batch.status !== 'pending') continue;
+    const missing = batch.depends_on.filter((dep) => statusMap.get(dep) !== 'passed');
+    if (missing.length > 0) {
+      skipped.push({ id: batch.id, missing });
+      continue;
+    }
+    return { selected: batch, skipped };
+  }
+  return { selected: undefined, skipped };
+}
+
+/**
+ * Counts how many `run.finished` events exist for `batchId` across all
+ * runs. Used as the FIX retry counter (SPEC 12.2: "计数从 journal 里本批次
+ * 的 `run.finished` 数出").
+ */
+function countBatchFinished(root: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  const runsDir = join(root, RUNS_RELATIVE_DIR);
+  if (!existsSync(runsDir)) return counts;
+  const journal = createJournal(root);
+  for (const dir of readdirSync(runsDir).sort()) {
+    if (!RunIdSchema.safeParse(dir).success || !existsSync(join(runsDir, dir, EVENTS_FILE_NAME)))
+      continue;
+    for (const event of journal.replay(dir)) {
+      if (event.event === 'run.finished' && typeof event.batch_id === 'string') {
+        counts.set(event.batch_id, (counts.get(event.batch_id) ?? 0) + 1);
+      }
+    }
+  }
+  return counts;
+}
+
+/** Generates a run_id from a Date, with the given prefix (r- for batch, q- for queue). */
+function makeRunId(prefix: string, date: Date): string {
+  // Strip non-digits from ISO string: 20261019120000... then take YYYYMMDDHHMMSS (14 chars).
+  const digits = date.toISOString().replace(/[^0-9]/g, '');
+  // eslint-disable-next-line @typescript-eslint/no-magic-numbers, no-restricted-syntax -- substring bound for YYYYMMDDHHMMSS format, not a threshold
+  return RunIdSchema.parse(`${prefix}${digits.slice(0, 14)}`);
+}
+
+/** Runs batches in --continue mode (SPEC 12.2). */
+export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
+  const { root } = ctx;
+  const config = loadConfig(root);
+  const batchesRun: string[] = [];
+
+  // Queue-level journal for batch.skipped / batch.status / queue.finished events.
+  // Uses a dedicated run_id distinct from individual batch runs.
+  const queueRunId = makeRunId('q-', ctx.now());
+  const queueJournal = createJournal(root);
+  const queueRec = new Recorder(queueJournal, queueRunId, undefined, ctx.now);
+
+  // Ensure the queue run directory exists.
+  mkdirSync(join(root, RUNS_RELATIVE_DIR, queueRunId), { recursive: true });
+
+  let currentBatchId: string | undefined;
+
+  // Loop until queue is exhausted, blocked, or --max reached.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite loop; exits via return
+  while (true) {
+    // Reload backlog each iteration to see status changes from previous batch.
+    const batches = loadBacklog(root);
+    const { selected, skipped } = selectNextBatch(batches);
+    for (const s of skipped) {
+      queueRec.record('batch.skipped', { batch_id: s.id, missing: s.missing });
+    }
+
+    if (selected === undefined) {
+      // Nothing eligible: exhausted or all remaining are blocked.
+      const reason = skipped.length > 0 ? 'exhausted' : 'exhausted';
+      queueRec.record('queue.finished', { reason, batches: batchesRun });
+      return { exitCode: EXIT_CODES.PASS, reason, batches: batchesRun };
+    }
+
+    currentBatchId = selected.id;
+    const runId = makeRunId('r-', ctx.now());
+    const outcome = await runBatch({
+      root,
+      batchId: currentBatchId,
+      runId,
+      runner: ctx.runner,
+      fetch: ctx.fetch,
+      remote: ctx.remote,
+      now: ctx.now,
+      err: ctx.err,
+      updateBacklogStatus: true,
+      ...(ctx.workerSignal === undefined ? {} : { workerSignal: ctx.workerSignal }),
+      ...(ctx.clock === undefined ? {} : { clock: ctx.clock }),
+      ...(ctx.ladderDelay === undefined ? {} : { ladderDelay: ctx.ladderDelay }),
+      ...(ctx.livenessIntervalMs === undefined
+        ? {}
+        : { livenessIntervalMs: ctx.livenessIntervalMs }),
+      ...(ctx.livenessNow === undefined ? {} : { livenessNow: ctx.livenessNow }),
+      ...(ctx.livenessSetTimer === undefined ? {} : { livenessSetTimer: ctx.livenessSetTimer }),
+      ...(ctx.livenessFingerprint === undefined
+        ? {}
+        : { livenessFingerprint: ctx.livenessFingerprint }),
+    });
+    batchesRun.push(currentBatchId);
+
+    if (outcome.final === 'PASS') {
+      // SPEC 12.2: PASS → take next. Status already updated inside runBatch.
+      if (ctx.max !== undefined && batchesRun.length >= ctx.max) {
+        queueRec.record('queue.finished', { reason: 'limit', batches: batchesRun });
+        return { exitCode: EXIT_CODES.PASS, reason: 'limit', batches: batchesRun };
+      }
+      continue;
+    }
+
+    if (outcome.final === 'FIX') {
+      // SPEC 12.2: FIX → check fix_max. Count from run.finished events.
+      const finishedCounts = countBatchFinished(root);
+      const count = finishedCounts.get(currentBatchId) ?? 0;
+      if (count <= config.limits.fix_max) {
+        // Rerun the same batch (attempt will increment via batchHistory).
+        continue;
+      }
+      // Exceeded fix_max: escalate → stop.
+      queueRec.record('escalated', { reason: 'fix_max', batch_id: currentBatchId });
+      queueRec.record('queue.finished', { reason: 'fix_max', batches: batchesRun });
+      return { exitCode: EXIT_CODES.BLOCK, reason: 'fix_max', batches: batchesRun };
+    }
+
+    // BLOCK or escalation: stop.
+    // Status already updated to 'blocked' inside runBatch when updateBacklogStatus=true.
+    queueRec.record('queue.finished', { reason: 'blocked', batches: batchesRun });
+    return { exitCode: EXIT_CODES.BLOCK, reason: 'blocked', batches: batchesRun };
   }
 }
