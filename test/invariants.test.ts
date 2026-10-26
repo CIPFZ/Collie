@@ -185,4 +185,17 @@ describe('structural invariants (SPEC 3.2)', () => {
     // SPEC 11.2 (v03-b02): reviewer must have disallowedTools to physically block write tools.
     expect(content).toContain('disallowedTools');
   });
+
+  it('src/backlog.ts exports setBatchStatus (v03-b03)', () => {
+    const content = readFileSync(join(ROOT, 'src/backlog.ts'), 'utf8');
+    expect(content).toMatch(/export function setBatchStatus\(/);
+  });
+
+  it('test/scenario-j.test.ts exists and covers queue mode (v03-b03)', () => {
+    const content = readFileSync(join(ROOT, 'test/scenario-j.test.ts'), 'utf8');
+    expect(content).toContain('scenario J');
+    expect(content).toContain('fix_max');
+    expect(content).toContain('escalated');
+    expect(content).toContain('queue.finished');
+  });
 });

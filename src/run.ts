@@ -1340,7 +1340,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     if (existsSync(verdictPath(root, batchId)))
       envelopes.push(relative(root, verdictPath(root, batchId)));
     // SPEC 12.2: --continue mode updates the backlog status column in this commit.
-    if (ctx.updateBacklogStatus === true) {
+    // FIX verdicts skip: the --continue loop retries and only writes 'blocked' on fix_max.
+    if (ctx.updateBacklogStatus === true && decision.final !== 'FIX') {
       const backlogFile = join(root, BACKLOG_RELATIVE_PATH);
       try {
         const backlogText = readFileSync(backlogFile, 'utf8');
@@ -1543,6 +1544,31 @@ function makeRunId(prefix: string, date: Date): string {
   return RunIdSchema.parse(`${prefix}${digits.slice(0, 14)}`);
 }
 
+/**
+ * SPEC 12.2: updates docs/backlog.md on disk and records a batch.status event.
+ * Used by runQueue for the fix_max escalation path (runBatch handles PASS/BLOCK).
+ */
+function updateBacklogToDisk(
+  root: string,
+  batchId: string,
+  status: 'passed' | 'blocked',
+  rec: Recorder,
+): void {
+  const backlogFile = join(root, BACKLOG_RELATIVE_PATH);
+  try {
+    const text = readFileSync(backlogFile, 'utf8');
+    const result = setBatchStatus(text, batchId, status);
+    if (result.changed) {
+      writeFileSync(backlogFile, result.text);
+      rec.record('batch.status', { batch_id: batchId, from: result.from ?? '', to: status });
+    } else {
+      rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
+    }
+  } catch {
+    rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
+  }
+}
+
 /** Runs batches in --continue mode (SPEC 12.2). */
 export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
   const { root } = ctx;
@@ -1620,7 +1646,13 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
         // Rerun the same batch (attempt will increment via batchHistory).
         continue;
       }
-      // Exceeded fix_max: escalate → stop.
+      // Exceeded fix_max: escalate → update status to blocked and stop.
+      updateBacklogToDisk(root, currentBatchId, 'blocked', queueRec);
+      try {
+        await commit(root, `progress: ${currentBatchId} fix_max`, [BACKLOG_RELATIVE_PATH]);
+      } catch {
+        // Best effort: the status was written to disk even if commit fails.
+      }
       queueRec.record('escalated', { reason: 'fix_max', batch_id: currentBatchId });
       queueRec.record('queue.finished', { reason: 'fix_max', batches: batchesRun });
       return { exitCode: EXIT_CODES.BLOCK, reason: 'fix_max', batches: batchesRun };

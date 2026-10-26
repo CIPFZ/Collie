@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { loadBacklog, parseBacklog } from '../src/backlog.js';
+import { loadBacklog, parseBacklog, setBatchStatus } from '../src/backlog.js';
 import { BatchStatusSchema, type Batch } from '../src/schema/index.js';
 
 const repoRoot = join(import.meta.dirname, '..');
@@ -143,5 +143,56 @@ describe('backlog: frozen fixture (status snapshot at v01-b02 issue)', () => {
 
   it('returns batches in overview order', () => {
     expect(batches.map((b) => b.priority)).toEqual([1, 2, 3]);
+  });
+});
+
+describe('setBatchStatus (SPEC 12.2)', () => {
+  const MINI_BACKLOG = [
+    '# backlog',
+    '',
+    '## 队列总览',
+    '',
+    '| 优先级 | 批次 | 标题 | 依赖 | 状态 |',
+    '|---|---|---|---|---|',
+    '| 1 | v01-b01 | 工程骨架 | — | passed |',
+    '| 2 | v01-b02 | worker | v01-b01 | pending |',
+    '',
+    '## v01-b01 工程骨架',
+    '',
+  ].join('\n');
+
+  it('changes the status of a matching batch row', () => {
+    const result = setBatchStatus(MINI_BACKLOG, 'v01-b02', 'passed');
+    expect(result.changed).toBe(true);
+    expect(result.from).toBe('pending');
+    expect(result.text).toContain('| passed |');
+    expect(result.text).not.toContain('| pending |');
+    // Other rows stay exactly the same.
+    expect(result.text).toContain('| 1 | v01-b01 | 工程骨架 | — | passed |');
+  });
+
+  it('returns changed=false when batch id is not found', () => {
+    const result = setBatchStatus(MINI_BACKLOG, 'v99-missing', 'blocked');
+    expect(result.changed).toBe(false);
+    expect(result.text).toBe(MINI_BACKLOG);
+  });
+
+  it('preserves all other lines byte-for-byte', () => {
+    const result = setBatchStatus(MINI_BACKLOG, 'v01-b01', 'blocked');
+    expect(result.changed).toBe(true);
+    // Only the v01-b01 line should have changed; the rest is identical.
+    const originalLines = MINI_BACKLOG.split('\n');
+    const resultLines = result.text.split('\n');
+    expect(resultLines.length).toBe(originalLines.length);
+    for (let i = 0; i < originalLines.length; i++) {
+      if (originalLines[i]?.includes('v01-b01') && originalLines[i]?.includes('|')) continue;
+      expect(resultLines[i]).toBe(originalLines[i]);
+    }
+  });
+
+  it('does not change non-table lines', () => {
+    const result = setBatchStatus(MINI_BACKLOG, 'v01-b01', 'blocked');
+    expect(result.text).toContain('# backlog');
+    expect(result.text).toContain('## 队列总览');
   });
 });
