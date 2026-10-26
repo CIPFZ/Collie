@@ -123,6 +123,8 @@ model = "claude-opus-4-6"
 allowed_tools = ["Read", "Glob", "Grep", "Bash"]   # 无 Write/Edit：物理上无法改代码
 max_turns = 60
 permission_mode = "bypassPermissions"
+bash_deny = ["^\\s*git\\s+(push|commit|add|reset|checkout|rebase|merge|cherry-pick|tag|branch\\s+-[dDm]|worktree|stash)\\b", "^\\s*gh\\s"]
+  # v03-b02 后：reviewer 的 Bash 命令级黑名单（正则，匹配即拒绝）。worker 不设。schema 接受前不得写进 toml（R1 在批次 PASS 后补）
 
 [limits]
 stall_secs = 300         # 事件流静默判定卡死；v02-b04 第 1 次运行 90 秒把「正在写 report」误判为卡死，上调
@@ -374,6 +376,7 @@ type EventType =
   | 'verdict.pushed'     // v0.3：R2 推送裁定提交；字段 sha / remote / branch
   | 'verdict.push_failed' // v0.3：推送失败；字段 sha / error；不改变本轮结论
   | 'verdict.push_skipped' // v0.3：启动补推条件不满足；字段 head / reason
+  | 'tool.denied'         // v0.3：PreToolUse 钩子拒绝了一次工具调用；字段 role / tool / command / pattern
   | 'ci.verdict_commit'  // v0.3：启动时核查上一条裁定提交的 CI；字段 sha / conclusion / run_url
   | 'acceptance.failed'   // 规则 8：实测验收未满足；字段 cmd / exit_code / expect
   | 'run.orphaned' | 'worker.stalled' | 'worker.idling'
@@ -676,6 +679,15 @@ interface RunResult {
   也不得把方法拆出来再调（`const fn = q.interrupt; fn()` 会丢 `this`，SDK 内部要用 `this.request`，
   v02-b04-fix 第 1 次运行因此 TypeError），要写成 `await q.interrupt()`。
   runner 测试的替身 `interrupt` 必须依赖 `this`（读自身字段，`this` 为 undefined 时抛错），否则这类错误测不出来。
+- **工具白名单要同时传 `tools` 与 `allowedTools`**（v03-b01-fix 第 1 次运行后，reviewer 事件流落盘才看见）：SDK 的 `allowedTools`
+  只是「这些工具免询问」，**不限制可用集合**；限制可用集合要用 `tools`（`string[]`）。Collie 从 v01-b05 起只传了 `allowedTools`，
+  两个角色实际拿到的都是全部 27 个默认工具，加上 `bypassPermissions`，reviewer 的 Write / Edit 一直可用——「物理上无法改代码」
+  在 v03-b01-fix 之前从未成立，只是 reviewer 碰巧没用。runner 必须 `tools: [...allowed_tools]`、`allowedTools: [...allowed_tools]`、
+  `disallowedTools: ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']`（仅 reviewer）三者同传；初始化消息里的工具清单必须等于白名单。
+- **reviewer 的 Bash 命令级黑名单**：工具白名单挡不住 `Bash` 里的 `git push` / `git commit` / `gh`。runner 为 reviewer 注册 SDK
+  `hooks.PreToolUse`（matcher `Bash`），命令匹配 `[agent.reviewer].bash_deny` 任一正则即返回
+  `{ hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason }`，并在事件流记一条 `tool.denied`
+  （字段 role / tool / command / pattern）。`bypassPermissions` 不影响 hooks。黑名单来自配置，runner 不内置。
 - **凡传给 SDK 的选项，其类型必须 `import type` 自 `@anthropic-ai/claude-agent-sdk` 的导出**（`Options`、`SpawnOptions`、
   `SpawnedProcess` 等），用 `Pick` / 索引类型派生，不得在 Collie 里手写一份。`import type` 在运行时被擦除，不影响惰性加载。
   手写签名与 SDK 不一致时 typecheck 不报、替身测试照过，只有真实运行才炸：v02-b02 `resume` 字段名、v02-b04 `interrupt` 丢 `this`、
@@ -836,14 +848,14 @@ v0.2 期间每轮有两个人工动作：操作员推送 R2 的裁定提交、�
 - **规则 9 的场景测试**（场景 H）：fake worker 产出 `claims.pushed=false` 且远端确实没有 head，reviewer 判 PASS；
   期望 arbiter 降为 FIX，journal 有 `verdict.downgraded`（rule=9）。规则 9 在 v0.2 期间从未真实触发，场景 H 是它唯一的回归证据。
 
-### 12.2 队列与分流（v03-b02，待签）
+### 12.2 队列与分流（v03-b03，待签）
 
 `collie run --continue`：按 backlog 优先级取第一个 `pending` 且依赖已 `passed` 的批次；PASS → 标 passed、取下一个；
 FIX → 同批次返工计数 +1，≤ `fix_max` 则立即重跑，否则 BLOCK；BLOCK / 上报 → 停下、退出码 20。
 依赖未满足的批次跳过并记 `batch.skipped`；全部不可执行则 `escalated`。backlog 的状态列由 R2 写（这是 backlog 唯一允许 R2 改的内容，R1 仍是唯一的条目作者）。
 每批次结束后仍执行 11.3 的清理与 12.1 的推送；批次之间不共享任何进程。
 
-### 12.3 放行与停表（v03-b03，待签）
+### 12.3 放行与停表（v03-b04，待签）
 
 分级放行白名单（ROADMAP）：PASS 且 `claim_mismatches` 空、CI success、diff 范围在条目内、`deps_diff` 空、无许可证变化 → 自动进下一批。
 停表清单：`spec_diff_lines > 0`、`deps_diff` 非空、受保护路径改动、规则 9 连续两次、reviewer `gaps` 非空、同批次第 2 次 BLOCK → 停下等人。

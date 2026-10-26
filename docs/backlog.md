@@ -38,7 +38,8 @@
 | 20 | v02-e-drill2 | 场景 E 第 2 次演练（脏工作区 + 不补杀） | v02-e-fix | passed |
 | 21 | v02-e-fix2 | rescue_sha 跨轮查找、interrupted_at 时间 | v02-e-drill2 | passed |
 | 22 | v03-b01 | 收回人工动作：R2 推送裁定提交、启动核查其 CI、reviewer 流落盘、场景 H | v02-e-fix2 | passed |
-| 23 | v03-b01-fix | 启动补推只认失败的裁定提交，且先于救援 | v03-b01 | pending |
+| 23 | v03-b01-fix | 启动补推只认失败的裁定提交，且先于救援 | v03-b01 | passed |
+| 24 | v03-b02 | 工具白名单真正生效：tools 选项、reviewer Bash 黑名单 | v03-b01-fix | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -957,4 +958,50 @@ push 只用 `.git/config` 现成 remote，凭据与全局配置哈希不变；�
 - 改动任何受保护路径
 - 为了让测试过而删除或跳过任何测试
 - 改动裁定提交在运行末尾的正常推送路径（12.1 第一条）
+
+记录：第 1 次运行 r-20261026-082249 PASS（裁定 `cb12647`，**R2 第一次自己推送**，`verdict.pushed` 在 journal），7/7 验收通过，702 全过，R1 复核一致。
+场景 I 用真实 bare 远端与 pre-receive hook 覆盖三条路径。reviewer 事件流首次落盘（1219 行，无密钥），首次能独立核实 reviewer 真跑了测试。
+**落盘才看见的旧问题**：初始化消息列出 27 个工具，与 worker 相同——runner 只传了 `allowedTools`（免询问）没传 `tools`（可用集合），
+reviewer 的 Write / Edit 自 v01-b05 起一直可用，只是没用过；它还执行过 `gh api` 与 `git ls-remote`。进 v03-b02，在其他批次之前跑。
+
+## v03-b02 工具白名单真正生效：tools 选项、reviewer Bash 黑名单
+
+优先级：24　依赖：v03-b01-fix
+
+铁律 6「reviewer 物理上无法改代码」到今天为止从未真正成立。规格见 SPEC 3.1（`bash_deny`）、11.2（三选项同传、PreToolUse 黑名单）、3.6（`tool.denied`）。
+原 12.2「队列与分流」顺延为 v03-b03，12.3 顺延为 v03-b04。
+
+条目：
+1. `claude.ts`：`tools: [...allowed_tools]` 与 `allowedTools` 同传；reviewer 角色另传 `disallowedTools: ['Write','Edit','MultiEdit','NotebookEdit']`；
+   类型按 11.2 来自 SDK 的 `Options`。`test/runner-claude.test.ts` 断言注入的 `query()` 收到的 `options.tools` 等于白名单、
+   reviewer 的 `options.disallowedTools` 含 `Write` 与 `Edit`，worker 的不含 `disallowedTools`
+2. reviewer Bash 黑名单：`ConfigSchema` 的 `[agent.reviewer]` 加可选 `bash_deny: string[]`（正则，解析时 `new RegExp` 校验）；
+   runner 为 reviewer 注册 `hooks.PreToolUse`（matcher `Bash`），命令匹配任一正则即返回 `permissionDecision: 'deny'` 并在
+   `reviewer.stream.ndjson` 追加 `tool.denied`（role / tool / command / pattern）；`bash_deny` 缺省为空数组、不注册钩子。
+   测试：注入 fake `query()` 捕获 `options.hooks.PreToolUse`，手动调用钩子，`git push origin main` 被拒、`npm test` 放行、
+   `git  push` （多空格）被拒；schema 测试覆盖非法正则报错
+3. `test/invariants.test.ts` 加两条：`src/runner/claude.ts` 同时含 `tools:` 与 `allowedTools:`；`src/runner/claude.ts` 含 `disallowedTools`。
+   另加一个只读的运行后检查工具 `collie audit <run_id>`（`src/cli.ts`）：读 `reviewer.stream.ndjson` 的初始化消息，工具清单不等于
+   reviewer 白名单则退出码 1 并打印差集；没有事件流或没有初始化消息退出码 2。`test/cli.test.ts` 覆盖三种退出码
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| tools 与 allowedTools 同传 | `grep -qE "^\s+tools: \[" src/runner/claude.ts && grep -qE "disallowedTools" src/runner/claude.ts` | exit 0 |
+| 白名单有测试 | `grep -qE "options\.tools\|\.tools\)" test/runner-claude.test.ts && grep -qE "disallowedTools" test/runner-claude.test.ts` | exit 0 |
+| bash_deny 进 schema 且有钩子 | `grep -qE "bash_deny" src/schema/index.ts && grep -qE "PreToolUse" src/runner/claude.ts && grep -qE "tool\.denied" src/runner/claude.ts` | exit 0 |
+| 钩子有测试 | `grep -qE "PreToolUse" test/runner-claude.test.ts && grep -qE "git push" test/runner-claude.test.ts` | exit 0 |
+| audit 子命令 | `grep -qE "'audit'" src/cli.ts && grep -qE "audit" test/cli.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "disallowedTools" test/invariants.test.ts` | exit 0 |
+| SDK 概念不泄漏 | `! grep -rlE "@anthropic-ai\|PreToolUse" src --include='*.ts' \| grep -v '^src/runner/'` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（`bash_deny` 的 toml 配置由 R1 在 PASS 后补写）
+- 为了让测试过而删除或跳过任何测试
+- 给 worker 加 `disallowedTools` 或 Bash 黑名单
+- 改动 `permission_mode` 的处理
 
