@@ -176,7 +176,9 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
 前提：v02-e-fix 已 PASS，R2 跑的是含守护进程的代码（本轮启动时加载的就是）。
 1. 照常 `collie run v02-e-drill2`。每 2 秒采样 `git status --short`，等到工作区出现**未提交**的改动且 `git log` 还没有新提交时（通常在第 1 个提交之前 1~3 分钟内），立刻执行第 2 步。
 2. 记下心跳的 `pid` / `worker_pid` / `guard_pid`，`kill -9 <R2 pid>`。**不要杀 worker，不要杀守护进程。**
-3. 每 1 秒采样 worker_pid 与 guard_pid 是否存活，记录 worker 消失的时刻（期望 ≤ 5 秒）与守护进程自退的时刻。若 15 秒后 worker 仍在，记录并 `kill -9` 它，这是 v02-e-fix 条目 1 失败的证据。
+3. 每 1 秒采样 worker_pid 与 guard_pid 是否存活，记录 worker 消失的时刻（期望 ≤ 5 秒）与守护进程自退的时刻。
+   **观察关卡**：若 15 秒后 worker 仍在，`kill -9` 它、记录为 v02-e-fix 条目 1 在真实环境失败，**停下汇报，不启动第 2 次运行**。
+   worker 自己死了才继续。
 4. worker 消失后 2 秒内再执行一次 `collie run v02-e-drill2`：若守护进程还在，期望被拒绝、退出码 1，记下输出；守护进程退出后再启动。
 5. 期望：`run.orphaned`、`worker.rescued` + wip 提交、`task.md` 有 `rescue_sha` 且「上一轮中断」一节含「请先核实」字样、`interrupted_at` 含 `orphaned`、R2 取证的 `commits_actual` 含 wip 提交。
 6. 汇报把第 1~5 步的时间线单独列一段，这一段是 v0.2 的最终验收。

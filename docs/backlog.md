@@ -34,7 +34,7 @@
 | 16 | v02-b05 | 中断标记与 resume | v02-b04-fix4 | passed |
 | 17 | v02-b05-fix | 规则 9、worker_pid 时序、CI 未取证措辞 | v02-b05 | passed |
 | 18 | v02-e-drill | stream.ndjson 密钥屏蔽（场景 E 真实 kill 演练） | v02-b05-fix | passed |
-| 19 | v02-e-fix | worker 随 R2 死、取证沿用首次 base_sha、interrupted_at | v02-e-drill | pending |
+| 19 | v02-e-fix | worker 随 R2 死、取证沿用首次 base_sha、interrupted_at | v02-e-drill | passed |
 | 20 | v02-e-drill2 | 场景 E 第 2 次演练（脏工作区 + 不补杀） | v02-e-fix | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
@@ -801,6 +801,12 @@ v02-e-drill 演练暴露的三处，见 SPEC 第 11 章开头「v0.2 收口条�
 - 改动任何受保护路径
 - 为了让测试过而删除或跳过任何测试
 - 守护进程读取配置或仓库；它只认两个 pid
+
+记录：第 1 次运行 r-20261025-083535 PASS（裁定 `2d09cc4`），8/8 验收通过，670 全过，R1 复核一致、`guard.test.ts` 连跑 3 次稳定。
+守护进程为独立 `node -e`（detached、unref），只认两个 pid；取证 base 已改为沿用的首次 `base_sha`；`interrupted_at` 能取 `orphaned` 并回退到 `stream.ndjson`。
+操作员在 vitest 外做了一次真实进程实验：SIGKILL 替身 R2 后 2.5 秒 worker 与守护进程都消失。
+reviewer 对条目 1 的行为要求只给了代码位置没实跑，手册已补「行为要求必须实跑」。worker 用了 193 轮（上限 200）。
+规则 9 至今未在真实运行里触发（每轮 worker 都推送且 CI 绿）。本批次代码下一轮（v02-e-drill2）才在 R2 上生效。
 
 ## v02-e-drill2 场景 E 第 2 次演练（脏工作区 + 不补杀）
 
