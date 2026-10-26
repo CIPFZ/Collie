@@ -4,12 +4,7 @@
 // (rule 9: "evidence missing", not "claim mismatch").
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakeRunner } from '../src/runner/fake.js';
-import {
-  BATCH,
-  fooledReviewerScene,
-  Sandbox,
-  workerScene,
-} from './support/sandbox.js';
+import { fooledReviewerScene, Sandbox, workerScene } from './support/sandbox.js';
 import type { Claims } from '../src/schema/index.js';
 
 let box: Sandbox;

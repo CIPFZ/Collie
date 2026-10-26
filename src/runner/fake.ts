@@ -5,6 +5,32 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, normalize, sep } from 'node:path';
 import type { AgentRole, AgentRunner, RunHandle, RunOptions, RunResult } from './index.js';
 
+/**
+ * Minimum secret length for redaction — matches claude.ts REDACT_MIN_LENGTH.
+ * This is a security floor, not a tunable threshold.
+ */
+// eslint-disable-next-line no-restricted-syntax -- security floor, not a SPEC threshold
+const REDACT_MIN_LENGTH = 8;
+const REDACT_MASK = '***';
+
+/**
+ * Replaces secrets in an event before it reaches onEvent (RunOptions.redact contract).
+ * Mirrors the logic in claude.ts so FakeRunner honours the same interface contract.
+ */
+function redactFakeEvent(event: unknown, secrets: readonly string[]): unknown {
+  if (secrets.length === 0) return event;
+  let json = JSON.stringify(event);
+  let changed = false;
+  for (const secret of secrets) {
+    if (secret === '' || secret.length < REDACT_MIN_LENGTH) continue;
+    if (json.includes(secret)) {
+      json = json.split(secret).join(REDACT_MASK);
+      changed = true;
+    }
+  }
+  return changed ? (JSON.parse(json) as unknown) : event;
+}
+
 export interface FakeSceneContext {
   cwd: string;
   opts: RunOptions;
@@ -143,7 +169,9 @@ export class FakeRunner implements AgentRunner {
         mkdirSync(dirname(target), { recursive: true });
         writeFileSync(target, content);
       }
-      for (const event of scene.events ?? []) opts.onEvent?.(event);
+      for (const event of scene.events ?? []) {
+        opts.onEvent?.(redactFakeEvent(event, opts.redact ?? []));
+      }
       await scene.effect?.({ cwd: opts.cwd, opts, handle, stopped: stoppedPromise });
 
       // A stop during the scene (e.g. the effect called handle.stop('kill'))
