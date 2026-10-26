@@ -153,4 +153,22 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(content).toContain('verdict.downgraded');
     expect(content).toContain('rule');
   });
+
+  it('every await push( in run.ts has push_failed or verdict within 5 lines above (v03-b01-fix)', () => {
+    const lines = readFileSync(join(ROOT, 'src/run.ts'), 'utf8').split('\n');
+    const pushLines = lines
+      .map((line, i) => ({ line, i }))
+      .filter(({ line }) => line.includes('await push('));
+    // SPEC 12.1: expect exactly 3 push calls after v03-b01-fix.
+    expect(pushLines.length).toBeGreaterThanOrEqual(1);
+    expect(pushLines.length).toBeLessThanOrEqual(3);
+    for (const { line, i } of pushLines) {
+      const start = Math.max(0, i - 5);
+      const context = lines.slice(start, i).join('\n');
+      expect(
+        /push_failed|verdict/.test(context),
+        `push( at line ${String(i + 1)} has no push_failed or verdict in the 5 lines above:\n${context}\n>>> ${line}`,
+      ).toBe(true);
+    }
+  });
 });

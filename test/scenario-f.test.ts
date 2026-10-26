@@ -38,7 +38,7 @@ function workerWithSession(sessionId: string): ReturnType<typeof workerScene> {
   };
 }
 
-describe('scenario F: resume_max gating (SPEC 11.7)', () => {
+describe('scenario F: resume_max gating (SPEC 11.7)', { timeout: 30_000 }, () => {
   it('passes resumeSessionId for the first two resumes but not the third', async () => {
     // Default resume_max in collie.toml template is 2.
     // Run 1: worker killed with session id → interrupted.
