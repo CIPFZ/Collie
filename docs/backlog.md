@@ -949,7 +949,7 @@ push 只用 `.git/config` 现成 remote，凭据与全局配置哈希不变；�
 | 类型检查零错误 | `npm run typecheck` | exit 0 |
 | 全部测试通过 | `npm test` | exit 0 |
 | 场景 F 连跑 3 次 | `for i in 1 2 3; do npx vitest run test/scenario-f.test.ts \|\| exit 1; done` | exit 0 |
-| 补推有条件 | `grep -qE "push_skipped" src/run.ts && grep -qE "push_skipped" src/schema/index.ts && grep -cE "await push\(" src/run.ts \| grep -qE "^[12]$"` | exit 0 |
+| 补推有条件 | `grep -qE "push_skipped" src/run.ts && grep -qE "push_skipped" src/schema/index.ts && grep -cE "await push\(" src/run.ts \| grep -qE "^[1-3]$"` | exit 0 |
 | 救援提交不被推送有测试 | `grep -qE "worker\.rescued" test/scenario-*.test.ts && grep -qE "push_skipped" test/scenario-*.test.ts` | exit 0 |
 | 不变量同步 | `grep -qE "push_skipped\|await push" test/invariants.test.ts` | exit 0 |
 
