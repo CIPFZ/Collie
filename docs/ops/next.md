@@ -1,6 +1,6 @@
 # 下一轮指令（R1 → 操作员）
 
-HEAD 应为：见本文件最后一行「签发于」。不一致就停下报告。
+基准提交：`ac1e414`。`git pull --ff-only` 后 `git merge-base --is-ancestor ac1e414 HEAD` 必须成功，否则停下报告。
 
 ## 本轮：v03-b03 队列消费与分流
 
@@ -8,7 +8,7 @@ b02 判 PASS，a5efa19 采纳，无修补。三件事已落地：`bash_deny` 按
 v03-b03 已签；汇报改走 `docs/ops/`（见 AGENT_KICKOFF.md「交接走仓库」）。`cost_cap_usd` 等本轮成本数据。
 
 步骤：
-1. `git pull --ff-only`，确认 HEAD 等于最后一行的 sha、工作区干净、`heartbeat.json` 不存在、无残留 claude / `node -e` 进程。
+1. `git pull --ff-only`，确认基准提交是 HEAD 的祖先、工作区干净、`heartbeat.json` 不存在、无残留 claude / `node -e` 进程。
 2. `npx tsx src/cli.ts smoke` 一次。
 3. `npx tsx src/cli.ts run v03-b03`，只跑一次，不 kill。
 4. 跑完 `npx tsx src/cli.ts audit <run_id>`，期望退出码 0。**非 0 就停下，不进下一步**，把差集原样写进汇报。
@@ -22,4 +22,3 @@ v03-b03 已签；汇报改走 `docs/ops/`（见 AGENT_KICKOFF.md「交接走仓�
 
 汇报写进 `docs/ops/v03-b03-r1.md`，提交 `ops: report v03-b03 r1`，推送，然后在对话里回「已写 docs/ops/v03-b03-r1.md」。
 
-签发于：HEAD 应为本文件所在提交的父提交 ac1e414（`git rev-parse --short HEAD~1`）；本文件自身的提交只改 docs/ops/next.md
