@@ -39,7 +39,8 @@
 | 21 | v02-e-fix2 | rescue_sha 跨轮查找、interrupted_at 时间 | v02-e-drill2 | passed |
 | 22 | v03-b01 | 收回人工动作：R2 推送裁定提交、启动核查其 CI、reviewer 流落盘、场景 H | v02-e-fix2 | passed |
 | 23 | v03-b01-fix | 启动补推只认失败的裁定提交，且先于救援 | v03-b01 | passed |
-| 24 | v03-b02 | 工具白名单真正生效：tools 选项、reviewer Bash 黑名单 | v03-b01-fix | pending |
+| 24 | v03-b02 | 工具白名单真正生效：tools 选项、reviewer Bash 黑名单 | v03-b01-fix | passed |
+| 25 | v03-b03 | 队列消费与分流：--continue、fix_max 返工闸、backlog 状态列 | v03-b02 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -1004,4 +1005,48 @@ reviewer 的 Write / Edit 自 v01-b05 起一直可用，只是没用过；它还
 - 为了让测试过而删除或跳过任何测试
 - 给 worker 加 `disallowedTools` 或 Bash 黑名单
 - 改动 `permission_mode` 的处理
+
+记录：第 1 次运行 r-20261026-091509 PASS（裁定 `a5efa19`，R2 自推），10/10 验收通过，724 全过，R1 复核一致。
+`collie audit` 对本轮与上一轮 reviewer 事件流正确报出工具不一致（退出码 1），对无事件流的旧运行退出码 2。
+本轮 R2 仍是 b01-fix 代码：reviewer 工具清单 27 个属已知；reviewer Bash 全为只读 git，未用 gh。`ci.verdict_commit` 首次出现（cb12647 success，不警告）。
+成本 $45.28（平时 3~4 倍）：cache_creation 630 万 token，1 次 compact_boundary、多次后台任务（TaskCreate/TaskUpdate 本不在白名单，b02 后被挡）。
+裁定：`bash_deny` 按 SPEC 3.1 原文补进 toml（三处镜像同步）；`ls-remote` / `fetch` 不禁；`curl` 写操作暂不加；`cost_cap_usd` 等下一轮数据。
+
+## v03-b03 队列消费与分流：--continue、fix_max 返工闸、backlog 状态列
+
+优先级：25　依赖：v03-b02
+
+v0.3 的核心批次。规格见 SPEC 12.2、3.6（`batch.skipped` / `batch.status` / `queue.finished`）、11.7（返工沿用首次 `base_sha`）。
+PASS 之后操作员改用 `--continue` 连跑，不再逐批说「跑」。
+
+条目：
+1. `collie run --continue [--max N]`（`src/cli.ts` + `src/run.ts`）：选批逻辑（第一个 `pending` 且依赖全 `passed`，依赖未满足记 `batch.skipped`）、
+   分流（PASS 取下一个；FIX 计数 ≤ `fix_max` 立即重跑，否则 `escalated` reason=`fix_max` 并停；BLOCK / 上报停、退出码 20）、
+   `queue.finished`（reason / batches）。每批次结束仍走 11.3 清理与 12.1 推送；批次之间不共享进程。单批次模式行为不变
+2. backlog 状态列写入（`src/backlog.ts` 加 `setBatchStatus(text, id, status)` 纯函数 + R2 落盘）：只改该行最后一列、其余字节不动，
+   找不到或格式不符记 `batch.status` to=`unchanged`。状态文件改动并入裁定提交（`progress: ...`）。单批次模式不写
+3. 场景 J（`test/scenario-j.test.ts`，fake runner）：backlog 三个批次 A(passed)、B(pending 依赖 A)、C(pending 依赖 X 不存在)，
+   `--continue`：B 跑 PASS → 状态列变 `passed`、C 记 `batch.skipped`、`queue.finished` reason=`exhausted`；
+   第二组：B 连续 FIX 3 次（`fix_max`=2）→ 第 3 次 `escalated` reason=`fix_max`、退出码 20、B 状态 `blocked`、attempt 为 3 且 `base_sha` 三次相同；
+   第三组：`--max 1` 跑一个即停 reason=`limit`。`test/invariants.test.ts` 加「`src/backlog.ts` 有 `setBatchStatus`」「`scenario-j` 存在」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 场景 J | `npm test -- test/scenario-j.test.ts` | exit 0 |
+| 三个事件进 schema | `grep -qE "batch\.skipped" src/schema/index.ts && grep -qE "batch\.status" src/schema/index.ts && grep -qE "queue\.finished" src/schema/index.ts` | exit 0 |
+| --continue 存在 | `grep -qE "\-\-continue" src/cli.ts && grep -qE "\-\-max" src/cli.ts` | exit 0 |
+| 状态列纯函数 | `grep -qE "export function setBatchStatus" src/backlog.ts && grep -qE "setBatchStatus" test/backlog.test.ts` | exit 0 |
+| fix_max 闸有测试 | `grep -qE "fix_max" test/scenario-j.test.ts && grep -qE "escalated" test/scenario-j.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "setBatchStatus\|scenario-j" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（`docs/backlog.md` 的状态列由 R2 在运行时写，worker 不碰）
+- 为了让测试过而删除或跳过任何测试
+- 单批次模式 `collie run <batch>` 改写 backlog
+- 批次之间复用 runner、守护进程或心跳
 

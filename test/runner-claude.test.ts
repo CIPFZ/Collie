@@ -883,7 +883,12 @@ describe('runner-claude: PreToolUse bash deny hook (SPEC 11.2 v03-b02)', () => {
 
   it('reviewer options do NOT contain hooks when bash_deny is empty', async () => {
     const { query, calls } = scripted([success()]);
-    await new ClaudeRunner(config, { query }).run(
+    // The repository toml now ships a non-empty bash_deny (R1, after v03-b02); test the empty case explicitly.
+    const noDeny = {
+      ...config,
+      agent: { ...config.agent, reviewer: { ...config.agent.reviewer, bash_deny: [] } },
+    };
+    await new ClaudeRunner(noDeny, { query }).run(
       opts({
         role: 'reviewer',
         allowedTools: config.agent.reviewer.allowed_tools,

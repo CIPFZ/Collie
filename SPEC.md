@@ -367,6 +367,9 @@ interface Event {
 type EventType =
   | 'run.started' | 'run.finished'
   | 'batch.selected' | 'batch.task_written'
+  | 'batch.skipped'      // v0.3：依赖未满足；字段 batch_id / missing（依赖清单）
+  | 'batch.status'       // v0.3：R2 改写 backlog 状态列；字段 batch_id / from / to
+  | 'queue.finished'     // v0.3：--continue 结束；字段 reason（exhausted / blocked / escalated / fix_max / limit）/ batches（本次跑过的）
   | 'worker.started' | 'worker.finished' | 'worker.crashed'
   | 'reviewer.started' | 'reviewer.verdict'
   | 'claim.mismatch' | 'verdict.downgraded'
@@ -848,14 +851,26 @@ v0.2 期间每轮有两个人工动作：操作员推送 R2 的裁定提交、�
 - **规则 9 的场景测试**（场景 H）：fake worker 产出 `claims.pushed=false` 且远端确实没有 head，reviewer 判 PASS；
   期望 arbiter 降为 FIX，journal 有 `verdict.downgraded`（rule=9）。规则 9 在 v0.2 期间从未真实触发，场景 H 是它唯一的回归证据。
 
-### 12.2 队列与分流（v03-b03，待签）
+### 12.2 队列与分流（v03-b03）
 
-`collie run --continue`：按 backlog 优先级取第一个 `pending` 且依赖已 `passed` 的批次；PASS → 标 passed、取下一个；
-FIX → 同批次返工计数 +1，≤ `fix_max` 则立即重跑，否则 BLOCK；BLOCK / 上报 → 停下、退出码 20。
-依赖未满足的批次跳过并记 `batch.skipped`；全部不可执行则 `escalated`。backlog 的状态列由 R2 写（这是 backlog 唯一允许 R2 改的内容，R1 仍是唯一的条目作者）。
-每批次结束后仍执行 11.3 的清理与 12.1 的推送；批次之间不共享任何进程。
+`collie run --continue [--max N]`：不带批次名，按 backlog 优先级取第一个 `pending` 且所有依赖已 `passed` 的批次，跑完按裁决分流：
+- PASS → R2 把 backlog 状态表该行改为 `passed`（记 `batch.status`）、提交进裁定提交、推送（12.1），取下一个；
+- FIX → 同批次返工计数 +1（计数从 journal 里本批次的 `run.finished` 数出，不另存）；计数 ≤ `fix_max` 则立即重跑同批次
+  （attempt 递增、沿用首次 `base_sha`，11.7）；超过则按 BLOCK 处理并记 `escalated`（reason `fix_max`）；
+- BLOCK / 上报 → 停下，退出码 20；backlog 状态改为 `blocked`。
+依赖未满足的批次跳过并记 `batch.skipped`；队列里没有可执行批次则记 `queue.finished`（reason `exhausted` 或 `escalated`）退出码 0 / 20。
+`--max N` 限制本次最多跑 N 个批次（缺省不限），到数记 `queue.finished`（reason `limit`）退出码 0。
+每个批次结束后仍执行 11.3 的清理与 12.1 的推送；批次之间不共享任何进程，每个批次的 worker / reviewer / 守护进程都是新拉起的。
+`collie run <batch>` 单批次模式行为不变，也**不**改 backlog 状态（状态列只在 `--continue` 下由 R2 写，单批次模式仍由 R1 写）。
 
-### 12.3 放行与停表（v03-b04，待签）
+backlog 状态列的写法：只改状态表里该批次那一行的最后一列，用正则定位 `| <id> |` 开头的行，其余内容一个字节不动；
+找不到该行或该行格式不符就不改、记 `batch.status` 的 `to` 为 `unchanged` 并继续。R1 仍是唯一的条目作者（铁律 19 的受保护路径不变，
+`docs/backlog.md` 对 worker 仍是只读；R2 的这处改动在 `base_sha..head_sha` 之外，规则 2 不会把它算进 worker 的 diff）。
+
+v03-b03 的真实验证（ROADMAP：连跑 5 个真实批次）：b03 PASS 后，操作员用 `--continue` 从 b04 起连跑，中途不说「跑」；
+b04 与后续批次的汇报改成每批一个 `docs/ops/` 文件（见 AGENT_KICKOFF.md「交接走仓库」）。
+
+### 12.3 放行与停表（v03-b04，待签；b03 PASS 后 R1 细化）
 
 分级放行白名单（ROADMAP）：PASS 且 `claim_mismatches` 空、CI success、diff 范围在条目内、`deps_diff` 空、无许可证变化 → 自动进下一批。
 停表清单：`spec_diff_lines > 0`、`deps_diff` 非空、受保护路径改动、规则 9 连续两次、reviewer `gaps` 非空、同批次第 2 次 BLOCK → 停下等人。

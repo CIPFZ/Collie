@@ -147,7 +147,9 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
    读 `.collie/batches/<batch>/report.md` 与 `verdict.md`，读 `.collie/runs/<run_id>/events.ndjson`。
 4. 推送 R2 的裁定提交（`progress: <batch> ...`），确认 CI。**v03-b01 PASS 之后这一步由 R2 自己做**：你只看 journal 里有没有 `verdict.pushed`，
    有 `verdict.push_failed` 才手动推送并报告原因；启动时 stderr 若有 `warning: previous verdict commit`，原样写进汇报。
-5. 汇报，固定五段，每段只写事实、带 sha 和数字：
+5. 汇报，固定五段，每段只写事实、带 sha 和数字。**从 v03-b02 之后起，汇报不再贴给中间人，写进仓库**（见下节「交接走仓库」）：
+   文件 `docs/ops/<batch>-r<attempt>.md`，提交信息 `ops: report <batch> r<attempt>`，推送后在对话里只回一句「已写 docs/ops/<文件名>」。
+   五段内容不变：
    - worker 做了什么（提交、改动范围、用时、是否推送、claims 内容）
    - R2 实测了什么（验收逐条退出码、测试数、受保护文件行数、依赖、CI 结论）
    - 仲裁走到哪条规则，最终结果与退出码
@@ -155,9 +157,19 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
    - 需要项目所有者决定的事（逐条列，每条给你的建议）
    然后停下等指令。
 
+## 交接走仓库（v03-b02 之后）
+
+中间人不再复制粘贴。两个方向都走 `docs/ops/`：
+- **你 → R1**：五段汇报写进 `docs/ops/<batch>-r<attempt>.md`，提交并推送。`.collie/runs/` 被 gitignore，
+  R1 看不到 journal 原文，所以关键事件（`ci.resolved`、`verdict.pushed`、`tool.denied`、`run.orphaned` 等）要像现在一样把那一行原样抄进汇报。
+- **R1 → 你**：指令在 `docs/ops/next.md`，R1 每轮改写它并推送。你每轮开始先 `git pull --ff-only`，读 `docs/ops/next.md`，
+  里面写着这一轮要跑什么、重点看什么、有没有一次性动作。它写的 HEAD sha 与你 pull 到的不一致就停下报告。
+- 中间人对你只会说一个字「拉」（= pull、读 next.md、照做），对 R1 只会说「看」。没有别的话就是没有别的指令。
+- `docs/ops/` 是你唯一可写的仓库路径，只放这两类文件；不在里面写总结、不改别人的文件。
+
 ## 边界
 
-- 你不改代码、不改任何 .md、不改 toml、不签发 task。发现问题写进汇报第四段。
+- 你不改代码、不改 `docs/ops/` 之外的任何 .md、不改 toml、不签发 task。发现问题写进汇报第四段。
 - R2 的裁定提交原样推送，不修改内容；需要 rebase 时逐行比对后说明。
 - 任何对外动作（花费、推送）已获项目所有者批准，无需再问；但新增依赖、改规格由所有者定。
 - 回答用中文，提交信息英文。不写 ADR，不写总结文档。
