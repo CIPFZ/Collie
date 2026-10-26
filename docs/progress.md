@@ -462,4 +462,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v03-b01 · r-20261026-045805 · PASS
+
+- 时间：2026-10-26T05:26:46.675Z
+- 裁定：规则 10，全部 9 项验收命令 exit 0。35 test files / 695 tests 全通过。三个条目（R2 推送裁定提交与启动核查、reviewer 事件流落盘、场景 H）的结构要求与行为要求逐条核对均满足。受保护路径零变动，无新增依赖，四条额外禁止均满足。提交已推送远端（head_sha 是 remote main 的祖先）。CI 以 R2 取证为准。
+- 提交：`e930a18` `5101f67` `49a3181` `7f876e8`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，695 passed, 0 failed
+  - `npm test -- test/scenario-h.test.ts` → exit 0，4 passed, 0 failed
+  - `grep -qE "verdict\.pushed" src/schema/index.ts && grep -qE "verdict\.push_failed" src/schema/index.ts && grep -qE "ci\.verdict_commit" src/schema/index.ts` → exit 0，exit 0
+  - `grep -qE "export async function push\(" src/git.ts && grep -qE "verdict\.push_failed" src/run.ts` → exit 0，exit 0
+  - `grep -qE "previous verdict commit" src/run.ts && grep -qE "previous verdict commit" test/*.test.ts` → exit 0，exit 0
+  - `grep -qE "reviewer\.stream\.ndjson" src/run.ts && grep -qE "reviewer\.stream\.ndjson" test/*.test.ts` → exit 0，exit 0
+  - `grep -qE "scenario-h" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/40273523628
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
