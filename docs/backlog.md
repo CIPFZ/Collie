@@ -37,7 +37,8 @@
 | 19 | v02-e-fix | worker 随 R2 死、取证沿用首次 base_sha、interrupted_at | v02-e-drill | passed |
 | 20 | v02-e-drill2 | 场景 E 第 2 次演练（脏工作区 + 不补杀） | v02-e-fix | passed |
 | 21 | v02-e-fix2 | rescue_sha 跨轮查找、interrupted_at 时间 | v02-e-drill2 | passed |
-| 22 | v03-b01 | 收回人工动作：R2 推送裁定提交、启动核查其 CI、reviewer 流落盘、场景 H | v02-e-fix2 | pending |
+| 22 | v03-b01 | 收回人工动作：R2 推送裁定提交、启动核查其 CI、reviewer 流落盘、场景 H | v02-e-fix2 | passed |
+| 23 | v03-b01-fix | 启动补推只认失败的裁定提交，且先于救援 | v03-b01 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -916,4 +917,44 @@ v0.3 第一批。规格见 SPEC 12.1、3.6（三个新事件）。
 - 为了让测试过而删除或跳过任何测试
 - 推送失败时重试、抛出或改变本轮退出码
 - 改动规则 1~10 的实现（场景 H 只是测试）
+
+记录：第 1 次运行 r-20261026-045805 PASS（裁定 `79b40de`，操作员代推最后一次），9/9 验收通过，695 全过（R1 复核 3 次 1 次 `scenario-f` 10 秒超时）。
+push 只用 `.git/config` 现成 remote，凭据与全局配置哈希不变；场景 H 用真实 bare 远端且 fake worker 不 push，`verdict.downgraded` rule=9 成立。
+**越界**：`run.ts:721-727` 启动时无条件 `push`，且位于孤儿救援之后——下一次真实救援会把 `wip(collie)` 提交推上 main，违反 11.4。
+规格 12.1 原文「若本地领先远端先推送」写得不严，R1 已收紧；reviewer 未拦。PASS 维持，`v03-b01-fix` 在任何下一轮之前先跑。
+
+## v03-b01-fix 启动补推只认失败的裁定提交，且先于救援
+
+优先级：23　依赖：v03-b01
+
+规格见 SPEC 12.1（补推的唯一条件）、11.4、3.6（`verdict.push_skipped`）。**在跑任何其他批次之前先跑它**：
+现在的代码在下一次孤儿救援时会把未审核的 wip 提交推上 main。
+
+条目：
+1. `run.ts` 启动阶段：补推移到孤儿检测与救援**之前**；只有 journal 最近一条 `verdict.push_failed.sha` 等于 `HEAD` 且远端不含它时才 `push`
+   并记 `verdict.pushed`；条件不满足记 `verdict.push_skipped`（字段 head / reason，reason 取 `no_failed_push` / `head_is_not_verdict` / `already_on_remote`）；
+   没有 `push_failed` 事件时不调用 `push`、不记事件。`schema` 加 `verdict.push_skipped`
+2. 场景测试（加进 `test/scenario-e.test.ts` 或新建 `test/scenario-i.test.ts`）：
+   a. 第 1 轮 worker 写脏文件后模拟 R2 被 kill；第 2 轮启动后断言远端**不含** `worker.rescued.sha`，journal 无 `verdict.pushed`；
+   b. 第 1 轮以注入的 push 替身让裁定推送失败（`verdict.push_failed`）；第 2 轮启动后断言远端含该裁定 sha、journal 有 `verdict.pushed`；
+   c. 在 b 的基础上，第 2 轮启动前在 HEAD 上再加一个提交，断言不推送、记 `verdict.push_skipped` reason=`head_is_not_verdict`
+3. `test/invariants.test.ts` 加一条：`src/run.ts` 里 `push(` 的调用处每一处前 5 行内都有 `push_failed` 或 `verdict`
+   字样（粗略保证没有裸的启动 push）；顺带把 `scenario-f` 的 vitest 超时从默认 10 秒提到 30 秒（只改该文件的 `describe` 选项，不改断言）
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 场景 F 连跑 3 次 | `for i in 1 2 3; do npx vitest run test/scenario-f.test.ts \|\| exit 1; done` | exit 0 |
+| 补推有条件 | `grep -qE "push_skipped" src/run.ts && grep -qE "push_skipped" src/schema/index.ts && grep -cE "await push\(" src/run.ts \| grep -qE "^[12]$"` | exit 0 |
+| 救援提交不被推送有测试 | `grep -qE "worker\.rescued" test/scenario-*.test.ts && grep -qE "push_skipped" test/scenario-*.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "push_skipped\|await push" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 改动裁定提交在运行末尾的正常推送路径（12.1 第一条）
 

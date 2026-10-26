@@ -373,6 +373,7 @@ type EventType =
   | 'ci.resolved'        // 取到 CI 结论；字段 head_sha / conclusion / branch_matched / run_url / waited_secs / polls / attributed_sha（采信后代时）
   | 'verdict.pushed'     // v0.3：R2 推送裁定提交；字段 sha / remote / branch
   | 'verdict.push_failed' // v0.3：推送失败；字段 sha / error；不改变本轮结论
+  | 'verdict.push_skipped' // v0.3：启动补推条件不满足；字段 head / reason
   | 'ci.verdict_commit'  // v0.3：启动时核查上一条裁定提交的 CI；字段 sha / conclusion / run_url
   | 'acceptance.failed'   // 规则 8：实测验收未满足；字段 cmd / exit_code / expect
   | 'run.orphaned' | 'worker.stalled' | 'worker.idling'
@@ -820,7 +821,11 @@ v0.2 期间每轮有两个人工动作：操作员推送 R2 的裁定提交、�
 
 - **R2 推送裁定提交**：写完 progress 与信封、提交之后，`git push --quiet origin <expected_branch>`，记 `verdict.pushed`。
   推送失败（网络、拒绝）记 `verdict.push_failed`（字段 error），**不改变本轮结论、不重试、不抛出**，退出码照旧；
-  下一次启动时若本地 `expected_branch` 领先远端，先尝试推送一次再继续。推送用的 remote 与凭据和 worker 相同（`.git/config`）。
+  **补推的唯一条件**（v03-b01 第 1 次运行后收紧）：journal 里最近一条 `verdict.push_failed.sha` 恰好等于当前 `HEAD`，且远端不含它。
+  满足才 `push` 一次并记 `verdict.pushed`；`HEAD` 是别的东西（救援提交、worker 未审提交、任何不是裁定提交的 sha）一律不推，
+  记 `verdict.push_skipped`（字段 head / reason）。没有 `push_failed` 事件时启动阶段**不执行任何 push**。
+  补推必须在 11.3 孤儿检测与 11.4 救援**之前**执行：救援提交不推送是铁规则，启动时的 push 不得把它带上 main
+  （b01 的实现无条件推送且位于救援之后，下一次真实孤儿救援就会把 wip 提交推上 main）。推送用的 remote 与凭据和 worker 相同（`.git/config`）。
 - **启动时核查上一条裁定提交的 CI**（Q7）：`collie run` 启动阶段，取 journal 里最近一条 `verdict.pushed.sha`，
   用 token 查一次它的 CI（`queryCi`，不等待）：`failure` / `cancelled` 则 stderr 打印
   `warning: previous verdict commit <sha> CI <conclusion> (<run_url>)`，并记 `ci.verdict_commit`；
