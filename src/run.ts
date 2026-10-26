@@ -224,13 +224,43 @@ function appendStream(root: string, runId: string, event: unknown): void {
 }
 
 /**
- * SPEC 11.7 (v02-e-fix): reads the last line of stream.ndjson for a run,
- * extracting an event type and timestamp.  Used as a fallback when the journal
- * has no `run.finished` (R2 crashed before writing it).
+ * SPEC 11.7 (v02-e-fix2): refines a raw SDK event `type` when it is too broad.
+ * If `type` is `assistant` or `user`, look for a `subtype` → `type/subtype`,
+ * or for a `tool_use` content block → `tool_use/<name>`.
+ */
+function refineEventType(obj: Record<string, unknown>): string {
+  const raw = typeof obj.type === 'string' ? obj.type : 'unknown';
+  if (raw !== 'assistant' && raw !== 'user') return raw;
+  // Prefer tool_use name (most specific), then subtype.
+  if (Array.isArray(obj.content)) {
+    for (const block of obj.content as unknown[]) {
+      if (typeof block === 'object' && block !== null) {
+        const b = block as Record<string, unknown>;
+        if (b.type === 'tool_use' && typeof b.name === 'string') {
+          return `tool_use/${b.name}`;
+        }
+      }
+    }
+  }
+  if (typeof obj.subtype === 'string') return `${raw}/${obj.subtype}`;
+  return raw;
+}
+
+/**
+ * SPEC 11.7 (v02-e-fix2): reads stream.ndjson for a run, extracting the last
+ * event's refined type and timestamp.  Used as a fallback when the journal has
+ * no `run.finished` (R2 crashed before writing it).
+ *
+ * Timestamp resolution order (SPEC 11.7):
+ *   1. Last line's own `timestamp` field.
+ *   2. Nearest earlier line that has `timestamp`.
+ *   3. `heartbeatUpdatedAt` (the orphaned heartbeat's `updated_at`).
+ * The returned `ts` is never empty (`'unknown'` as the absolute last resort).
  */
 function readStreamLastEvent(
   root: string,
   runId: string,
+  heartbeatUpdatedAt?: string,
 ): { type: string; ts: string } | undefined {
   const streamPath = join(root, RUNS_RELATIVE_DIR, runId, STREAM_FILE_NAME);
   let content: string;
@@ -240,20 +270,55 @@ function readStreamLastEvent(
     return undefined;
   }
   if (content === '') return undefined;
-  const lastLine = content.split('\n').at(-1);
-  if (lastLine === undefined || lastLine.trim() === '') return undefined;
+  const lines = content.split('\n').filter((l) => l.trim() !== '');
+  if (lines.length === 0) return undefined;
+
+  // Parse the last line for type and timestamp.
+  let lastObj: Record<string, unknown> | undefined;
+  const lastLine = lines.at(-1);
+  if (lastLine === undefined) return undefined;
   try {
     const parsed: unknown = JSON.parse(lastLine);
     if (typeof parsed === 'object' && parsed !== null) {
-      const obj = parsed as Record<string, unknown>;
-      const type = typeof obj.type === 'string' ? obj.type : 'unknown';
-      const ts = typeof obj.ts === 'string' ? obj.ts : '';
-      return { type, ts };
+      lastObj = parsed as Record<string, unknown>;
     }
   } catch {
     // Corrupted last line: ignore.
   }
-  return undefined;
+  if (lastObj === undefined) return undefined;
+
+  // SPEC 11.7 (v02-e-fix2): event type refined for assistant/user messages.
+  const type = refineEventType(lastObj);
+
+  // SPEC 11.7 (v02-e-fix2): timestamp from this line, backward search, heartbeat fallback.
+  let ts = typeof lastObj.timestamp === 'string' ? lastObj.timestamp : '';
+  if (ts === '') {
+    // Search backward for the nearest line that has a timestamp.
+    for (let i = lines.length - 1 - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (line === undefined) continue;
+      try {
+        const prev: unknown = JSON.parse(line);
+        if (typeof prev === 'object' && prev !== null) {
+          const prevTs = (prev as Record<string, unknown>).timestamp;
+          if (typeof prevTs === 'string' && prevTs !== '') {
+            ts = prevTs;
+            break;
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  // Heartbeat updated_at as final fallback (SPEC 11.7).
+  if (ts === '' && typeof heartbeatUpdatedAt === 'string' && heartbeatUpdatedAt !== '') {
+    ts = heartbeatUpdatedAt;
+  }
+  // SPEC 11.7: returned time must never be empty.
+  if (ts === '') ts = 'unknown';
+
+  return { type, ts };
 }
 
 /**
@@ -458,6 +523,32 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
   let lastSessionId: string | undefined;
   let resumeCount = 0;
 
+  // SPEC 11.7 (v02-e-fix2): the excluded run (the current run) may contain
+  // run.orphaned events with heartbeat updated_at timestamps, and worker.rescued
+  // events from the orphan rescue path.  Collect both before the main loop.
+  const excludedEvents = excludeRunId !== undefined ? (allRuns.get(excludeRunId) ?? []) : [];
+  // Map from orphaned run id → heartbeat updated_at (for readStreamLastEvent fallback).
+  const orphanHeartbeatTs = new Map<string, string>();
+  for (const e of excludedEvents) {
+    if (
+      e.event === 'run.orphaned' &&
+      typeof e.orphaned_run_id === 'string' &&
+      typeof e.updated_at === 'string'
+    ) {
+      orphanHeartbeatTs.set(e.orphaned_run_id, e.updated_at);
+    }
+  }
+  // SPEC 11.7 (v02-e-fix2): rescue_sha from the current run's orphan rescue path.
+  // The rescue happens after run.orphaned and before batchHistory() is called,
+  // but excludeRunId filters it out of the main loop — check it separately.
+  const currentRunRescued = excludedEvents.findLast(
+    (e) => e.event === 'worker.rescued' && e.batch_id === batchId,
+  );
+  const currentRunRescueSha =
+    currentRunRescued !== undefined && typeof currentRunRescued.sha === 'string'
+      ? currentRunRescued.sha
+      : undefined;
+
   for (const [runId, events] of allRuns) {
     if (runId === excludeRunId) continue;
     const batchEvents = events.filter((e) => e.batch_id === batchId);
@@ -497,10 +588,13 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
 
       // SPEC 11.7 (v02-e-fix): when journal has no run.finished, fall back to
       // stream.ndjson for the last event (worker events streamed in real-time).
+      // v02-e-fix2: readStreamLastEvent now refines event type and resolves
+      // timestamp via backward search + heartbeat fallback.
       let lastType: string;
       let lastTs: string;
       if (finished === undefined) {
-        const streamEvent = readStreamLastEvent(root, runId);
+        const heartbeatTs = orphanHeartbeatTs.get(runId);
+        const streamEvent = readStreamLastEvent(root, runId, heartbeatTs);
         if (streamEvent !== undefined) {
           lastType = streamEvent.type;
           lastTs = streamEvent.ts;
@@ -520,7 +614,7 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
       lastSessionId =
         typeof workerFinished?.session_id === 'string' ? workerFinished.session_id : undefined;
 
-      // Rescue sha from worker.rescued event.
+      // Rescue sha from worker.rescued event in this run's journal.
       const rescued = batchEvents.findLast((e) => e.event === 'worker.rescued');
       rescueSha = typeof rescued?.sha === 'string' ? rescued.sha : undefined;
     } else {
@@ -529,6 +623,13 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
       rescueSha = undefined;
       lastSessionId = undefined;
     }
+  }
+
+  // SPEC 11.7 (v02-e-fix2): overlay the current run's orphan rescue sha.
+  // In the orphan path the rescue is recorded in the CURRENT run's journal
+  // (after run.orphaned), not the previous run's.  Take the last one overall.
+  if (currentRunRescueSha !== undefined) {
+    rescueSha = currentRunRescueSha;
   }
 
   return { attempt, baseSha, interruptedAt, rescueSha, lastSessionId, resumeCount };

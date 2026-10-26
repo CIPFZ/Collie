@@ -130,4 +130,15 @@ describe('structural invariants (SPEC 3.2)', () => {
       0,
     );
   });
+
+  it('rescue_sha cross-run lookup and 请先核实 are in run.ts and worker.ts (v02-e-fix2)', () => {
+    const run = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    const worker = readFileSync(join(ROOT, 'src/roles/worker.ts'), 'utf8');
+    // SPEC 11.7: rescue_sha must be looked up from both the previous run and
+    // the current run (orphan rescue path).
+    expect(run).toContain('rescue_sha');
+    expect(run).toContain('currentRunRescueSha');
+    // SPEC 11.7: task body must contain the 请先核实 sentence when rescue_sha exists.
+    expect(worker).toContain('请先核实');
+  });
 });

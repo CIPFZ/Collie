@@ -1,10 +1,12 @@
 // Scenario E (SPEC 11.9): fake worker writes files, then gets killed (effect
 // calls handle.stop('kill')). Front half: rescue commit. Back half (v02-b05):
 // attempt=2, interrupted_at, rescue_sha, base_sha reuse across attempts.
+// Orphan rescue path (v02-e-fix2): heartbeat left behind, rescue_sha cross-run.
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { git } from '../src/git.js';
+import { git, revParse } from '../src/git.js';
+import { writeHeartbeat } from '../src/heartbeat.js';
 import { EVENTS_FILE_NAME, RUNS_RELATIVE_DIR } from '../src/journal.js';
 import { batchHistory, STREAM_FILE_NAME } from '../src/run.js';
 import type { FakeScene, FakeSceneContext } from '../src/runner/fake.js';
@@ -338,13 +340,14 @@ describe('scenario E: interrupted_at orphaned and stream.ndjson fallback (SPEC 1
 
     // Stream.ndjson: worker produced some events before R2 crashed.
     // The last event has a type that is NOT worker.started.
+    // SPEC 11.7 (v02-e-fix2): SDK events use `timestamp`, not `ts`.
     writeStreamEvent(box.root, orphanRunId, {
       type: 'content_block_delta',
-      ts: '2026-01-01T00:01:00.000Z',
+      timestamp: '2026-01-01T00:01:00.000Z',
     });
     writeStreamEvent(box.root, orphanRunId, {
       type: 'tool_use',
-      ts: '2026-01-01T00:02:00.000Z',
+      timestamp: '2026-01-01T00:02:00.000Z',
     });
 
     const h = batchHistory(box.root, BATCH);
@@ -410,5 +413,175 @@ describe('scenario E: interrupted_at orphaned and stream.ndjson fallback (SPEC 1
     expect(taskContent).toContain('## 上一轮中断');
     expect(taskContent).toContain('上一轮未留下救援提交');
     expect(taskContent).toContain('git log');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scenario E: orphan rescue path via full runBatch flow (SPEC 11.7 v02-e-fix2)
+// Simulates R2 being killed: heartbeat left over, no run.finished,
+// stream.ndjson last line is a user message without timestamp.
+// The next run detects the orphan, creates a rescue commit, and generates
+// task.md with rescue_sha, 请先核实, and a refined interrupted_at.
+// ---------------------------------------------------------------------------
+
+describe('scenario E: orphan rescue path with fake runner (SPEC 11.7 v02-e-fix2)', () => {
+  /** A PID that is almost certainly not alive in the test environment. */
+  const DEAD_PID = 4194300;
+
+  it('rescue_sha in task.md matches worker.rescued, body has 请先核实, interrupted_at refined', async () => {
+    // --- Simulate round 1: R2 crashed mid-run ---
+    const orphanRunId = 'r-20260101-000000';
+    const baseSha = await revParse(box.root, 'HEAD');
+
+    // 1. Write dirty files that will become the rescue commit.
+    box.write('dirty-a.txt', 'partial work A\n');
+    box.write('dirty-b.txt', 'partial work B\n');
+
+    // 2. Write heartbeat with a dead PID → triggers orphan detection on next run.
+    writeHeartbeat(box.root, {
+      run_id: orphanRunId,
+      batch_id: BATCH,
+      pid: DEAD_PID,
+      phase: 'worker',
+      started_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-01T00:05:00.000Z',
+    });
+
+    // 3. Write journal events for the orphaned run: batch.selected + worker.started,
+    //    but NO run.finished (R2 was killed before it could write one).
+    writeJournalEvent(box.root, orphanRunId, {
+      ts: '2026-01-01T00:00:00.000Z',
+      run_id: orphanRunId,
+      batch_id: BATCH,
+      event: 'batch.selected',
+      base_sha: baseSha,
+    });
+    writeJournalEvent(box.root, orphanRunId, {
+      ts: '2026-01-01T00:00:01.000Z',
+      run_id: orphanRunId,
+      batch_id: BATCH,
+      event: 'worker.started',
+    });
+
+    // 4. Write stream.ndjson: earlier events WITH timestamp, last event is a
+    //    `user` message WITHOUT timestamp (SPEC 11.7: forces backward search).
+    //    The user message has a tool_use content block so the type is refined
+    //    from bare `user` to `tool_use/Bash` (SPEC 11.7 v02-e-fix2).
+    writeStreamEvent(box.root, orphanRunId, {
+      type: 'assistant',
+      content: [{ type: 'tool_use', name: 'Bash' }],
+      timestamp: '2026-01-01T00:03:00.000Z',
+    });
+    writeStreamEvent(box.root, orphanRunId, {
+      type: 'user',
+      content: [{ type: 'tool_use', name: 'Bash' }],
+      // No timestamp — tests backward search and non-empty ts guarantee.
+    });
+
+    // --- Round 2: collie run detects orphan and generates task.md ---
+    const runner = new FakeRunner([
+      workerScene(box, { passing: 5, failing: 0, push: true, claims: honestClaims(5, true) }),
+      fooledReviewerScene(box),
+    ]);
+    const code = await box.run(runner);
+    expect(code).toBe(0);
+
+    // --- Assertions ---
+    const events = box.events();
+
+    // A. worker.rescued event must exist (orphan rescue created a commit).
+    const rescued = events.find((e) => e.event === 'worker.rescued');
+    expect(rescued).toBeDefined();
+    const rescueSha = rescued?.sha as string;
+    expect(rescueSha).toMatch(/^[0-9a-f]{7,40}$/);
+
+    // B. task.md frontmatter must have rescue_sha matching the rescued event.
+    const taskContent = box.read(`.collie/batches/${BATCH}/task.md`);
+    expect(taskContent).toContain('rescue_sha');
+    expect(taskContent).toContain(rescueSha);
+
+    // C. task.md body must contain the 请先核实 sentence (SPEC 11.7).
+    expect(taskContent).toContain('请先核实');
+
+    // D. interrupted_at must contain 'orphaned' and have non-empty time.
+    //    YAML may or may not quote the value; match both forms.
+    const iaMatch = /interrupted_at:\s*"?([^\n"]+)"?/.exec(taskContent);
+    expect(iaMatch).toBeTruthy();
+    const interruptedAt = iaMatch?.[1] ?? '';
+    expect(interruptedAt).toContain('orphaned');
+
+    // Time part (after @) must not be empty (SPEC 11.7: time must never be empty).
+    const atIdx = interruptedAt.lastIndexOf('@');
+    expect(atIdx).toBeGreaterThan(0);
+    const timePart = interruptedAt.slice(atIdx + 1);
+    expect(timePart).toBeTruthy();
+    expect(timePart.length).toBeGreaterThan(0);
+    // The timestamp comes from backward search: '2026-01-01T00:03:00.000Z'.
+    expect(timePart).toMatch(/^\d{4}-\d{2}-\d{2}/);
+
+    // E. Event type in interrupted_at must NOT be bare 'user' (v02-e-fix2 refinement).
+    //    It should be 'tool_use/Bash' because the user message had tool_use content.
+    expect(interruptedAt).toContain('tool_use');
+    expect(interruptedAt).not.toMatch(/ user@/);
+  });
+
+  it('heartbeat updated_at is the final timestamp fallback when stream has no timestamps', async () => {
+    // Variant: stream.ndjson has NO timestamps at all → falls back to heartbeat.
+    const orphanRunId = 'r-20260101-000002';
+    const baseSha = await revParse(box.root, 'HEAD');
+
+    // Dirty files for rescue.
+    box.write('dirty-c.txt', 'partial work C\n');
+
+    // Heartbeat with a known updated_at.
+    writeHeartbeat(box.root, {
+      run_id: orphanRunId,
+      batch_id: BATCH,
+      pid: DEAD_PID,
+      phase: 'worker',
+      started_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-01T00:07:42.000Z',
+    });
+
+    // Journal: no run.finished.
+    writeJournalEvent(box.root, orphanRunId, {
+      ts: '2026-01-01T00:00:00.000Z',
+      run_id: orphanRunId,
+      batch_id: BATCH,
+      event: 'batch.selected',
+      base_sha: baseSha,
+    });
+    writeJournalEvent(box.root, orphanRunId, {
+      ts: '2026-01-01T00:00:01.000Z',
+      run_id: orphanRunId,
+      batch_id: BATCH,
+      event: 'worker.started',
+    });
+
+    // Stream: only a bare user message, no timestamp anywhere.
+    writeStreamEvent(box.root, orphanRunId, {
+      type: 'user',
+      // No timestamp, no earlier events either → heartbeat fallback.
+    });
+
+    // Round 2.
+    const runner = new FakeRunner([
+      workerScene(box, { passing: 5, failing: 0, push: true, claims: honestClaims(5, true) }),
+      fooledReviewerScene(box),
+    ]);
+    await box.run(runner);
+
+    const taskContent = box.read(`.collie/batches/${BATCH}/task.md`);
+    const iaMatch = /interrupted_at:\s*"?([^\n"]+)"?/.exec(taskContent);
+    expect(iaMatch).toBeTruthy();
+    const interruptedAt = iaMatch?.[1] ?? '';
+
+    // Time must not be empty: the heartbeat updated_at is the fallback.
+    const atIdx = interruptedAt.lastIndexOf('@');
+    expect(atIdx).toBeGreaterThan(0);
+    const timePart = interruptedAt.slice(atIdx + 1);
+    expect(timePart).toBeTruthy();
+    // The fallback timestamp should be the heartbeat's updated_at.
+    expect(timePart).toContain('2026-01-01T00:07:42');
   });
 });
