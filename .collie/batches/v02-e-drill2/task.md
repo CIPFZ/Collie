@@ -1,11 +1,11 @@
 ---
 schema_version: 1
-run_id: r-20261026-025529
+run_id: r-20261026-025925
 batch_id: v02-e-drill2
 base_sha: 7f9393976cd7a3da90e287e57d4317b4259d981a
-created_at: 2026-10-26T02:55:29.834Z
-attempt: 1
-interrupted_at: null
+created_at: 2026-10-26T02:59:25.208Z
+attempt: 2
+interrupted_at: r-20261026-025529 orphaned user@
 issued_by: collie
 ---
 
@@ -43,3 +43,9 @@ issued_by: collie
 完成后写 `.collie/batches/v02-e-drill2/report.md`：固定四段（做了什么 / 测试结果 / 偏离或疑问 / 下一步建议）
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v02-e-drill2` 为提交信息单独提交并推送该文件。
+
+## 上一轮中断
+
+中断信息：`r-20261026-025529 orphaned user@`
+
+上一轮未留下救援提交，请从 `git log` 核实已完成到哪一步。
