@@ -483,4 +483,23 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v03-b01-fix · r-20261026-082249 · PASS
+
+- 时间：2026-10-26T08:50:36.483Z
+- 裁定：规则 10，全部 7 条验收命令实跑通过；3 个条目的代码实现与测试覆盖逐条核对满足；受保护文件与依赖无变化；额外禁止逐条满足。CI 以 R2 取证为准。
+- 提交：`6a96607` `1832377` `9faa3d0` `13a5cee`
+- 验收命令：7/7 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，702 passed, 0 failed
+  - `for i in 1 2 3; do npx vitest run test/scenario-f.test.ts || exit 1; done` → exit 0，4 passed, 0 failed
+  - `grep -qE "push_skipped" src/run.ts && grep -qE "push_skipped" src/schema/index.ts && grep -cE "await push\(" src/run.ts | grep -qE "^[1-3]$"` → exit 0，exit 0
+  - `grep -qE "worker\.rescued" test/scenario-*.test.ts && grep -qE "push_skipped" test/scenario-*.test.ts` → exit 0，exit 0
+  - `grep -qE "push_skipped|await push" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/40294162377
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
