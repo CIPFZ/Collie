@@ -426,4 +426,21 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v02-e-drill2 · r-20261026-025925 · PASS
+
+- 时间：2026-10-26T03:12:54.654Z
+- 裁定：规则 10，五项验收全部实跑通过，三条目逐条核对有据，受保护文件零改动，无依赖变化，无范围蔓延。CI 以 R2 取证为准。
+- 提交：`be95a2e` `6158611` `69f6922` `fa469de` `b076c7b`
+- 验收命令：5/5 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，672 passed, 0 failed
+  - `grep -qE "中断链" src/cli.ts && grep -qE "中断链" test/show.test.ts` → exit 0，exit 0
+  - `grep -qE "^## .*中断与恢复" README.md` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/40262228514
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
