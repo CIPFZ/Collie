@@ -136,6 +136,52 @@ describe('schema: CollieConfig round-trip', () => {
       }),
     ).toEqual(['project.repo', 'ci.provider']);
   });
+
+  it('accepts valid bash_deny regex patterns in reviewer config', () => {
+    const withPatterns = {
+      ...validConfig,
+      agent: {
+        ...validConfig.agent,
+        reviewer: {
+          ...validConfig.agent.reviewer,
+          bash_deny: ['^\\s*git\\s+push\\b', '^\\s*gh\\s'],
+        },
+      },
+    };
+    expect(CollieConfigSchema.safeParse(withPatterns).success).toBe(true);
+  });
+
+  it('rejects invalid regex in bash_deny', () => {
+    const withBadRegex = {
+      ...validConfig,
+      agent: {
+        ...validConfig.agent,
+        reviewer: {
+          ...validConfig.agent.reviewer,
+          bash_deny: ['(unclosed'],
+        },
+      },
+    };
+    const result = CollieConfigSchema.safeParse(withBadRegex);
+    expect(result.success).toBe(false);
+  });
+
+  it('defaults bash_deny to empty array when omitted', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructure to omit
+    const { bash_deny: _bd, ...reviewerWithout } = validConfig.agent.reviewer;
+    const withoutBashDeny = {
+      ...validConfig,
+      agent: {
+        ...validConfig.agent,
+        reviewer: reviewerWithout,
+      },
+    };
+    const result = CollieConfigSchema.safeParse(withoutBashDeny);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.agent.reviewer.bash_deny).toEqual([]);
+    }
+  });
 });
 
 describe('schema: Acceptance round-trip', () => {

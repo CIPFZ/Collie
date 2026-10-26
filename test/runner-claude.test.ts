@@ -10,6 +10,7 @@ import {
   type ClaudeQuery,
   type ClaudeQueryIterable,
   type ClaudeQueryParams,
+  type HookInput,
   type SpawnOptions,
 } from '../src/runner/claude.js';
 import type { RunHandle, RunOptions } from '../src/runner/index.js';
@@ -762,5 +763,177 @@ describe('runner-claude: stream redaction (v02-e-drill)', () => {
       opts({ onEvent: (e) => seen.push(e), redact: [TOKEN_A, TOKEN_B] }),
     );
     expect(textOf(seen[0])).toBe('*** and ***');
+  });
+});
+
+describe('runner-claude: tools whitelist and disallowedTools (SPEC 11.2 v03-b02)', () => {
+  it('options.tools equals the role whitelist (worker)', async () => {
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(config, { query }).run(opts());
+    expect(calls[0]?.options?.tools).toEqual(config.agent.worker.allowed_tools);
+  });
+
+  it('options.tools equals the role whitelist (reviewer)', async () => {
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(config, { query }).run(
+      opts({
+        role: 'reviewer',
+        allowedTools: config.agent.reviewer.allowed_tools,
+        maxTurns: config.agent.reviewer.max_turns,
+      }),
+    );
+    expect(calls[0]?.options?.tools).toEqual(config.agent.reviewer.allowed_tools);
+  });
+
+  it('reviewer options contain disallowedTools with Write and Edit', async () => {
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(config, { query }).run(
+      opts({
+        role: 'reviewer',
+        allowedTools: config.agent.reviewer.allowed_tools,
+        maxTurns: config.agent.reviewer.max_turns,
+      }),
+    );
+    const disallowed = calls[0]?.options?.disallowedTools;
+    expect(disallowed).toBeDefined();
+    expect(disallowed).toContain('Write');
+    expect(disallowed).toContain('Edit');
+    expect(disallowed).toContain('MultiEdit');
+    expect(disallowed).toContain('NotebookEdit');
+  });
+
+  it('worker options do NOT contain disallowedTools', async () => {
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(config, { query }).run(opts());
+    expect(calls[0]?.options).not.toHaveProperty('disallowedTools');
+  });
+});
+
+describe('runner-claude: PreToolUse bash deny hook (SPEC 11.2 v03-b02)', () => {
+  /** Config with bash_deny patterns for the reviewer. */
+  const configWithBashDeny: typeof config = {
+    ...config,
+    agent: {
+      ...config.agent,
+      reviewer: {
+        ...config.agent.reviewer,
+        bash_deny: [
+          '^\\s*git\\s+(push|commit|add|reset|checkout|rebase|merge|cherry-pick|tag|branch\\s+-[dDm]|worktree|stash)\\b',
+          '^\\s*gh\\s',
+        ],
+      },
+    },
+  };
+
+  /** Runs the reviewer with bash_deny config and returns the PreToolUse hook function. */
+  async function getHook(
+    onEvent?: (e: unknown) => void,
+  ): Promise<(input: HookInput, id: string, opts: { signal: AbortSignal }) => Promise<unknown>> {
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(configWithBashDeny, { query }).run(
+      opts({
+        role: 'reviewer',
+        allowedTools: config.agent.reviewer.allowed_tools,
+        maxTurns: config.agent.reviewer.max_turns,
+        ...(onEvent === undefined ? {} : { onEvent }),
+      }),
+    );
+    const matchers = calls[0]?.options?.hooks?.PreToolUse;
+    expect(matchers).toBeDefined();
+    const hookFn = matchers?.[0]?.hooks[0];
+    expect(hookFn).toBeTypeOf('function');
+    return hookFn as unknown as (
+      input: HookInput,
+      id: string,
+      opts: { signal: AbortSignal },
+    ) => Promise<unknown>;
+  }
+
+  function bashInput(command: string): HookInput {
+    return {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      tool_input: { command },
+      tool_use_id: 'tu_test',
+    } as unknown as HookInput;
+  }
+
+  it('reviewer options contain hooks.PreToolUse when bash_deny is non-empty', async () => {
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(configWithBashDeny, { query }).run(
+      opts({
+        role: 'reviewer',
+        allowedTools: config.agent.reviewer.allowed_tools,
+        maxTurns: config.agent.reviewer.max_turns,
+      }),
+    );
+    const hooks = calls[0]?.options?.hooks;
+    expect(hooks).toBeDefined();
+    expect(hooks?.PreToolUse).toBeDefined();
+    expect(hooks?.PreToolUse).toHaveLength(1);
+    expect(hooks?.PreToolUse?.[0]?.matcher).toBe('Bash');
+    expect(hooks?.PreToolUse?.[0]?.hooks).toHaveLength(1);
+  });
+
+  it('worker options do NOT contain hooks even when reviewer has bash_deny', async () => {
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(configWithBashDeny, { query }).run(opts());
+    expect(calls[0]?.options?.hooks).toBeUndefined();
+  });
+
+  it('reviewer options do NOT contain hooks when bash_deny is empty', async () => {
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(config, { query }).run(
+      opts({
+        role: 'reviewer',
+        allowedTools: config.agent.reviewer.allowed_tools,
+        maxTurns: config.agent.reviewer.max_turns,
+      }),
+    );
+    expect(calls[0]?.options?.hooks).toBeUndefined();
+  });
+
+  it('hook denies "git push origin main" and emits tool.denied event', async () => {
+    const events: unknown[] = [];
+    const hookFn = await getHook((e) => events.push(e));
+    const result = await hookFn(bashInput('git push origin main'), 'tu_1', {
+      signal: AbortSignal.timeout(5000),
+    });
+    // Should deny
+    const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
+      .hookSpecificOutput;
+    expect(output?.permissionDecision).toBe('deny');
+    // Should have emitted a tool.denied event
+    const denied = events.find(
+      (e) =>
+        typeof e === 'object' && e !== null && (e as { event?: string }).event === 'tool.denied',
+    ) as
+      { event: string; role: string; tool: string; command: string; pattern: string } | undefined;
+    expect(denied).toBeDefined();
+    expect(denied?.role).toBe('reviewer');
+    expect(denied?.tool).toBe('Bash');
+    expect(denied?.command).toBe('git push origin main');
+  });
+
+  it('hook allows "npm test" (no match)', async () => {
+    const hookFn = await getHook();
+    const result = await hookFn(bashInput('npm test'), 'tu_2', {
+      signal: AbortSignal.timeout(5000),
+    });
+    // Should NOT deny — return empty object
+    const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
+      .hookSpecificOutput;
+    expect(output).toBeUndefined();
+  });
+
+  it('hook denies "git  push" (multiple spaces)', async () => {
+    const hookFn = await getHook();
+    const result = await hookFn(bashInput('git  push'), 'tu_3', {
+      signal: AbortSignal.timeout(5000),
+    });
+    // The pattern uses \s+ so double-space should also match
+    const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
+      .hookSpecificOutput;
+    expect(output?.permissionDecision).toBe('deny');
   });
 });
