@@ -194,7 +194,7 @@ export const EVENT_TYPES = [
   'verdict.push_skipped',
   // v0.3 (SPEC 12.1): startup CI check of the previous verdict commit.
   'ci.verdict_commit',
-  // v0.3 (SPEC 11.2, v03-b02): PreToolUse hook denied a tool call.
+  // v0.3 (SPEC 11.2, v03-b02): a bash-deny hook denied a tool call.
   'tool.denied',
 ] as const;
 

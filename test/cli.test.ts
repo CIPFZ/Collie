@@ -1,9 +1,11 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runIdAt } from '../src/cli.js';
+import { AUDIT_EXIT, runIdAt } from '../src/cli.js';
 import { loadConfig, parseConfig } from '../src/config.js';
 import { git, log } from '../src/git.js';
+import { RUNS_RELATIVE_DIR } from '../src/journal.js';
+import { REVIEWER_STREAM_FILE_NAME } from '../src/run.js';
 import { FakeRunner } from '../src/runner/fake.js';
 import {
   BATCH,
@@ -144,5 +146,63 @@ describe('cli: init, show and the R2 commits', () => {
     const output = box.output.join('');
     expect(output).toContain('smoke failed');
     expect(output).toContain('cannot connect');
+  });
+});
+
+describe('cli: audit reviewer tool whitelist (SPEC 11.2 v03-b02)', () => {
+  let box: Sandbox;
+
+  beforeEach(async () => {
+    box = await Sandbox.create();
+  });
+
+  afterEach(() => {
+    box.dispose();
+  });
+
+  const RUN_ID = 'r-20261019-120000';
+
+  /** Write a reviewer.stream.ndjson with the given lines as raw JSON. */
+  function writeStream(lines: unknown[]): void {
+    const dir = join(box.root, RUNS_RELATIVE_DIR, RUN_ID);
+    mkdirSync(dir, { recursive: true });
+    const content = lines.map((l) => JSON.stringify(l)).join('\n') + '\n';
+    writeFileSync(join(dir, REVIEWER_STREAM_FILE_NAME), content);
+  }
+
+  it('exit 0 when init tools match reviewer whitelist', async () => {
+    const config = loadConfig(box.root);
+    const tools = config.agent.reviewer.allowed_tools;
+    writeStream([
+      { type: 'system', subtype: 'init', tools },
+      { type: 'result', subtype: 'success' },
+    ]);
+    expect(await box.cli(['audit', RUN_ID], undefined)).toBe(AUDIT_EXIT.MATCH);
+    expect(box.output.join('')).toContain('tools match');
+  });
+
+  it('exit 1 when init tools do not match reviewer whitelist', async () => {
+    writeStream([
+      { type: 'system', subtype: 'init', tools: ['Read', 'Glob', 'Grep', 'Bash', 'Write'] },
+      { type: 'result', subtype: 'success' },
+    ]);
+    expect(await box.cli(['audit', RUN_ID], undefined)).toBe(AUDIT_EXIT.MISMATCH);
+    const output = box.output.join('');
+    expect(output).toContain('mismatch');
+    expect(output).toContain('extra: Write');
+  });
+
+  it('exit 2 when reviewer.stream.ndjson is missing', async () => {
+    expect(await box.cli(['audit', RUN_ID], undefined)).toBe(AUDIT_EXIT.NO_DATA);
+    expect(box.output.join('')).toContain('not found');
+  });
+
+  it('exit 2 when no init message exists in the stream', async () => {
+    writeStream([
+      { type: 'assistant', content: [{ type: 'text', text: 'hello' }] },
+      { type: 'result', subtype: 'success' },
+    ]);
+    expect(await box.cli(['audit', RUN_ID], undefined)).toBe(AUDIT_EXIT.NO_DATA);
+    expect(box.output.join('')).toContain('no init message');
   });
 });

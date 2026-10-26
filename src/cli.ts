@@ -14,7 +14,7 @@ import type { Clock, FetchLike } from './ci.js';
 import { CONFIG_RELATIVE_PATH, parseConfig } from './config.js';
 import { git } from './git.js';
 import { createJournal, EVENTS_FILE_NAME, RUNS_RELATIVE_DIR } from './journal.js';
-import { EXIT_CODES, readEnvelope, runBatch } from './run.js';
+import { EXIT_CODES, readEnvelope, REVIEWER_STREAM_FILE_NAME, runBatch } from './run.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { AgentRunner } from './runner/index.js';
 import { RunIdSchema, type Event } from './schema/index.js';
@@ -323,6 +323,77 @@ async function smoke(deps: CliDeps, runnerChoice?: RunnerChoice): Promise<number
   }
 }
 
+/* eslint-disable no-restricted-syntax, @typescript-eslint/no-magic-numbers -- audit-specific exit codes (SPEC 11.2 v03-b02) */
+/** Exit codes for `collie audit` (SPEC 11.2 v03-b02). */
+export const AUDIT_EXIT = { MATCH: 0, MISMATCH: 1, NO_DATA: 2 } as const;
+/* eslint-enable no-restricted-syntax, @typescript-eslint/no-magic-numbers */
+
+/**
+ * `collie audit <run_id>`: reads reviewer.stream.ndjson, extracts the init
+ * message's tool list, compares it with the reviewer whitelist from config.
+ * Exit 0 = match, 1 = mismatch (prints diff), 2 = no stream or no init.
+ */
+function audit(deps: CliDeps, runId: string): number {
+  const streamPath = join(deps.cwd, RUNS_RELATIVE_DIR, runId, REVIEWER_STREAM_FILE_NAME);
+  let content: string;
+  try {
+    content = readFileSync(streamPath, 'utf8');
+  } catch {
+    deps.err(`${REVIEWER_STREAM_FILE_NAME} not found for run ${runId}\n`);
+    return AUDIT_EXIT.NO_DATA;
+  }
+  if (content.trim() === '') {
+    deps.err(`${REVIEWER_STREAM_FILE_NAME} is empty for run ${runId}\n`);
+    return AUDIT_EXIT.NO_DATA;
+  }
+
+  // Find the SDK init message: { type: 'system', subtype: 'init', tools: [...] }
+  const lines = content.trim().split('\n');
+  let initTools: string[] | undefined;
+  for (const line of lines) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      (parsed as Record<string, unknown>).type === 'system' &&
+      (parsed as Record<string, unknown>).subtype === 'init' &&
+      Array.isArray((parsed as Record<string, unknown>).tools)
+    ) {
+      initTools = (parsed as Record<string, unknown>).tools as string[];
+      break;
+    }
+  }
+  if (initTools === undefined) {
+    deps.err(`no init message found in ${REVIEWER_STREAM_FILE_NAME} for run ${runId}\n`);
+    return AUDIT_EXIT.NO_DATA;
+  }
+
+  const config = loadConfig(deps.cwd);
+  const whitelist = [...config.agent.reviewer.allowed_tools].sort();
+  const actual = [...initTools].sort();
+
+  if (JSON.stringify(actual) === JSON.stringify(whitelist)) {
+    deps.out(`audit ${runId}: tools match reviewer whitelist\n`);
+    return AUDIT_EXIT.MATCH;
+  }
+
+  // Print the symmetric difference.
+  const whitelistSet = new Set(whitelist);
+  const actualSet = new Set(actual);
+  const extra = actual.filter((t) => !whitelistSet.has(t));
+  const missing = whitelist.filter((t) => !actualSet.has(t));
+  const parts: string[] = [];
+  if (extra.length > 0) parts.push(`extra: ${extra.join(', ')}`);
+  if (missing.length > 0) parts.push(`missing: ${missing.join(', ')}`);
+  deps.err(`audit ${runId}: tools mismatch (${parts.join('; ')})\n`);
+  return AUDIT_EXIT.MISMATCH;
+}
+
 /** Parses argv (without node and script) and runs one command; resolves with the exit code. */
 export async function main(argv: readonly string[], deps: CliDeps): Promise<number> {
   let code: number = EXIT_CODES.ERROR;
@@ -378,6 +449,15 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
         return;
       }
       code = await smoke(deps, kind === undefined ? undefined : { kind });
+    });
+  program
+    .command('audit')
+    .description(
+      'check that the reviewer init message tools match the whitelist (exit 0 match / 1 mismatch / 2 no data)',
+    )
+    .argument('<run_id>')
+    .action((runId: string) => {
+      code = audit(deps, runId);
     });
 
   try {

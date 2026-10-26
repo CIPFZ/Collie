@@ -171,4 +171,18 @@ describe('structural invariants (SPEC 3.2)', () => {
       ).toBe(true);
     }
   });
+
+  it('src/runner/claude.ts simultaneously contains tools: and allowedTools: (v03-b02)', () => {
+    const content = readFileSync(join(ROOT, 'src/runner/claude.ts'), 'utf8');
+    // SPEC 11.2 (v03-b02): both must be present to restrict the available tool set
+    // while also bypassing permission prompts for those tools.
+    expect(content).toMatch(/tools:/);
+    expect(content).toMatch(/allowedTools:/);
+  });
+
+  it('src/runner/claude.ts contains disallowedTools (v03-b02)', () => {
+    const content = readFileSync(join(ROOT, 'src/runner/claude.ts'), 'utf8');
+    // SPEC 11.2 (v03-b02): reviewer must have disallowedTools to physically block write tools.
+    expect(content).toContain('disallowedTools');
+  });
 });
