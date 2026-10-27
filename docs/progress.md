@@ -615,4 +615,27 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v03-b04 · r-20261027055553 · PASS
+
+- 时间：2026-10-27T06:05:46.956Z
+- 裁定：规则 10，全部 11 条验收命令实跑通过，三个条目结构和行为要求均满足，额外禁止无违反，提交已推送。CI 以 R2 取证为准。
+- 提交：`8beae0d` `d416710`
+- 验收命令：11/11 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，792 passed, 0 failed
+  - `npm test -- test/scenario-l.test.ts` → exit 0，10 passed, 0 failed
+  - `grep -qE "queue\.paused" src/schema/index.ts && grep -qE "batch\.retried" src/schema/index.ts` → exit 0，exit 0
+  - `grep -qE "export function gateDecision" src/gate.ts && ! grep -qE "runner|run\.js" src/gate.ts` → exit 0，exit 0
+  - `grep -qE "\b30\b" src/cli.ts && grep -qE "\b30\b" test/scenario-l.test.ts` → exit 0，exit 0
+  - `grep -qE "batch\.retried" src/run.ts && grep -qE "fix_max" test/scenario-l.test.ts` → exit 0，exit 0
+  - `grep -qE "rule9_twice" src/run.ts && grep -qE "rule9_twice" test/scenario-l.test.ts` → exit 0，exit 0
+  - `grep -cE "^\s+it\(" test/gate.test.ts | grep -qE "^([7-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `grep -qE "gate\.ts|scenario-l" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/40458356938
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->

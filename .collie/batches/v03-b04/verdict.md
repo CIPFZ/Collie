@@ -1,4 +1,6 @@
-Now I have all the evidence I need. Let me compile the verdict.
+All checks pass. Let me now compile my verdict.
+
+---
 
 # 批次 v03-b04 审核
 
@@ -7,134 +9,71 @@ Now I have all the evidence I need. Let me compile the verdict.
 ### 1. 提交事实
 
 ```
-$ git log --oneline eb22b9e45ee2cb48a9f95fe7182c6e511b18380d..8beae0d569fa96b2c2c94bb16781cd4278d62bf2
+$ git log --oneline eb22b9e..d416710
+d416710 fix: remove 'runner' word from gate.ts comment to satisfy acceptance grep
+75ab050 docs: issue v03-b04 task envelope
+4a00255 progress: v03-b04 FIX
+51c5d2d report(collie): v03-b04
 8beae0d gate: implement SPEC 12.3 gate decision, rule 1 auto-retry, rule 9 consecutive
 55bba57 docs: issue v03-b04 task envelope
 ```
 
-两个提交。`git log --format='%H'` 得到完整 SHA：
-- `8beae0d569fa96b2c2c94bb16781cd4278d62bf2`
-- `55bba5745c02dc79c0d7da2943ed90db0288520c`
-
-远端：`git branch -r --contains 8beae0d569fa96b2c2c94bb16781cd4278d62bf2` 返回 `origin/main`——head_sha 已推送到远端。
-
-### 2. 受保护路径
+6 commits in range. Worker implementation commits: `8beae0d` (main implementation), `d416710` (fix for acceptance grep). R2 envelope commits: `55bba57`, `51c5d2d`, `4a00255`, `75ab050`.
 
 ```
-$ git diff --stat eb22b9e..8beae0d -- SPEC.md CONSTRAINTS.md ROADMAP.md ROLES.md 'AGENT-*.md' docs/backlog.md docs/decisions docs/progress.md .collie/collie.toml
-(无输出)
+$ git branch -r --contains d416710
+origin/HEAD -> origin/main
+origin/main
+```
+Head commit confirmed pushed to `origin/main`.
+
+### 2. 受保护文件
+
+```
+$ git diff --stat eb22b9e..d416710 -- SPEC.md CONSTRAINTS.md ROADMAP.md ROLES.md 'AGENT-*.md' docs/backlog.md docs/decisions docs/progress.md .collie/collie.toml
+ docs/progress.md | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
 ```
 
-受保护路径未被改动。`spec_diff_lines = 0`。
+`docs/progress.md` was modified — but only by R2's `4a00255 progress: v03-b04 FIX` commit (from the first FIX attempt). Worker commits (`8beae0d`, `d416710`) do not touch any protected files (verified via per-commit diff).
 
 ### 3. 依赖变化
 
-```
-$ git diff eb22b9e..8beae0d -- package.json package-lock.json
-(无输出)
-```
+`package.json` and `package-lock.json` — no changes in the diff. Zero new dependencies.
 
-无依赖变更。`deps_diff = []`。
+### 4. 验收命令实跑
 
-### 4. 文件范围检查
+全部 11 条验收命令，逐条实跑：
+
+| # | 命令 | 期望 | 退出码 | 结果 |
+|---|---|---|---|---|
+| 1 | `npm run lint` | exit 0 | 0 | ✅ All matched files use Prettier code style! |
+| 2 | `npm run typecheck` | exit 0 | 0 | ✅ tsc -p tsconfig.json |
+| 3 | `npm test` | exit 0 | 0 | ✅ 39 test files, 792 tests passed, 0 failed |
+| 4 | `npm test -- test/scenario-l.test.ts` | exit 0 | 0 | ✅ 1 test file, 10 tests passed |
+| 5 | schema events | exit 0 | 0 | ✅ queue.paused and batch.retried found |
+| 6 | gate pure function | exit 0 | 0 | ✅ export function gateDecision found, no runner/run.js |
+| 7 | exit code 30 | exit 0 | 0 | ✅ 30 in cli.ts and scenario-l.test.ts |
+| 8 | rule 1 retry | exit 0 | 0 | ✅ batch.retried in run.ts, fix_max in scenario-l.test.ts |
+| 9 | rule 9 consecutive | exit 0 | 0 | ✅ rule9_twice in run.ts and scenario-l.test.ts |
+| 10 | 7+ gate tests | exit 0 | 0 | ✅ gate.test.ts has 11 it() blocks |
+| 11 | invariants | exit 0 | 0 | ✅ gate.ts and scenario-l found in invariants.test.ts |
+
+### 5. 行为要求实跑
 
 ```
-$ git diff --name-only eb22b9e..8beae0d
-.collie/batches/v03-b04/task.md
-src/cli.ts
-src/gate.ts
-src/run.ts
-src/schema/index.ts
-test/gate.test.ts
-test/invariants.test.ts
-test/scenario-l.test.ts
-test/schema.test.ts
-```
+$ npx vitest run test/gate.test.ts
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
 
-全部在 task.md 条目范围内，无范围蔓延。
+$ npx vitest run test/scenario-l.test.ts
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
 
-### 5. 逐条实跑验收命令
-
-**#1 代码规范零错误**
+$ npx vitest run test/invariants.test.ts
+ Test Files  1 passed (1)
+      Tests  32 passed (32)
 ```
-$ npm run lint
-> eslint . && prettier --check .
-Checking formatting...
-All matched files use Prettier code style!
-```
-退出码 0 ✅
-
-**#2 类型检查零错误**
-```
-$ npm run typecheck
-> tsc -p tsconfig.json
-(无输出)
-```
-退出码 0 ✅
-
-**#3 全部测试通过**
-```
-$ npm test
-Test Files  39 passed (39)
-     Tests  792 passed (792)
-  Duration  18.61s
-```
-退出码 0 ✅
-
-**#4 场景 L**
-```
-$ npm test -- test/scenario-l.test.ts
-Test Files  1 passed (1)
-     Tests  10 passed (10)
-  Duration  9.09s
-```
-退出码 0 ✅
-
-**#5 两个事件进 schema**
-```
-$ grep -qE "queue\.paused" src/schema/index.ts && grep -qE "batch\.retried" src/schema/index.ts
-```
-退出码 0 ✅
-
-**#6 判定是纯函数**
-```
-$ grep -qE "export function gateDecision" src/gate.ts && ! grep -qE "runner|run\.js" src/gate.ts
-```
-退出码 1 ❌
-
-原因：`src/gate.ts` 第 3 行注释 `// no runner import, no journal import, no side effects.` 包含 "runner" 字样，导致 `grep -qE "runner|run\.js"` 匹配成功，`!` 取反后整个命令失败。
-
-文件本身确实是纯函数（零条 import 语句），但注释中出现的 "runner" 一词触发了 grep。
-
-**#7 退出码 30**
-```
-$ grep -qE "\b30\b" src/cli.ts && grep -qE "\b30\b" test/scenario-l.test.ts
-```
-退出码 0 ✅
-
-**#8 规则 1 重跑不计 fix_max**
-```
-$ grep -qE "batch\.retried" src/run.ts && grep -qE "fix_max" test/scenario-l.test.ts
-```
-退出码 0 ✅
-
-**#9 规则 9 连续两次**
-```
-$ grep -qE "rule9_twice" src/run.ts && grep -qE "rule9_twice" test/scenario-l.test.ts
-```
-退出码 0 ✅
-
-**#10 七项各有单测**
-```
-$ grep -cE "^\s+it\(" test/gate.test.ts | grep -qE "^([7-9]|[1-9][0-9])$"
-```
-退出码 0 ✅（gate.test.ts 有 11 个 `it(` 调用，覆盖七项条件加上 pass-all、多条失败、以及 CI 的 branch=false 和 branch=null 三个子用例）
-
-**#11 不变量同步**
-```
-$ grep -qE "gate\.ts|scenario-l" test/invariants.test.ts
-```
-退出码 0 ✅
 
 ## 逐条验收
 
@@ -142,83 +81,109 @@ $ grep -qE "gate\.ts|scenario-l" test/invariants.test.ts
 |---|---|---|---|
 | 代码规范零错误 | `npm run lint` | exit 0 | ✅ |
 | 类型检查零错误 | `npm run typecheck` | exit 0 | ✅ |
-| 全部测试通过 | `npm test` | exit 0, 39 files, 792 tests | ✅ |
-| 场景 L | `npm test -- test/scenario-l.test.ts` | exit 0, 10 tests | ✅ |
-| 两个事件进 schema | `grep -qE "queue\.paused" ... && grep -qE "batch\.retried" ...` | exit 0 | ✅ |
-| 判定是纯函数 | `grep ... && ! grep -qE "runner\|run\.js" src/gate.ts` | exit 1 | ❌ |
-| 退出码 30 | grep ... | exit 0 | ✅ |
-| 规则 1 重跑不计 fix_max | grep ... | exit 0 | ✅ |
-| 规则 9 连续两次 | grep ... | exit 0 | ✅ |
-| 七项各有单测 | grep -cE ... (11 tests) | exit 0 | ✅ |
-| 不变量同步 | grep ... | exit 0 | ✅ |
+| 全部测试通过 | `npm test` | exit 0, 792 passed | ✅ |
+| 场景 L | `npm test -- test/scenario-l.test.ts` | exit 0, 10 passed | ✅ |
+| 两个事件进 schema | `grep -qE ...` | exit 0 | ✅ |
+| 判定是纯函数 | `grep -qE ...` | exit 0 | ✅ |
+| 退出码 30 | `grep -qE ...` | exit 0 | ✅ |
+| 规则 1 重跑不计 fix_max | `grep -qE ...` | exit 0 | ✅ |
+| 规则 9 连续两次 | `grep -qE ...` | exit 0 | ✅ |
+| 七项各有单测 | `grep -cE ...` | exit 0 | ✅ |
+| 不变量同步 | `grep -qE ...` | exit 0 | ✅ |
 
 ## 条目要求与额外禁止
 
-### 结构要求
+### 条目 1: 放行判定
 
-| 要求 | 出处 | 证据（文件:行 / 命令输出） | 满足 |
+| 要求 | 出处 | 证据 | 满足 |
 |---|---|---|---|
-| 判定函数独立为纯函数 `gateDecision` | 条目 1 | `src/gate.ts:54` — `export function gateDecision(input: GateInput): GateResult` | ✅ |
-| 放在 `src/arbiter.ts` 旁的 `src/gate.ts` | 条目 1 | `src/gate.ts` 存在，与 `src/arbiter.ts` 同目录 | ✅ |
-| 输入只含 SPEC 12.3 列的字段 | 条目 1 | `src/gate.ts:12-33` — GateInput 接口包含 downgraded/claimMismatches/ciConclusion/ciBranchMatched/depsDiffCount/specDiffLines/protectedDiffLines/gapsCount，对应 SPEC 12.3 七项 | ✅ |
-| gate.ts 不 import runner 或 journal | 条目 1 | `src/gate.ts` 全文无 import 语句；但第 3 行注释含 "runner" 字样，导致验收命令 #6 grep 误命中 | ⚠️ 功能正确但验收不过 |
-| schema 加两个事件 `queue.paused` 和 `batch.retried` | 条目 1 | `src/schema/index.ts:206` — `'queue.paused'`; `src/schema/index.ts:208` — `'batch.retried'` | ✅ |
-| cli.ts 退出码 30 | 条目 1 | `src/run.ts:69` — `PAUSED: 30`; `src/cli.ts:467` — `30 paused` in description | ✅ |
-| 单批次模式不调用 gate | 条目 1 | `queue.paused` 只出现在 `runQueue` 函数中（`src/run.ts:1816,1837`），`runBatch` 函数不含 gate 调用 | ✅ |
-| BLOCK + rule=1 + 未 retried → batch.retried + 重跑 | 条目 2 | `src/run.ts:1871-1888` — 检查 rule===1, !hasBatchRetried, 记录 batch.retried, 重置 status, continue | ✅ |
-| 第二次仍规则 1 → 停 + 退出码 20 | 条目 2 | `src/run.ts:1888` — 第二次 fall through 到正常 BLOCK 处理，退出码 EXIT_CODES.BLOCK=20 | ✅ |
-| 规则 1 重跑不计入 fix_max | 条目 2 | `src/run.ts:1876` — `batchesRun.pop()` 从计数中移除 | ✅ |
-| 连续两个批次 verdict.downgraded rule=9 → queue.paused rule9_twice | 条目 2 | `src/run.ts:1830-1852` — hasBatchRule9Downgrade + prevBatchRule9Downgraded 跟踪 | ✅ |
-| test/gate.test.ts 覆盖七项各单独不满足 | 条目 3 | `test/gate.test.ts` 有 11 个 it()，见下方行为验证 | ✅ |
-| test/invariants.test.ts 加 gate.ts 和 scenario-l | 条目 3 | `test/invariants.test.ts:227-241` — 两个 it() 分别检查 gate.ts 和 scenario-l.test.ts | ✅ |
-| 不改受保护路径 | 额外禁止 | `git diff --stat` 对受保护路径返回空 | ✅ |
-| 不删除或跳过测试 | 额外禁止 | diff 中无 `it.skip` 或删除 `it(`，全部 792 测试通过 | ✅ |
-| 不改规则 1~10 实现 | 额外禁止 | `git diff ... -- src/arbiter.ts` 返回空；arbiter.ts 未改动 | ✅ |
-| 单批次模式不发 queue.paused 或返回 30 | 额外禁止 | `queue.paused` 只在 `runQueue` 中（行 1816,1837）；`runBatch` 的 `finish()` 只返回 PASS/FIX/BLOCK/ERROR | ✅ |
+| 判定函数独立为纯函数 `gateDecision(input): {pass: boolean; reasons: string[]}` | task.md 条目 1 | `src/gate.ts:54` — `export function gateDecision(input: GateInput): GateResult`; `src/gate.ts:36-40` — `GateResult` has `pass: boolean` and `reasons: string[]`; zero imports in the file | ✅ |
+| 放在 `src/arbiter.ts` 旁的 `src/gate.ts` | task.md 条目 1 | `src/gate.ts` exists, same directory as `src/arbiter.ts` | ✅ |
+| 输入只含 SPEC 12.3 列的字段 | task.md 条目 1 | `src/gate.ts:12-33` — `GateInput` has exactly 8 fields matching SPEC 12.3 七项 | ✅ |
+| PASS 之后、选下一批之前按 SPEC 12.3 七项逐条检查 | task.md 条目 1 | `src/run.ts:1799-1828` — after `outcome.final === 'PASS'`, builds `GateInput` and calls `gateDecision`, before `continue` to next loop iteration | ✅ |
+| 任一不满足: `rec.record('queue.paused', {batch_id, reasons})` | task.md 条目 1 | `src/run.ts:1816` — `queueRec.record('queue.paused', { batch_id: currentBatchId, reasons: gate.reasons })` | ✅ |
+| `queue.finished` reason=`paused` 带 `paused_count` | task.md 条目 1 | `src/run.ts:1817-1820` — `queueRec.record('queue.finished', { reason: 'paused', ..., paused_count: pausedCount })` | ✅ |
+| 退出码 30 | task.md 条目 1 | `src/run.ts:69` — `PAUSED: 30`; `src/run.ts:1823` — `exitCode: EXIT_CODES.PAUSED` | ✅ |
+| schema 加两个事件 | task.md 条目 1 | `src/schema/index.ts:206,208` — `'queue.paused'` and `'batch.retried'` added | ✅ |
+| `cli.ts` 退出码 30 | task.md 条目 1 | `src/cli.ts` diff: description updated to include "30 paused" | ✅ |
+| 单批次模式不调用 | task.md 条目 1 | `gateDecision` called only at `src/run.ts:1811` inside `runQueue()` (line 1733+); `runBatch()` (line 758-1543) does not reference it | ✅ |
 
-### 行为要求
+### 条目 2: 规则 1 自动重跑与规则 9 连续两次
 
-| 要求 | 出处 | 测试实跑证据 | 满足 |
+| 要求 | 出处 | 证据 | 满足 |
 |---|---|---|---|
-| 场景 La: PASS + gaps → queue.paused reasons 含 gaps, 退出码 30, backlog=passed, paused_count=1 | 条目 3a | `npx vitest run test/scenario-l.test.ts` → Tests 10 passed (含 group a 的 4 个 it) | ✅ |
-| 场景 Lb: 规则 1 BLOCK → batch.retried → 继续下一批, fix_max 不增 | 条目 3b | 同上，group b 3 个 it 全过 | ✅ |
-| 场景 Lc: 连续两批 pushed=false → rule9_twice | 条目 3c | 同上，group c 3 个 it 全过 | ✅ |
-| gate.test.ts 七项各自单独不满足 | 条目 3 | `npx vitest run test/gate.test.ts` → Tests 11 passed | ✅ |
+| BLOCK 且 `decision.rule === 1` 且本批次此前没有 `batch.retried` → 记 `batch.retried` 立即重跑 | task.md 条目 2 | `src/run.ts:1871-1886` — checks `outcome.decision?.rule === RULE_UNPARSEABLE` (which is 1 at line 367), calls `hasBatchRetried`, records `batch.retried`, resets to pending, continues loop | ✅ |
+| 不计入 `fix_max` | task.md 条目 2 | `src/run.ts:1875-1876` — `batchesRun.pop()` removes the batch from run count; the retry is transparent and the batch goes back to 'pending', so `countBatchFinished` doesn't count it as an additional FIX | ✅ |
+| 第二次仍规则 1 → 停、退出码 20 | task.md 条目 2 | `src/run.ts:1872` — if `hasBatchRetried` returns true, falls through to normal BLOCK handling at line 1893 which returns `EXIT_CODES.BLOCK` (= 20) | ✅ |
+| 连续两个批次都有 `verdict.downgraded` rule=9 → `queue.paused` reason=`rule9_twice` | task.md 条目 2 | `src/run.ts:1834-1851` — tracks `prevBatchRule9Downgraded`, calls `hasBatchRule9Downgrade`, records `queue.paused` with `reasons: ['rule9_twice']`, exits with `EXIT_CODES.PAUSED` (30) | ✅ |
+
+行为验证——实跑 `npx vitest run test/scenario-l.test.ts`:
+```
+Test Files  1 passed (1)
+Tests  10 passed (10)
+```
+- Group b tests (rule 1 retry): `retries on rule 1 BLOCK and continues to next batch` ✅, `records batch.retried with rule=1` ✅, `does not increase fix_max count for rule 1 retry` ✅
+- Group c tests (rule 9 consecutive): `stops with queue.paused reason=rule9_twice` ✅, `records queue.paused with reasons containing "rule9_twice"` ✅, `both batches have verdict.downgraded rule=9` ✅
+
+### 条目 3: 场景 L 测试
+
+| 要求 | 出处 | 证据 | 满足 |
+|---|---|---|---|
+| `test/scenario-l.test.ts` 使用 fake runner | task.md 条目 3 | `test/scenario-l.test.ts:11` — `import { FakeRunner } from '../src/runner/fake.js'` | ✅ |
+| 三组 (a, b, c) | task.md 条目 3 | Group a (line 214), Group b (line 281), Group c (line 356) | ✅ |
+| a: PASS + gaps → queue.paused, backlog=passed, exit 30, paused_count=1 | task.md 条目 3 | Tests at lines 231, 240, 253, 263 cover all four aspects; `npx vitest run test/scenario-l.test.ts` — Tests 10 passed | ✅ |
+| b: rule 1 BLOCK → retry → PASS, batch.retried rule=1, fix_max unchanged | task.md 条目 3 | Tests at lines 299, 315, 332; `npx vitest run test/scenario-l.test.ts` — Tests 10 passed | ✅ |
+| c: two consecutive rule 9 → queue.paused rule9_twice | task.md 条目 3 | Tests at lines 377, 399, 417; `npx vitest run test/scenario-l.test.ts` — Tests 10 passed | ✅ |
+| `test/gate.test.ts` 覆盖七项各自单独不满足 | task.md 条目 3 | `test/gate.test.ts` has 11 `it()` blocks: 1 all-pass + 7 individual condition failures (downgraded, claim_mismatches, ci×3 variants, deps_diff, spec_diff, protected, gaps) + 1 multi-reason; `npx vitest run test/gate.test.ts` — Tests 11 passed | ✅ |
+| `test/invariants.test.ts` 加 `src/gate.ts` 和 `scenario-l` | task.md 条目 3 | `test/invariants.test.ts:227-241` — two new invariant tests for gate.ts and scenario-l; `npx vitest run test/invariants.test.ts` — Tests 32 passed | ✅ |
+
+### 额外禁止检查
+
+| 禁止项 | 出处 | 证据 | 满足 |
+|---|---|---|---|
+| 改动任何受保护路径 | task.md 额外禁止 | Worker commits `8beae0d` and `d416710` — `git diff --stat <sha>^..<sha> -- [protected paths]` returns empty for both. `docs/progress.md` change is from R2 commit `4a00255` | ✅ |
+| 删除或跳过任何测试 | task.md 额外禁止 | No `.skip` or `.only` in new tests; diff shows no deleted `it(` lines; `test/schema.test.ts` only updated count from 29→31 | ✅ |
+| 改动规则 1~10 的实现或仲裁结论 | task.md 额外禁止 | `git diff` of `src/arbiter.ts` — empty, no changes | ✅ |
+| 单批次模式发出 `queue.paused` 或返回 30 | task.md 额外禁止 | All `queue.paused`, `batch.retried`, `EXIT_CODES.PAUSED` references are exclusively within `runQueue()` (line 1733+), never in `runBatch()` (line 758-1543) | ✅ |
 
 ## 声称与实测的差异
 
-- 验收命令 #6 的设计意图是验证 `src/gate.ts` 不引用 runner 或 run.js 模块。文件确实不含任何 import 语句，是纯函数实现。但第 3 行注释 `// no runner import, no journal import, no side effects.` 中的 "runner" 一词让 `grep -qE "runner|run\.js"` 命中，致使 `! grep ...` 返回非零。验收命令按规定必须原样跑，实跑失败即失败。
+无。前一轮（attempt 1）因验收命令 #6 失败（`gate.ts` 注释含 'runner' 字符串触发 grep），被规则 10 判 FIX。第二轮（attempt 2，commit `d416710`）修复了注释，所有 11 条验收命令均通过。
 
 ## 结论与理由
 
-**FIX**。
+全部 11 条验收命令实跑通过。三个条目的所有结构要求和行为要求均已满足。`gateDecision` 是零 import 的纯函数。规则 1 自动重跑、规则 9 连续两次、场景 L 三组测试全部通过（gate.test.ts 11/11, scenario-l.test.ts 10/10, invariants.test.ts 32/32）。额外禁止条目无一违反。提交已推送到 origin/main。未修改受保护文件（progress.md 修改来自 R2 自身的 FIX progress commit）。无依赖变化。无范围蔓延。
 
-10 条验收命令中有 1 条（#6 "判定是纯函数"）实跑失败。根因：`src/gate.ts` 第 3 行注释包含 "runner" 字样，触发 grep 命中。修复方法简单：将注释中的 "runner" 替换为不会被 grep 捕获的等价表述（如 "agent-runner"→不行，仍匹配；可改为 "no agent import" 或直接删除该注释行）。
+CI 无法查证（无 token），以 R2 取证为准。
 
-实现本身是正确的——gateDecision 确实是纯函数、零 import、输入只含 SPEC 12.3 字段。全部测试（39 文件 792 用例）通过，场景 L 的 10 个测试全过，gate.test.ts 的 11 个测试全过。代码逻辑、schema 变更、退出码、额外禁止全部满足。唯一缺口是注释措辞导致验收 grep 失败。
+**PASS**。
 
 ```json
 {
   "schema_version": 1,
   "batch_id": "v03-b04",
-  "verdict": "FIX",
+  "verdict": "PASS",
   "evidence": {
     "commits_actual": [
       "55bba5745c02dc79c0d7da2943ed90db0288520c",
-      "8beae0d569fa96b2c2c94bb16781cd4278d62bf2"
+      "8beae0d569fa96b2c2c94bb16781cd4278d62bf2",
+      "51c5d2dc918a6e3afd39b81701e1f3ab469764b5",
+      "4a002555daf1e1fd46ed540966c01cfb6b4feca4",
+      "75ab0505e3d8f79df53b0787b2f12af80c688aae",
+      "d416710ee5834c7ade087f2180541996ff4e434e"
     ],
     "verify_results": [
       { "cmd": "npm run lint", "exit_code": 0, "summary": "All matched files use Prettier code style!" },
-      { "cmd": "npm run typecheck", "exit_code": 0, "summary": "tsc clean" },
-      { "cmd": "npm test", "exit_code": 0, "summary": "39 files, 792 tests passed" },
-      { "cmd": "npm test -- test/scenario-l.test.ts", "exit_code": 0, "summary": "1 file, 10 tests passed" },
+      { "cmd": "npm run typecheck", "exit_code": 0, "summary": "tsc -p tsconfig.json" },
+      { "cmd": "npm test", "exit_code": 0, "summary": "39 test files, 792 passed, 0 failed" },
+      { "cmd": "npm test -- test/scenario-l.test.ts", "exit_code": 0, "summary": "10 passed, 0 failed" },
       { "cmd": "grep -qE \"queue\\.paused\" src/schema/index.ts && grep -qE \"batch\\.retried\" src/schema/index.ts", "exit_code": 0, "summary": "both events found" },
-      { "cmd": "grep -qE \"export function gateDecision\" src/gate.ts && ! grep -qE \"runner|run\\.js\" src/gate.ts", "exit_code": 1, "summary": "FAIL: comment on line 3 contains 'runner'" },
-      { "cmd": "grep -qE \"\\b30\\b\" src/cli.ts && grep -qE \"\\b30\\b\" test/scenario-l.test.ts", "exit_code": 0, "summary": "30 found in both" },
+      { "cmd": "grep -qE \"export function gateDecision\" src/gate.ts && ! grep -qE \"runner|run\\.js\" src/gate.ts", "exit_code": 0, "summary": "pure function confirmed" },
+      { "cmd": "grep -qE \"\\b30\\b\" src/cli.ts && grep -qE \"\\b30\\b\" test/scenario-l.test.ts", "exit_code": 0, "summary": "exit code 30 found in both" },
       { "cmd": "grep -qE \"batch\\.retried\" src/run.ts && grep -qE \"fix_max\" test/scenario-l.test.ts", "exit_code": 0, "summary": "batch.retried and fix_max found" },
       { "cmd": "grep -qE \"rule9_twice\" src/run.ts && grep -qE \"rule9_twice\" test/scenario-l.test.ts", "exit_code": 0, "summary": "rule9_twice found in both" },
-      { "cmd": "grep -cE \"^\\s+it\\(\" test/gate.test.ts | grep -qE \"^([7-9]|[1-9][0-9])$\"", "exit_code": 0, "summary": "11 it() calls, >=7" },
-      { "cmd": "grep -qE \"gate\\.ts|scenario-l\" test/invariants.test.ts", "exit_code": 0, "summary": "both referenced" }
+      { "cmd": "grep -cE \"^\\s+it\\(\" test/gate.test.ts | grep -qE \"^([7-9]|[1-9][0-9])$\"", "exit_code": 0, "summary": "11 test cases found" },
+      { "cmd": "grep -qE \"gate\\.ts|scenario-l\" test/invariants.test.ts", "exit_code": 0, "summary": "invariants updated" }
     ],
     "remote_has_head": true,
     "ci_conclusion": "unknown",
@@ -228,9 +193,7 @@ $ grep -qE "gate\.ts|scenario-l" test/invariants.test.ts
     "spec_diff_lines": 0
   },
   "claim_mismatches": [],
-  "gaps": [
-    "验收命令 #6 失败：src/gate.ts 第 3 行注释 '// no runner import, no journal import, no side effects.' 包含 'runner' 字样，使 `! grep -qE \"runner|run\\.js\" src/gate.ts` 返回非零。需将注释中的 'runner' 改为不被 grep 捕获的表述（如 'no agent-module import' 或删除该注释）。"
-  ],
-  "reason": "验收命令 #6 实跑失败（exit 1）。src/gate.ts 确为纯函数（零 import），但行 3 注释含 'runner' 触发 grep。全部测试和其余 10 条验收命令均通过。CI 以 R2 取证为准。"
+  "gaps": [],
+  "reason": "全部 11 条验收命令实跑通过，三个条目结构和行为要求均满足，额外禁止无违反，提交已推送。CI 以 R2 取证为准。"
 }
 ```
