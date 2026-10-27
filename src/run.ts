@@ -21,6 +21,7 @@ import { queryCi, type Clock, type FetchLike } from './ci.js';
 import { loadConfig } from './config.js';
 import { collectEvidence, type Evidence } from './evidence.js';
 import { isR2Commit } from './evidence.js';
+import { gateDecision, type GateInput } from './gate.js';
 import {
   addWorktree,
   commit,
@@ -50,6 +51,7 @@ import type { AgentRunner, RunHandle } from './runner/index.js';
 import type {
   Acceptance,
   Batch,
+  BatchStatus,
   Event,
   EventType,
   Report,
@@ -60,10 +62,11 @@ import { RunIdSchema } from './schema/index.js';
 
 /** SPEC 5 exit codes of `collie run`. */
 /* eslint-disable no-restricted-syntax, @typescript-eslint/no-magic-numbers -- SPEC 5 exit codes */
-export const EXIT_CODES: Readonly<Record<VerdictValue | 'ERROR', number>> = {
+export const EXIT_CODES: Readonly<Record<VerdictValue | 'ERROR' | 'PAUSED', number>> = {
   PASS: 0,
   FIX: 10,
   BLOCK: 20,
+  PAUSED: 30,
   ERROR: 1,
 };
 /* eslint-enable no-restricted-syntax, @typescript-eslint/no-magic-numbers */
@@ -140,6 +143,10 @@ export interface RunOutcome {
   decision?: ArbiterDecision;
   /** Why the run stopped early, for escalations. */
   escalation?: string;
+  /** Evidence collected by R2, available when the full pipeline ran. */
+  evidence?: Evidence;
+  /** Reviewer gaps from the verdict, available when the verdict parsed. */
+  gaps?: readonly string[];
 }
 
 class Recorder {
@@ -357,6 +364,9 @@ async function rescueDirtyWorkspace(
 }
 
 const RULE_ESCALATED = 0;
+const RULE_UNPARSEABLE = 1;
+// eslint-disable-next-line no-restricted-syntax -- SPEC 4.3 rule number: evidence missing
+const RULE_EVIDENCE_MISSING = 9;
 
 /** Synthetic decision for escalation paths that never reach the arbiter (SPEC 11.7). */
 function escalationDecision(reason: string): ArbiterDecision {
@@ -1474,7 +1484,11 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       // SPEC 12.1: push failure does not alter the conclusion or throw.
     }
 
-    return finish(decision.final, { decision });
+    return finish(decision.final, {
+      decision,
+      evidence: collected.evidence,
+      gaps: verdict.ok ? verdict.value.gaps : [],
+    });
   } catch (outerError) {
     // SPEC 11.3: exception fallback. Any unexpected error after heartbeat write
     // must not let the process exit without cleanup.
@@ -1579,12 +1593,14 @@ export interface QueueContext {
 }
 
 export interface QueueOutcome {
-  /** Combined exit code: 0 for exhausted/limit, 20 for blocked/fix_max/escalated. */
+  /** Combined exit code: 0 for exhausted/limit, 20 for blocked/fix_max/escalated, 30 for paused. */
   exitCode: number;
   /** Why the queue stopped. */
   reason: string;
   /** Batches that ran (in order). */
   batches: string[];
+  /** SPEC 12.3: how many times `queue.paused` fired in this --continue session. */
+  pausedCount?: number;
 }
 
 /**
@@ -1648,7 +1664,7 @@ function makeRunId(prefix: string, date: Date): string {
 function updateBacklogToDisk(
   root: string,
   batchId: string,
-  status: 'passed' | 'blocked',
+  status: BatchStatus,
   rec: Recorder,
 ): void {
   const backlogFile = join(root, BACKLOG_RELATIVE_PATH);
@@ -1664,6 +1680,53 @@ function updateBacklogToDisk(
   } catch {
     rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
   }
+}
+
+/**
+ * SPEC 12.3: checks whether any run of `batchId` recorded a
+ * `verdict.downgraded` event with rule=9 (evidence missing). Used by
+ * the consecutive rule 9 stop condition: two batches in a row with rule 9
+ * downgrades pauses the queue.
+ */
+function hasBatchRule9Downgrade(root: string, batchId: string): boolean {
+  const runsDir = join(root, RUNS_RELATIVE_DIR);
+  if (!existsSync(runsDir)) return false;
+  const journal = createJournal(root);
+  for (const dir of readdirSync(runsDir).sort()) {
+    if (!RunIdSchema.safeParse(dir).success || !existsSync(join(runsDir, dir, EVENTS_FILE_NAME)))
+      continue;
+    for (const event of journal.replay(dir)) {
+      if (
+        event.event === 'verdict.downgraded' &&
+        event.batch_id === batchId &&
+        event.rule === RULE_EVIDENCE_MISSING
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * SPEC 12.3: checks whether `batch.retried` (rule 1) has already been
+ * recorded for a given batch across all journal runs. Returns true if the
+ * batch has been retried at least once.
+ */
+function hasBatchRetried(root: string, batchId: string): boolean {
+  const runsDir = join(root, RUNS_RELATIVE_DIR);
+  if (!existsSync(runsDir)) return false;
+  const journal = createJournal(root);
+  for (const dir of readdirSync(runsDir).sort()) {
+    if (!RunIdSchema.safeParse(dir).success || !existsSync(join(runsDir, dir, EVENTS_FILE_NAME)))
+      continue;
+    for (const event of journal.replay(dir)) {
+      if (event.event === 'batch.retried' && event.batch_id === batchId) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /** Runs batches in --continue mode (SPEC 12.2). */
@@ -1683,6 +1746,13 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
 
   let currentBatchId: string | undefined;
 
+  // SPEC 12.3: track queue.paused count for this --continue session.
+  let pausedCount = 0;
+
+  // SPEC 12.3: track whether the previous batch had a verdict.downgraded rule=9,
+  // for the "consecutive two batches" stop condition.
+  let prevBatchRule9Downgraded = false;
+
   // Loop until queue is exhausted, blocked, or --max reached.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite loop; exits via return
   while (true) {
@@ -1696,8 +1766,8 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
     if (selected === undefined) {
       // Nothing eligible: exhausted or all remaining are blocked.
       const reason = skipped.length > 0 ? 'exhausted' : 'exhausted';
-      queueRec.record('queue.finished', { reason, batches: batchesRun });
-      return { exitCode: EXIT_CODES.PASS, reason, batches: batchesRun };
+      queueRec.record('queue.finished', { reason, batches: batchesRun, paused_count: pausedCount });
+      return { exitCode: EXIT_CODES.PASS, reason, batches: batchesRun, pausedCount };
     }
 
     currentBatchId = selected.id;
@@ -1727,37 +1797,128 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
     batchesRun.push(currentBatchId);
 
     if (outcome.final === 'PASS') {
+      // SPEC 12.3: gate decision — check seven conditions before continuing.
+      const gateInput: GateInput = {
+        downgraded: outcome.decision?.downgraded === true,
+        claimMismatches: outcome.decision?.mismatches.length ?? 0,
+        ciConclusion: outcome.evidence?.ci_conclusion ?? 'unknown',
+        ciBranchMatched: outcome.evidence?.ci_branch_matched ?? null,
+        depsDiffCount: outcome.evidence?.deps_diff.length ?? 0,
+        specDiffLines: outcome.evidence?.spec_diff_lines ?? 0,
+        protectedDiffLines: outcome.evidence?.spec_diff_lines ?? 0,
+        gapsCount: outcome.gaps?.length ?? 0,
+      };
+      const gate = gateDecision(gateInput);
+
+      if (!gate.pass) {
+        // SPEC 12.3: stop but PASS stands. Backlog status is already 'passed'.
+        pausedCount++;
+        queueRec.record('queue.paused', { batch_id: currentBatchId, reasons: gate.reasons });
+        queueRec.record('queue.finished', {
+          reason: 'paused',
+          batches: batchesRun,
+          paused_count: pausedCount,
+        });
+        return {
+          exitCode: EXIT_CODES.PAUSED,
+          reason: 'paused',
+          batches: batchesRun,
+          pausedCount,
+        };
+      }
+
+      // SPEC 12.3: rule 9 consecutive check. Scan the journal for verdict.downgraded
+      // rule=9 events for this batch (may have occurred in a prior FIX attempt, not
+      // necessarily the current PASS run). If both this batch and the previous batch
+      // had rule 9, pause the queue.
+      const thisBatchHadRule9 = hasBatchRule9Downgrade(root, currentBatchId);
+      if (thisBatchHadRule9 && prevBatchRule9Downgraded) {
+        pausedCount++;
+        queueRec.record('queue.paused', {
+          batch_id: currentBatchId,
+          reasons: ['rule9_twice'],
+        });
+        queueRec.record('queue.finished', {
+          reason: 'paused',
+          batches: batchesRun,
+          paused_count: pausedCount,
+        });
+        return {
+          exitCode: EXIT_CODES.PAUSED,
+          reason: 'paused',
+          batches: batchesRun,
+          pausedCount,
+        };
+      }
+
+      prevBatchRule9Downgraded = thisBatchHadRule9;
+
       // SPEC 12.2: PASS → take next. Status already updated inside runBatch.
       if (ctx.max !== undefined && batchesRun.length >= ctx.max) {
-        queueRec.record('queue.finished', { reason: 'limit', batches: batchesRun });
-        return { exitCode: EXIT_CODES.PASS, reason: 'limit', batches: batchesRun };
+        queueRec.record('queue.finished', {
+          reason: 'limit',
+          batches: batchesRun,
+          paused_count: pausedCount,
+        });
+        return { exitCode: EXIT_CODES.PASS, reason: 'limit', batches: batchesRun, pausedCount };
       }
       continue;
     }
 
-    if (outcome.final === 'FIX') {
-      // SPEC 12.2: FIX → check fix_max. Count from run.finished events.
-      const finishedCounts = countBatchFinished(root);
-      const count = finishedCounts.get(currentBatchId) ?? 0;
-      if (count <= config.limits.fix_max) {
-        // Rerun the same batch (attempt will increment via batchHistory).
-        continue;
+    if (outcome.final === 'BLOCK') {
+      // SPEC 12.3: rule 1 auto-retry — if BLOCK is due to rule 1 (unparseable verdict)
+      // and this batch has not been retried for rule 1 before, retry once.
+      if (outcome.decision?.rule === RULE_UNPARSEABLE) {
+        if (!hasBatchRetried(root, currentBatchId)) {
+          queueRec.record('batch.retried', { batch_id: currentBatchId, rule: RULE_UNPARSEABLE });
+          // Don't count against batchesRun for --max (it's the same batch).
+          // Remove it from batchesRun so the retry is transparent.
+          batchesRun.pop();
+          // SPEC 12.3: runBatch set the backlog status to 'blocked' for the BLOCK
+          // verdict, but rule 1 retry means the batch should be retried. Reset the
+          // status to 'pending' so selectNextBatch picks it up again.
+          updateBacklogToDisk(root, currentBatchId, 'pending', queueRec);
+          try {
+            await commit(root, `progress: ${currentBatchId} rule1_retry`, [BACKLOG_RELATIVE_PATH]);
+          } catch {
+            // Best effort: the status was written to disk even if commit fails.
+          }
+          continue;
+        }
+        // Second rule 1 BLOCK: fall through to normal BLOCK handling.
       }
-      // Exceeded fix_max: escalate → update status to blocked and stop.
-      updateBacklogToDisk(root, currentBatchId, 'blocked', queueRec);
-      try {
-        await commit(root, `progress: ${currentBatchId} fix_max`, [BACKLOG_RELATIVE_PATH]);
-      } catch {
-        // Best effort: the status was written to disk even if commit fails.
-      }
-      queueRec.record('escalated', { reason: 'fix_max', batch_id: currentBatchId });
-      queueRec.record('queue.finished', { reason: 'fix_max', batches: batchesRun });
-      return { exitCode: EXIT_CODES.BLOCK, reason: 'fix_max', batches: batchesRun };
+
+      // BLOCK or escalation: stop.
+      // Status already updated to 'blocked' inside runBatch when updateBacklogStatus=true.
+      queueRec.record('queue.finished', {
+        reason: 'blocked',
+        batches: batchesRun,
+        paused_count: pausedCount,
+      });
+      return { exitCode: EXIT_CODES.BLOCK, reason: 'blocked', batches: batchesRun, pausedCount };
     }
 
-    // BLOCK or escalation: stop.
-    // Status already updated to 'blocked' inside runBatch when updateBacklogStatus=true.
-    queueRec.record('queue.finished', { reason: 'blocked', batches: batchesRun });
-    return { exitCode: EXIT_CODES.BLOCK, reason: 'blocked', batches: batchesRun };
+    // SPEC 12.2: FIX → check fix_max. Count from run.finished events.
+    // (At this point outcome.final must be 'FIX' — PASS and BLOCK are handled above.)
+    const finishedCounts = countBatchFinished(root);
+    const count = finishedCounts.get(currentBatchId) ?? 0;
+    if (count <= config.limits.fix_max) {
+      // Rerun the same batch (attempt will increment via batchHistory).
+      continue;
+    }
+    // Exceeded fix_max: escalate → update status to blocked and stop.
+    updateBacklogToDisk(root, currentBatchId, 'blocked', queueRec);
+    try {
+      await commit(root, `progress: ${currentBatchId} fix_max`, [BACKLOG_RELATIVE_PATH]);
+    } catch {
+      // Best effort: the status was written to disk even if commit fails.
+    }
+    queueRec.record('escalated', { reason: 'fix_max', batch_id: currentBatchId });
+    queueRec.record('queue.finished', {
+      reason: 'fix_max',
+      batches: batchesRun,
+      paused_count: pausedCount,
+    });
+    return { exitCode: EXIT_CODES.BLOCK, reason: 'fix_max', batches: batchesRun, pausedCount };
   }
 }

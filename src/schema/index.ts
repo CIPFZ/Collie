@@ -200,8 +200,12 @@ export const EVENT_TYPES = [
   'batch.skipped',
   // v0.3 (SPEC 12.2): R2 updated a backlog status column during --continue mode.
   'batch.status',
-  // v0.3 (SPEC 12.2): --continue queue finished; reason = exhausted / blocked / escalated / fix_max / limit.
+  // v0.3 (SPEC 12.2): --continue queue finished; reason = exhausted / blocked / escalated / fix_max / limit / paused.
   'queue.finished',
+  // v0.3 (SPEC 12.3): PASS but gate conditions not met; fields batch_id / reasons (array).
+  'queue.paused',
+  // v0.3 (SPEC 12.3): rule 1 BLOCK auto-retried once; fields batch_id / rule (fixed 1).
+  'batch.retried',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);

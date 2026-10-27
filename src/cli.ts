@@ -464,7 +464,7 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
   program
     .command('run')
     .description(
-      'run one batch: worker -> reviewer -> arbiter (exit 0 PASS / 10 FIX / 20 BLOCK / 1 error)',
+      'run one batch: worker -> reviewer -> arbiter (exit 0 PASS / 10 FIX / 20 BLOCK / 30 paused / 1 error)',
     )
     .argument('[batch_id]', 'specific batch to run (omit with --continue for queue mode)')
     .option('--runner <kind>', 'agent runner: claude (default) or fake')

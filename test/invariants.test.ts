@@ -224,6 +224,22 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(content).toContain('tool.denied');
   });
 
+  it('src/gate.ts exists and does not import runner or journal (v03-b04)', () => {
+    const content = readFileSync(join(ROOT, 'src/gate.ts'), 'utf8');
+    // SPEC 12.3: gateDecision must be a pure function — no runner/journal deps.
+    expect(content).toContain('gateDecision');
+    expect(content).not.toContain("from './runner");
+    expect(content).not.toContain("from './journal");
+  });
+
+  it('test/scenario-l.test.ts exists and covers gate, rule 1 retry, rule 9 consecutive (v03-b04)', () => {
+    const content = readFileSync(join(ROOT, 'test/scenario-l.test.ts'), 'utf8');
+    expect(content).toContain('scenario L');
+    expect(content).toContain('queue.paused');
+    expect(content).toContain('batch.retried');
+    expect(content).toContain('rule9_twice');
+  });
+
   it('vitest.config.ts testTimeout is at least 30000 (v03-b03-fix2)', () => {
     const content = readFileSync(join(ROOT, 'vitest.config.ts'), 'utf8');
     // SPEC 11.5: scenario-j and cli tests with real git can take 6–8s; 10s was flaky.
