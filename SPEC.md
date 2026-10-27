@@ -373,6 +373,7 @@ type EventType =
   | 'queue.finished'     // v0.3：--continue 结束；字段 reason（exhausted / blocked / escalated / fix_max / limit / paused）/ batches（本次跑过的）/ paused_count
   | 'queue.paused'       // v0.3（12.3）：PASS 但触发停表清单；字段 batch_id / reasons（数组）
   | 'batch.retried'      // v0.3（12.3）：规则 1 BLOCK 后自动重跑一次；字段 batch_id / rule（固定 1）
+  | 'queue.batch_started' // v0.3（12.2）：队列拉起一次批次运行；字段 run_id / batch_id / attempt / why（new / fix_retry / rule1_retry）
   | 'worker.started' | 'worker.finished' | 'worker.crashed'
   | 'reviewer.started' | 'reviewer.verdict'
   | 'claim.mismatch' | 'verdict.downgraded'
@@ -786,6 +787,10 @@ v0.1 的 `wallclock_secs` 超时从「直接 abort + 记 crashed」改为走本�
 一次运行若以 stalled / idling / wallclock / orphaned / turns_exhausted / 非零退出结束，
 **且仲裁结论不是 PASS**，称为**中断**。worker 非零退出但 report 已提交、仲裁按证据判 PASS 的运行
 （v02-b03 第 1 次：200 轮用满，但交付在前）不算中断，下一轮 `attempt` 不递增。
+**FIX 重跑也不是中断**（v03-b04 后明确）：`attempt` **递增**（每次运行一个号，便于对照 journal 与汇报），
+`base_sha` 沿用首次，但 frontmatter 的 `interrupted_at` 为 `null`、正文**不写**「上一轮中断」一节，
+改写一节「上一轮判 FIX」：原样列出上一轮 verdict 的 `gaps` 与未通过的验收命令及其退出码，以及上一轮的代码提交清单，
+并写明「这些提交已在审核范围内，只补缺口，不要重做」。v03-b04 第 2 次把 FIX 写成了「中断、原因 unknown」，worker 靠自己读 progress 才没被误导。
 无论哪种结束方式，`run.finished` 事件与 `docs/progress.md` 的运行记录都带 worker 的
 `exit_code` 与 `stop_reason`，让人看得出它是怎么结束的（2.3）。
 下一次对同一批次 `collie run` 时：
@@ -876,11 +881,16 @@ v0.2 期间每轮有两个人工动作：操作员推送 R2 的裁定提交、�
 
 `collie run --continue [--max N]`：不带批次名，按 backlog 优先级取第一个 `pending` 且所有依赖已 `passed` 的批次，跑完按裁决分流：
 - PASS → R2 把 backlog 状态表该行改为 `passed`（记 `batch.status`）、提交进裁定提交、推送（12.1），取下一个；
-- FIX → 同批次返工计数 +1（计数从 journal 里本批次的 `run.finished` 数出，不另存）；计数 ≤ `fix_max` 则立即重跑同批次
+- FIX → 同批次返工计数 +1；**计数只数本次 `--continue` 内本批次的 FIX 次数**（不是所有历史运行的 `run.finished`——v03-b04 的实现跨全部历史累计，
+  同一批次以前单批次模式跑过的 FIX 会把队列一上来就顶到 `fix_max`）；计数 ≤ `fix_max` 则立即重跑同批次
   （attempt 递增、沿用首次 `base_sha`，11.7）；超过则按 BLOCK 处理并记 `escalated`（reason `fix_max`）；
 - BLOCK / 上报 → 停下，退出码 20；backlog 状态改为 `blocked`。
 依赖未满足的批次跳过并记 `batch.skipped`；队列里没有可执行批次则记 `queue.finished`（reason `exhausted` 或 `escalated`）退出码 0 / 20。
-`--max N` 限制本次最多跑 N 个批次（缺省不限），到数记 `queue.finished`（reason `limit`）退出码 0。
+`--max N` 限制本次最多跑 N 个批次（缺省不限；数的是 PASS 的批次，FIX 重跑不计），到数记 `queue.finished`（reason `limit`）退出码 0。
+队列 journal（`q-` 运行目录）要能独立还原队列做了什么：每次拉起批次运行前记 `queue.batch_started`
+（字段 run_id / batch_id / attempt / why：`new` / `fix_retry` / `rule1_retry`），`queue.finished.batches` 改为对象数组
+`{batch_id, run_id, verdict}`。只有一行 `queue.finished` 且不带 run_id 的队列 journal（v03-b04）不够。
+run_id 格式：批次运行 `r-YYYYMMDDHHMMSS`、队列运行 `q-YYYYMMDDHHMMSS`，v03-b03 起不再有中间的 `-`；两种前缀都要被 `show` / `audit` 接受。
 每个批次结束后仍执行 11.3 的清理与 12.1 的推送；批次之间不共享任何进程，每个批次的 worker / reviewer / 守护进程都是新拉起的。
 `collie run <batch>` 单批次模式行为不变，也**不**改 backlog 状态（状态列只在 `--continue` 下由 R2 写，单批次模式仍由 R1 写）。
 

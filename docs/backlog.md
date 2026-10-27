@@ -44,6 +44,7 @@
 | 26 | v03-b03-fix | head_sha 按首次 base_sha、取证排除 R2 提交、续接成本判断、中断原因、CLI 总结行、audit | v03-b03 | blocked |
 | 27 | v03-b03-fix2 | 补两条断言、bash_deny 正反用例、tool.denied 进 journal、测试超时 | v03-b03-fix | passed |
 | 28 | v03-b04 | 放行判定与停表：queue.paused、规则 1 自动重跑、规则 9 连续两次 | v03-b03-fix2 | passed |
+| 29 | v03-b04-fix | FIX 重跑的 task 语义、fix_max 只计本次队列、队列 journal 可还原 | v03-b04 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -1196,4 +1197,48 @@ v0.3 最后一个功能批次。规格见 SPEC 12.3、3.6（`queue.paused` / `ba
 - 为了让测试过而删除或跳过任何测试
 - 改动规则 1~10 的实现或仲裁结论：放行判定只决定「继续还是停」，不改 PASS
 - 单批次模式 `collie run <batch>` 发出 `queue.paused` 或返回 30
+
+记录：第一次 `--continue --max 1`（队列 q-20261027051508，50 分 44 秒，退出码 0）。选批正确（唯一 pending 且依赖已 passed），
+第 1 次运行 FIX（$8.92）→ 队列在 `fix_max` 内自动重跑 → 第 2 次 PASS（$0.63，不续接会话，b03-fix 规则首次真实生效）。
+**R2 第一次写受保护路径**：`batch.status` pending→passed，只改第 46 行最后一格，操作员逐字节比对其余相同，并进裁定提交 `2bbda1b`。
+两次 `collie audit` 都是 0。R1 复核 792 全过、`gate.ts` 零 import。放行判定本轮未生效（R2 跑的是 b03 代码）。
+FIX 的原因又是验收正则匹配到注释（`! grep "runner"` 碰到 `gate.ts` 第 3 行注释里的词）——R1 第二次犯同类错；更糟的是 reviewer 主动建议改注释、
+worker 照做并在提交信息写明「to satisfy acceptance grep」，一行代码没动就从 FIX 变 PASS。裁定：PASS 维持（功能真实、CI 绿、纯函数属实）；
+「不得为过验收改字面」升为铁律 26，worker 手册 4.2、reviewer 手册核对表同步；FIX 重跑语义（attempt 递增、不写中断、写「上一轮判 FIX」）、
+`fix_max` 只计本次队列、队列 journal 加 `queue.batch_started` 三条进 v03-b04-fix。
+
+## v03-b04-fix FIX 重跑的 task 语义、fix_max 只计本次队列、队列 journal 可还原
+
+优先级：29　依赖：v03-b04
+
+v03-b04 第一次队列运行暴露的三处。规格见 SPEC 11.7（FIX 重跑）、12.2（`fix_max` 计数范围、队列 journal）、3.6（`queue.batch_started`）。
+
+条目：
+1. FIX 重跑的 task（`run.ts` `batchHistory` / task 生成）：上一轮 `run.finished.verdict === 'FIX'` 时 `interrupted_at: null`、不写「上一轮中断」，
+   改写「上一轮判 FIX」一节：上一轮 verdict 的 `gaps` 原样、未通过的验收命令与退出码、上一轮代码提交清单、「只补缺口，不要重做」。
+   场景测试（scenario-l 或 scenario-j 加一组）：第 1 轮 fake reviewer 判 FIX 带 gaps，第 2 轮断言 task.md 含该 gaps 文本、`interrupted_at` 为 null、不含「上一轮中断」
+2. `fix_max` 计数只数本次 `--continue` 内本批次的 FIX（队列循环里的内存计数，不再 `countBatchFinished` 扫全部历史）；
+   场景测试：预先在 `.collie/runs/` 放两个该批次历史 FIX 的 journal，`--continue` 仍应重跑而不是直接 `escalated`
+3. 队列 journal：每次拉起批次运行前 `queueRec.record('queue.batch_started', {run_id, batch_id, attempt, why})`，`why` 取 `new` / `fix_retry` / `rule1_retry`；
+   `queue.finished.batches` 改为 `{batch_id, run_id, verdict}[]`（schema 同步）。`collie show --queue <q-run_id>` 按 journal 打印时间线。
+   `test/invariants.test.ts` 加「`src/run.ts` 含 `queue.batch_started`」「`src/run.ts` 不含 `countBatchFinished`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| FIX 重跑不写中断 | `grep -qE "上一轮判 FIX" src/run.ts && grep -qE "上一轮判 FIX" test/scenario-*.test.ts` | exit 0 |
+| fix_max 只计本次队列 | `! grep -v '^\s*//' src/run.ts \| grep -qE "countBatchFinished" && grep -qE "escalated" test/scenario-*.test.ts` | exit 0 |
+| 队列事件进 schema | `grep -qE "queue\.batch_started" src/schema/index.ts && grep -qE "fix_retry" src/run.ts` | exit 0 |
+| show --queue | `grep -qE "\-\-queue" src/cli.ts && grep -qE "\-\-queue" test/cli.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "queue\.batch_started" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）：匹配到注释就在 report 里指出，照常提交
+- 改动放行判定（`gate.ts`）、规则 1~10、`fix_max` 的默认值
 
