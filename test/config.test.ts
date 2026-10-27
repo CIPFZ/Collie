@@ -25,7 +25,7 @@ model = "claude-opus-4-6"
 allowed_tools = ["Read", "Glob", "Grep", "Bash"]
 max_turns = 60
 permission_mode = "bypassPermissions"
-bash_deny = ["^\\\\s*git\\\\s+(push|commit|add|reset|checkout|rebase|merge|cherry-pick|tag|branch\\\\s+-[dDm]|worktree|stash)\\\\b", "^\\\\s*gh\\\\s"]
+bash_deny = ["^\\\\s*git\\\\s+(push|commit|add|reset|checkout|rebase|merge|cherry-pick|tag|branch\\\\s+-[dDm]|worktree|stash)(?=\\\\s|$)", "^\\\\s*gh\\\\s"]
 
 [limits]
 stall_secs = 300
@@ -86,7 +86,7 @@ describe('config: the repository .collie/collie.toml', () => {
       max_turns: 60,
       permission_mode: 'bypassPermissions',
       bash_deny: [
-        '^\\s*git\\s+(push|commit|add|reset|checkout|rebase|merge|cherry-pick|tag|branch\\s+-[dDm]|worktree|stash)\\b',
+        '^\\s*git\\s+(push|commit|add|reset|checkout|rebase|merge|cherry-pick|tag|branch\\s+-[dDm]|worktree|stash)(?=\\s|$)',
         '^\\s*gh\\s',
       ],
     });

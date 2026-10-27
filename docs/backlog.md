@@ -41,7 +41,8 @@
 | 23 | v03-b01-fix | 启动补推只认失败的裁定提交，且先于救援 | v03-b01 | passed |
 | 24 | v03-b02 | 工具白名单真正生效：tools 选项、reviewer Bash 黑名单 | v03-b01-fix | passed |
 | 25 | v03-b03 | 队列消费与分流：--continue、fix_max 返工闸、backlog 状态列 | v03-b02 | blocked |
-| 26 | v03-b03-fix | head_sha 按首次 base_sha、取证排除 R2 提交、续接成本判断、中断原因、CLI 总结行、audit | v03-b03 | pending |
+| 26 | v03-b03-fix | head_sha 按首次 base_sha、取证排除 R2 提交、续接成本判断、中断原因、CLI 总结行、audit | v03-b03 | blocked |
+| 27 | v03-b03-fix2 | 补两条断言、bash_deny 正反用例、tool.denied 进 journal、测试超时 | v03-b03-fix | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -1103,4 +1104,49 @@ v03-b03 两次运行暴露的问题。v03-b03 本身标 blocked、`c62deb2` / `0
 - 为了让测试过而删除或跳过任何测试
 - 改动信号阶梯的触发条件或 soft / hard / kill 的实现
 - 放宽 `head_sha` 检查到「任意已存在的提交」：必须同时满足首次 `base_sha` 的后代与 `HEAD` 的祖先
+
+记录：第 1 次运行 r-20261026-161002 FIX（裁定 `403916c`），worker 28 分钟、102 轮、$7.18，一个代码提交 `2196fc6`。三条目功能全部完成且有测试，750 全过，R1 复核一致。
+**`collie audit` 首次退出码 0**：reviewer 工具清单 Bash / Glob / Grep / Read，worker 6 个。手册「推送后立刻写 report」首次生效（推送到信封 59 秒）。
+FIX 的唯一原因是 R1 的第 6 条验收正则区分大小写（`sessionId.*undefined` 对 `toBeUndefined`）——**R1 的错**；reviewer 建议「加注释让 grep 过」是错误引导。
+`tool.denied` 首次出现但误拦：`\b` 把 `git merge-base` 当 `merge`；且只进了 reviewer 事件流没进 journal。
+两处缺失断言：scenario-e 没断言 `commits_actual` 不含 R2 提交；scenario-f 没断言 `worker.resumed.session_id` 为 null。
+裁定：按上一轮给 R1 自己定的约束（attempt 之间不推受保护改动），R1 不能改验收后重跑，所以 v03-b03-fix 标 blocked、`2196fc6` 采纳；
+正则改 `(?=\\s|$)`（`tag -l` 仍会被拦，接受）；缺口进 v03-b03-fix2。v03-b03 队列代码不另开审核批次：操作员 9/9 补测 + R1 复核 + 场景 J 作为其审核，真实检验在 b04 起的 `--continue`。
+R1 教训：验收里 grep 测试内容时匹配断言语义（`not\.toContain`、`toBeNull`），不要猜字面，或一律 `-i`。
+
+## v03-b03-fix2 补两条断言、bash_deny 正反用例、tool.denied 进 journal、测试超时
+
+优先级：27　依赖：v03-b03-fix
+
+v03-b03-fix 第 1 次运行留下的几个小缺口。规格见 SPEC 11.7（取证排除 R2 提交、不续接）、3.6（`tool.denied` 进 journal）、3.1（`bash_deny`）。
+
+条目：
+1. 两条缺失断言：`test/scenario-e.test.ts` 的 attempt 2 用例断言 `commits_actual`（从 verdict 输入或 progress）**不含**本批次的 task / progress / `report(collie)` 提交
+   （task、progress、`report(collie)` 三个提交各一条独立的 `not.toContain`，不要用循环合成一条）；`test/scenario-f.test.ts` 的「只缺 report 不续接」用例断言 journal 里 `worker.resumed` 事件的 `session_id` 为 `null`
+2. `bash_deny` 正反用例（`test/runner-claude.test.ts`，用仓库 toml 里的正则）：放行 `git merge-base --is-ancestor a b`、`git branch -v`、`git log --oneline`、`npm test`；
+   拒绝 `git merge x`、`git push origin main`、`git  push`、`git branch -D x`、`git stash`、`gh api repos`
+3. `tool.denied` 进 journal：runner 已通过 `onEvent` 发出该事件，R2 在 `onEvent` 回调里识别 `event === 'tool.denied'` 并 `rec.record('tool.denied', {role, tool, command, pattern})`
+   （journal 自带 ts / run_id）；`collie show` 的「中断链」之后列出 `tool.denied` 条数与命令。测试：注入 fake runner 发一条 `tool.denied`，断言 journal 含它。
+   顺带：`vitest.config.ts` 的 `testTimeout` 10 秒 → 30 秒（真实 git 的 cli / scenario-j 用例全量运行时 6~8 秒，随机超时），删掉 `scenario-f` 里单独的 30 秒；
+   `test/invariants.test.ts` 加「`src/run.ts` 含 `tool.denied`」「`vitest.config.ts` 的 testTimeout ≥ 30000」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 全量连跑 3 次稳定 | `for i in 1 2 3; do npm test \|\| exit 1; done` | exit 0 |
+| commits_actual 排除断言（现有 2 处 + 新增 3 处） | `grep -cE "not\.toContain" test/scenario-e.test.ts \| grep -qE "^([5-9]\|[1-9][0-9])$"` | exit 0 |
+| session_id null 断言 | `grep -qiE "session_id.{0,40}null" test/scenario-f.test.ts` | exit 0 |
+| bash_deny 正反用例 | `grep -qE "merge-base" test/runner-claude.test.ts && grep -qE "branch -D" test/runner-claude.test.ts` | exit 0 |
+| tool.denied 进 journal | `grep -qE "tool\.denied" src/run.ts && grep -qE "tool\.denied" test/*.test.ts` | exit 0 |
+| 测试超时 | `grep -qE "testTimeout: 30_?000" vitest.config.ts` | exit 0 |
+| 不变量同步 | `grep -qE "tool\.denied\|testTimeout" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让 grep 通过而加注释或改字面：验收 grep 的是断言，不是字符串
 
