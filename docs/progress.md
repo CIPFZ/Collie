@@ -638,4 +638,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v03-b04-fix · r-20261027090540 · PASS
+
+- 时间：2026-10-27T09:49:56.521Z
+- 裁定：规则 10，All 8 acceptance commands pass (exit 0). Scenario-j groups 4 & 5 verify FIX rerun task semantics and per-queue fix_max counting behaviorally. No protected files changed, no dependency changes, no scope creep. CI 以 R2 取证为准。
+- 提交：`ebc4154`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，801 passed, 0 failed
+  - `grep -qE "上一轮判 FIX" src/run.ts && grep -qE "上一轮判 FIX" test/scenario-*.test.ts` → exit 0，exit 0
+  - `! grep -v '^\s*//' src/run.ts | grep -qE "countBatchFinished" && grep -qE "escalated" test/scenario-*.test.ts` → exit 0，exit 0
+  - `grep -qE "queue\.batch_started" src/schema/index.ts && grep -qE "fix_retry" src/run.ts` → exit 0，exit 0
+  - `grep -qE "\-\-queue" src/cli.ts && grep -qE "\-\-queue" test/cli.test.ts` → exit 0，grep: warning: stray \ before -
+  - `grep -qE "queue\.batch_started" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/40482985905
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->

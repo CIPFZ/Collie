@@ -44,7 +44,7 @@
 | 26 | v03-b03-fix | head_sha 按首次 base_sha、取证排除 R2 提交、续接成本判断、中断原因、CLI 总结行、audit | v03-b03 | blocked |
 | 27 | v03-b03-fix2 | 补两条断言、bash_deny 正反用例、tool.denied 进 journal、测试超时 | v03-b03-fix | passed |
 | 28 | v03-b04 | 放行判定与停表：queue.paused、规则 1 自动重跑、规则 9 连续两次 | v03-b03-fix2 | passed |
-| 29 | v03-b04-fix | FIX 重跑的 task 语义、fix_max 只计本次队列、队列 journal 可还原 | v03-b04 | pending |
+| 29 | v03-b04-fix | FIX 重跑的 task 语义、fix_max 只计本次队列、队列 journal 可还原 | v03-b04 | passed |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
