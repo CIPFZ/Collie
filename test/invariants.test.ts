@@ -217,4 +217,20 @@ describe('structural invariants (SPEC 3.2)', () => {
     // goes into sdk_stop_reason.
     expect(content).toContain('sdk_stop_reason');
   });
+
+  it('src/run.ts contains tool.denied journal recording (v03-b03-fix2)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    // SPEC 3.6: runner emits tool.denied via onEvent; R2 records it to the journal.
+    expect(content).toContain('tool.denied');
+  });
+
+  it('vitest.config.ts testTimeout is at least 30000 (v03-b03-fix2)', () => {
+    const content = readFileSync(join(ROOT, 'vitest.config.ts'), 'utf8');
+    // SPEC 11.5: scenario-j and cli tests with real git can take 6–8s; 10s was flaky.
+    const match = /testTimeout:\s*(\d[\d_]*)/.exec(content);
+    expect(match).toBeTruthy();
+    const raw = match?.[1] ?? '0';
+    const value = Number(raw.replace(/_/g, ''));
+    expect(value).toBeGreaterThanOrEqual(30_000);
+  });
 });

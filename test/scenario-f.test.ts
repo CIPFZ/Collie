@@ -39,7 +39,7 @@ function workerWithSession(sessionId: string): ReturnType<typeof workerScene> {
   };
 }
 
-describe('scenario F: resume_max gating (SPEC 11.7)', { timeout: 30_000 }, () => {
+describe('scenario F: resume_max gating (SPEC 11.7)', () => {
   it('passes resumeSessionId for the first two resumes but not the third', async () => {
     // Default resume_max in collie.toml template is 2.
     // Run 1: worker killed with session id → interrupted.
@@ -187,5 +187,12 @@ describe('scenario F: resume_max gating (SPEC 11.7)', { timeout: 30_000 }, () =>
 
     // The worker in run 2 should NOT have received resumeSessionId.
     expect(r2.calls[0]?.resumeSessionId).toBeUndefined();
+
+    // The journal should contain a worker.resumed event with session_id=null
+    // because resume was skipped but this is still attempt 2 (v03-b03-fix2).
+    const events = box.events();
+    const resumed = events.filter((e) => e.event === 'worker.resumed');
+    expect(resumed).toHaveLength(1);
+    expect(resumed[0]?.session_id).toBeNull();
   });
 });

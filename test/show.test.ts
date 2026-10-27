@@ -187,3 +187,61 @@ describe('collie show: ci.resolved in a normal PASS run', () => {
     expect(out).toContain('conclusion=success');
   });
 });
+
+describe('collie show: tool.denied in journal and show output (v03-b03-fix2)', () => {
+  it('tool.denied event from runner reaches the journal and collie show lists it', async () => {
+    // A worker scene that emits a tool.denied event (simulating the PreToolUse hook
+    // firing inside the runner) before completing normally.
+    const r = new FakeRunner([
+      {
+        expectRole: 'worker',
+        events: [
+          {
+            event: 'tool.denied',
+            role: 'reviewer',
+            tool: 'Bash',
+            command: 'git push origin main',
+            pattern: '^\\s*git\\s+push',
+          },
+        ],
+        effect: async ({ cwd }: FakeSceneContext) => {
+          box.write('feature.txt', 'feature\n', cwd);
+          box.write('tests/t000.sh', 'exit 0\n', cwd);
+          const head = await box.commitAll('feat: add feature with tests', cwd);
+          const report = {
+            schema_version: 1,
+            batch_id: BATCH,
+            head_sha: head,
+            claims: { commits: [head], ...honestClaims(1, true) },
+            open_questions: [],
+          };
+          box.write(
+            `.collie/batches/${BATCH}/report.md`,
+            `# r\n\n## 做了什么\n完成。\n\n## 测试结果\n见。\n\n## 偏离或疑问\n无\n\n## 下一步建议\n无\n\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n`,
+            cwd,
+          );
+          await box.commitAll(`report(collie): ${BATCH}`, cwd);
+          const { git: gitFn } = await import('../src/git.js');
+          await gitFn(cwd, ['push', '-q', 'origin', 'main']);
+        },
+        result: { exitCode: 0 },
+      },
+      fooledReviewerScene(box),
+    ]);
+    expect(await box.run(r)).toBe(0);
+
+    // Journal must contain the tool.denied event.
+    const events = box.events();
+    const denied = events.find((e) => e.event === 'tool.denied');
+    expect(denied).toBeDefined();
+    expect(denied?.role).toBe('reviewer');
+    expect(denied?.tool).toBe('Bash');
+    expect(denied?.command).toBe('git push origin main');
+    expect(denied?.pattern).toBe('^\\s*git\\s+push');
+
+    // `collie show` must list the tool.denied section.
+    const out = await showOutput();
+    expect(out).toContain('tool.denied');
+    expect(out).toContain('git push origin main');
+  });
+});

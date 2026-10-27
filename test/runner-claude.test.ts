@@ -942,3 +942,144 @@ describe('runner-claude: PreToolUse bash deny hook (SPEC 11.2 v03-b02)', () => {
     expect(output?.permissionDecision).toBe('deny');
   });
 });
+
+describe('runner-claude: bash_deny positive/negative with repo toml patterns (v03-b03-fix2)', () => {
+  // Uses the actual config loaded from the repo's collie.toml, which has
+  // (?=\\s|$) word boundary instead of \\b (merge-base false positive fix).
+
+  /** Extracts the PreToolUse hook from a reviewer run using the real config. */
+  async function getRepoHook(): Promise<
+    (input: HookInput, id: string, opts: { signal: AbortSignal }) => Promise<unknown>
+  > {
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(config, { query }).run(
+      opts({
+        role: 'reviewer',
+        allowedTools: config.agent.reviewer.allowed_tools,
+        maxTurns: config.agent.reviewer.max_turns,
+      }),
+    );
+    const matchers = calls[0]?.options?.hooks?.PreToolUse;
+    expect(matchers).toBeDefined();
+    const hookFn = matchers?.[0]?.hooks[0];
+    expect(hookFn).toBeTypeOf('function');
+    return hookFn as unknown as (
+      input: HookInput,
+      id: string,
+      opts: { signal: AbortSignal },
+    ) => Promise<unknown>;
+  }
+
+  function bashInput(command: string): HookInput {
+    return {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      tool_input: { command },
+      tool_use_id: 'tu_repo',
+    } as unknown as HookInput;
+  }
+
+  // --- Allowed commands ---
+
+  it('allows git merge-base --is-ancestor a b', async () => {
+    const hookFn = await getRepoHook();
+    const result = await hookFn(bashInput('git merge-base --is-ancestor a b'), 'tu_a1', {
+      signal: AbortSignal.timeout(5000),
+    });
+    const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
+      .hookSpecificOutput;
+    expect(output).toBeUndefined();
+  });
+
+  it('allows git branch -v', async () => {
+    const hookFn = await getRepoHook();
+    const result = await hookFn(bashInput('git branch -v'), 'tu_a2', {
+      signal: AbortSignal.timeout(5000),
+    });
+    const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
+      .hookSpecificOutput;
+    expect(output).toBeUndefined();
+  });
+
+  it('allows git log --oneline', async () => {
+    const hookFn = await getRepoHook();
+    const result = await hookFn(bashInput('git log --oneline'), 'tu_a3', {
+      signal: AbortSignal.timeout(5000),
+    });
+    const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
+      .hookSpecificOutput;
+    expect(output).toBeUndefined();
+  });
+
+  it('allows npm test', async () => {
+    const hookFn = await getRepoHook();
+    const result = await hookFn(bashInput('npm test'), 'tu_a4', {
+      signal: AbortSignal.timeout(5000),
+    });
+    const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
+      .hookSpecificOutput;
+    expect(output).toBeUndefined();
+  });
+
+  // --- Denied commands ---
+
+  it('denies git merge x', async () => {
+    const hookFn = await getRepoHook();
+    const result = await hookFn(bashInput('git merge x'), 'tu_d1', {
+      signal: AbortSignal.timeout(5000),
+    });
+    const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
+      .hookSpecificOutput;
+    expect(output?.permissionDecision).toBe('deny');
+  });
+
+  it('denies git push origin main', async () => {
+    const hookFn = await getRepoHook();
+    const result = await hookFn(bashInput('git push origin main'), 'tu_d2', {
+      signal: AbortSignal.timeout(5000),
+    });
+    const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
+      .hookSpecificOutput;
+    expect(output?.permissionDecision).toBe('deny');
+  });
+
+  it('denies git  push (multiple spaces)', async () => {
+    const hookFn = await getRepoHook();
+    const result = await hookFn(bashInput('git  push'), 'tu_d3', {
+      signal: AbortSignal.timeout(5000),
+    });
+    const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
+      .hookSpecificOutput;
+    expect(output?.permissionDecision).toBe('deny');
+  });
+
+  it('denies git branch -D x', async () => {
+    const hookFn = await getRepoHook();
+    const result = await hookFn(bashInput('git branch -D x'), 'tu_d4', {
+      signal: AbortSignal.timeout(5000),
+    });
+    const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
+      .hookSpecificOutput;
+    expect(output?.permissionDecision).toBe('deny');
+  });
+
+  it('denies git stash', async () => {
+    const hookFn = await getRepoHook();
+    const result = await hookFn(bashInput('git stash'), 'tu_d5', {
+      signal: AbortSignal.timeout(5000),
+    });
+    const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
+      .hookSpecificOutput;
+    expect(output?.permissionDecision).toBe('deny');
+  });
+
+  it('denies gh api repos', async () => {
+    const hookFn = await getRepoHook();
+    const result = await hookFn(bashInput('gh api repos'), 'tu_d6', {
+      signal: AbortSignal.timeout(5000),
+    });
+    const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
+      .hookSpecificOutput;
+    expect(output?.permissionDecision).toBe('deny');
+  });
+});

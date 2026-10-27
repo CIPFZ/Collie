@@ -662,6 +662,22 @@ describe('scenario E: head_sha against first base_sha and R2 commit exclusion (v
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded at line 615
     expect(progress).toContain(attempt1CodeSha!.slice(0, 7));
 
+    // D2. commits_actual must NOT contain any R2 operational commits.
+    //     Each exclusion is a separate assertion (task v03-b03-fix2 item 1).
+    const gitLog = await git(box.root, ['log', '--oneline', '--all']);
+    const taskLine = gitLog.split('\n').find((l) => l.includes('docs: issue'));
+    const progressLine = gitLog.split('\n').find((l) => l.includes('progress:'));
+    const reportLine = gitLog.split('\n').find((l) => l.includes('report(collie):'));
+    expect(taskLine).toBeDefined();
+    expect(progressLine).toBeDefined();
+    expect(reportLine).toBeDefined();
+    const taskSha = taskLine?.split(' ')[0] ?? '';
+    const progressSha = progressLine?.split(' ')[0] ?? '';
+    const reportSha = reportLine?.split(' ')[0] ?? '';
+    expect(progress).not.toContain(taskSha);
+    expect(progress).not.toContain(progressSha);
+    expect(progress).not.toContain(reportSha);
+
     // E. Verify batch.selected events show same base_sha across runs.
     const selected = events.filter((e) => e.event === 'batch.selected');
     expect(selected).toHaveLength(2);

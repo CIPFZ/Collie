@@ -1128,6 +1128,21 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       appendStream(root, runId, event);
       touchHeartbeat(root, ctx.now().toISOString());
       monitor.onEvent();
+      // SPEC 3.6: tool.denied events emitted by the runner's PreToolUse hook
+      // go into the journal for the audit trail (v03-b03-fix2).
+      if (
+        typeof event === 'object' &&
+        event !== null &&
+        (event as Record<string, unknown>).event === 'tool.denied'
+      ) {
+        const e = event as Record<string, unknown>;
+        rec.record('tool.denied', {
+          role: typeof e.role === 'string' ? e.role : 'unknown',
+          tool: typeof e.tool === 'string' ? e.tool : 'unknown',
+          command: typeof e.command === 'string' ? e.command : '',
+          pattern: typeof e.pattern === 'string' ? e.pattern : '',
+        });
+      }
     };
     const onStarted = (handle: RunHandle): void => {
       workerHandle = handle;

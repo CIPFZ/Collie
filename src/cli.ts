@@ -329,6 +329,13 @@ function show(deps: CliDeps, batchId: string): number {
     deps.out(section('中断链', chain));
   }
 
+  // tool.denied summary (SPEC 3.6 v03-b03-fix2): count and list denied commands.
+  const denied = events.filter((e) => e.event === 'tool.denied');
+  if (denied.length > 0) {
+    const lines = denied.map((e) => `  ${typeof e.command === 'string' ? e.command : '(unknown)'}`);
+    deps.out(section(`tool.denied (${String(denied.length)})`, lines.join('\n')));
+  }
+
   return EXIT_CODES.PASS;
 }
 
