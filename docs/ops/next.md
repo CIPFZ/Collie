@@ -2,29 +2,29 @@
 
 基准提交：见本文件末尾。`git pull --ff-only` 后 `git merge-base --is-ancestor <基准> HEAD` 必须成功，否则停下报告。
 
-## 本轮：v03-b03-fix2
+## 本轮：`--continue --max 1`（应选中 v03-b04）
 
-b03-fix 的 FIX 是我的验收正则写错了，worker 没错。你建议的「R1 改验收后跑 attempt 2」我不能做：上一轮刚给 R1 定了
-「attempt 之间不推受保护改动」，`docs/backlog.md` 是受保护路径，改了你就该拒绝我。所以 v03-b03-fix 标 blocked、`2196fc6` 采纳，
-缺口（两条断言、`bash_deny` 用例、`tool.denied` 进 journal、测试超时）进 v03-b03-fix2。
-你问的 FIX 重跑是否沿用首次 `base_sha`：是，代码一直如此（看第一条 `batch.selected`，不看 attempt），已写进 SPEC 11.7。
-`bash_deny` 正则已改 `(?=\s|$)`（toml / 模板 / SPEC / 夹具），`merge-base` 放行；`tag -l` 仍会被拦，接受。
-b03 的队列代码不另开审核批次，你的 9/9 补测 + 我的复核 + 场景 J 作为它的审核，真实检验在 b04 起的 `--continue`。
+fix2 PASS，v03-b03 组全部收口。你发现的 `not.toContain` 恒真那条我同意不开批次，记进了我的自查清单（多轮 sha 用 `filter` 不用 `find`）。
+v03-b04「放行判定与停表」已签（SPEC 12.3 细化、退出码 30、`queue.paused` / `batch.retried`）。
+按你的建议第一次 `--max 1`。这是队列代码（`c62deb2` / `09f229c`）第一次真实运行，也是它第一次被真正检验。
 
 步骤：
 1. `git pull --ff-only`，确认基准是 HEAD 祖先、工作区干净、`heartbeat.json` 不存在、无残留 claude / `node -e` 进程。
 2. `npx tsx src/cli.ts smoke` 一次。
-3. `npx tsx src/cli.ts run v03-b03-fix2`，只跑一次，不 kill。
-4. 跑完 `npx tsx src/cli.ts audit <run_id>`，有 reviewer 时必须 0。
+3. `npx tsx src/cli.ts run --continue --max 1`。不带批次名。只跑一次，不 kill。
+   预期：选中 v03-b04（唯一 pending 且依赖 fix2 已 passed；v03-b03 / b03-fix 是 blocked，不该被选）。
+   若它选了别的批次或报「没有可执行批次」，停下，把 `batch.selected` / `batch.skipped` / `queue.finished` 原样抄下来。
+4. 跑完对该 run_id `npx tsx src/cli.ts audit <run_id>`，有 reviewer 时必须 0。
 
 重点看（写进汇报）：
-- `tool.denied`：reviewer 这轮若再跑 `git merge-base` 应当放行；若仍有 `tool.denied`，原样抄命令与 pattern。
-- 这是 b03-fix 代码第一次在 R2 上生效：取证范围应从首次 `base_sha` 算且 progress「提交」一栏不再列 task / progress / ops 提交；
-  `worker.finished` 若有信号则 `stop_reason` 为阶梯 reason；CLI 总结行不再有 `rule 0`。
-- worker 是否遵守「验收 grep 的是断言，不是字符串」（额外禁止第 3 条）：看它改的是测试断言还是加了注释。
-- 轮数、花费、上下文压缩次数；推送到信封的间隔。
-- 启动时 `ci.verdict_commit` 查的是 `403916c`，应为 success、不警告。
+- 队列层：`batch.selected` 选的是谁、有没有 `batch.skipped`、`queue.finished` 的 reason（应为 `limit`）与退出码。
+- **backlog 状态列**：`docs/backlog.md` 里 v03-b04 那一行最后一列是否被 R2 改成 `passed` / `blocked`，改动是否只在那一行、是否并进了 `progress:` 裁定提交；
+  `batch.status` 事件原样抄。这是 R2 第一次写受保护路径，看它有没有多改一个字节。
+- 若结果是 FIX：Collie 应在 `fix_max` 内自动重跑同批次（attempt 不递增、`base_sha` 沿用），每次运行一份汇报。
+- 每个批次结束后的清理与推送（`verdict.pushed`）照常。
+- 常规项：reviewer 工具清单与 audit、`tool.denied`、推送到信封间隔、轮数花费压缩、`ci.verdict_commit` 查 `437fb77` 应 success。
 
-汇报写进 `docs/ops/v03-b03-fix2-r1.md`，提交 `ops: report v03-b03-fix2 r1`，推送，对话里回「已写 docs/ops/v03-b03-fix2-r1.md」。
+汇报：`docs/ops/v03-b04-r1.md`（批次）+ `docs/ops/queue-20261027.md`（队列层，哪怕只跑了一个）。提交 `ops: report v03-b04 r1 + queue`，推送，
+对话里回「已写 docs/ops/v03-b04-r1.md」。
 
-基准提交：8b68691
+基准提交：051c9bf
