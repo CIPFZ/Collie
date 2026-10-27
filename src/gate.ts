@@ -1,6 +1,6 @@
 // SPEC 12.3: gate decision — pure function that decides "continue or stop" after
 // a batch PASSes in --continue mode. The seven conditions are self-contained:
-// no runner import, no journal import, no side effects.
+// zero external imports, no journal dependency, no side effects.
 
 /**
  * Input for the gate decision. All fields come from the batch's arbiter outcome,
