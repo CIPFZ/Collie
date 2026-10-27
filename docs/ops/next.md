@@ -2,29 +2,31 @@
 
 基准提交：见本文件末尾。`git pull --ff-only` 后 `git merge-base --is-ancestor <基准> HEAD` 必须成功，否则停下报告。
 
-## 本轮：`--continue --max 1`（应选中 v03-b04）
+## 本轮：`--continue --max 1`（应选中 v03-b04-fix）
 
-fix2 PASS，v03-b03 组全部收口。你发现的 `not.toContain` 恒真那条我同意不开批次，记进了我的自查清单（多轮 sha 用 `filter` 不用 `find`）。
-v03-b04「放行判定与停表」已签（SPEC 12.3 细化、退出码 30、`queue.paused` / `batch.retried`）。
-按你的建议第一次 `--max 1`。这是队列代码（`c62deb2` / `09f229c`）第一次真实运行，也是它第一次被真正检验。
+b04 维持 PASS。`--continue` 第一次真实运行成立：选批对、FIX 自动重跑、`base_sha` 沿用、R2 写 backlog 状态列只动一格（你的逐字节比对是本轮最硬的证据）。
+你的四条建议全部采纳：
+- 「不得为过验收改字面」升为铁律 26（CONSTRAINTS），worker 手册 4.2、reviewer 手册核对表同步。reviewer 以后遇到这种情况 gaps 要写「转 R1」。
+- FIX 重跑：attempt 递增、`interrupted_at` 为 null、不写「上一轮中断」、写「上一轮判 FIX」（SPEC 11.7）。
+- `fix_max` 只计本次队列（SPEC 12.2）。
+- 队列 journal 加 `queue.batch_started`，`queue.finished.batches` 带 run_id 与 verdict（SPEC 12.2 / 3.6）。
+三条进 v03-b04-fix。这一轮 b04 的放行判定（`gateDecision` / `queue.paused` / 退出码 30）第一次在 R2 上生效。
 
 步骤：
 1. `git pull --ff-only`，确认基准是 HEAD 祖先、工作区干净、`heartbeat.json` 不存在、无残留 claude / `node -e` 进程。
 2. `npx tsx src/cli.ts smoke` 一次。
-3. `npx tsx src/cli.ts run --continue --max 1`。不带批次名。只跑一次，不 kill。
-   预期：选中 v03-b04（唯一 pending 且依赖 fix2 已 passed；v03-b03 / b03-fix 是 blocked，不该被选）。
-   若它选了别的批次或报「没有可执行批次」，停下，把 `batch.selected` / `batch.skipped` / `queue.finished` 原样抄下来。
-4. 跑完对该 run_id `npx tsx src/cli.ts audit <run_id>`，有 reviewer 时必须 0。
+3. `npx tsx src/cli.ts run --continue --max 1`。预期选中 v03-b04-fix。选了别的或报无可执行批次，停下抄事件。
+4. 每个 run_id 各跑一次 `npx tsx src/cli.ts audit <run_id>`，有 reviewer 时必须 0。
 
 重点看（写进汇报）：
-- 队列层：`batch.selected` 选的是谁、有没有 `batch.skipped`、`queue.finished` 的 reason（应为 `limit`）与退出码。
-- **backlog 状态列**：`docs/backlog.md` 里 v03-b04 那一行最后一列是否被 R2 改成 `passed` / `blocked`，改动是否只在那一行、是否并进了 `progress:` 裁定提交；
-  `batch.status` 事件原样抄。这是 R2 第一次写受保护路径，看它有没有多改一个字节。
-- 若结果是 FIX：Collie 应在 `fix_max` 内自动重跑同批次（attempt 不递增、`base_sha` 沿用），每次运行一份汇报。
-- 每个批次结束后的清理与推送（`verdict.pushed`）照常。
-- 常规项：reviewer 工具清单与 audit、`tool.denied`、推送到信封间隔、轮数花费压缩、`ci.verdict_commit` 查 `437fb77` 应 success。
+- **放行判定首次生效**：PASS 之后 journal 里有没有 `queue.paused`；退出码是 0 还是 30；`queue.finished` 是否带 `paused_count`。
+  若是 30，把 `queue.paused.reasons` 原样抄下来——这是「打扰」的第一个真实样本，要判断它该不该打扰。
+- 若有 FIX 重跑：这轮 R2 还是 b04 代码，task 仍会错写「上一轮中断 / unknown」（属已知，本批次修）；看 worker 有没有被误导。
+- 若 reviewer 又判验收匹配到注释：看它的 gaps 是否按新手册写「转 R1」，worker 是否按铁律 26 不改字面。
+- backlog 状态列改动是否仍只动一格；队列 journal 内容原样。
+- 常规项：audit、`tool.denied`、推送到信封间隔、轮数花费压缩、`ci.verdict_commit` 查 `2bbda1b` 应 success。
 
-汇报：`docs/ops/v03-b04-r1.md`（批次）+ `docs/ops/queue-20261027.md`（队列层，哪怕只跑了一个）。提交 `ops: report v03-b04 r1 + queue`，推送，
-对话里回「已写 docs/ops/v03-b04-r1.md」。
+汇报：`docs/ops/v03-b04-fix-r<attempt>.md`（每次运行一份）+ `docs/ops/queue-20261027-2.md`。提交 `ops: report v03-b04-fix + queue`，推送，
+对话里回「已写 docs/ops/v03-b04-fix-r1.md」。
 
-基准提交：051c9bf
+基准提交：59a9579
