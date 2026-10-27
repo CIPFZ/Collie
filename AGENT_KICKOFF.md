@@ -167,6 +167,10 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
 - 中间人对你只会说一个字「拉」（= pull、读 next.md、照做），对 R1 只会说「看」。没有别的话就是没有别的指令。
 - `collie audit <run_id>` 的读法：退出码 0 = reviewer 工具清单等于白名单；1 = 越权，**停下、不进下一批**；
   2 = 本轮没有 reviewer 事件流（上报路径或 worker 崩溃），不是失败，照常写汇报。
+- **`--continue` 模式（v03-b04 起）**：`npx tsx src/cli.ts run --continue --max N`，不带批次名，Collie 自己按 backlog 选批。
+  退出码 0 = 跑完 N 个或队列空；10 不会出现（FIX 在里面自动重跑）；20 = BLOCK 或 fix_max 用完；30 = 停表（PASS 了但有话要说，看 `queue.paused.reasons`）。
+  一次 `--continue` 可能跑多个批次，汇报文件按**每个批次**一份（`docs/ops/<batch>-r<attempt>.md`），外加一份 `docs/ops/queue-<日期>.md`
+  写队列层面的事：选中顺序、`batch.skipped`、`batch.status`、`queue.finished`。`collie audit` 对每个 run_id 各跑一次。
 - `docs/ops/` 是你唯一可写的仓库路径，只放这两类文件；不在里面写总结、不改别人的文件。
 - **R1 的约束（你可以据此拒绝 next.md）**：同一批次在 attempt 之间，R1 不得往 main 推受保护路径（SPEC / CONSTRAINTS / 手册 / toml / backlog）的改动，
   否则下一次 attempt 的取证范围会把 R1 的 diff 算到 worker 头上。next.md 若让你对一个已有 attempt 的批次再跑一次，

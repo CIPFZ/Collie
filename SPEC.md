@@ -370,7 +370,9 @@ type EventType =
   | 'batch.selected' | 'batch.task_written'
   | 'batch.skipped'      // v0.3：依赖未满足；字段 batch_id / missing（依赖清单）
   | 'batch.status'       // v0.3：R2 改写 backlog 状态列；字段 batch_id / from / to
-  | 'queue.finished'     // v0.3：--continue 结束；字段 reason（exhausted / blocked / escalated / fix_max / limit）/ batches（本次跑过的）
+  | 'queue.finished'     // v0.3：--continue 结束；字段 reason（exhausted / blocked / escalated / fix_max / limit / paused）/ batches（本次跑过的）/ paused_count
+  | 'queue.paused'       // v0.3（12.3）：PASS 但触发停表清单；字段 batch_id / reasons（数组）
+  | 'batch.retried'      // v0.3（12.3）：规则 1 BLOCK 后自动重跑一次；字段 batch_id / rule（固定 1）
   | 'worker.started' | 'worker.finished' | 'worker.crashed'
   | 'reviewer.started' | 'reviewer.verdict'
   | 'claim.mismatch' | 'verdict.downgraded'
@@ -523,6 +525,7 @@ collie show <batch_id>           打印该批次的 task / report / verdict 与�
 - `0`：PASS
 - `10`：FIX
 - `20`：BLOCK
+- `30`：`--continue` 下停表（结论是 PASS，但触发了 12.3 的停表清单，等人看一眼再继续；v03-b04）
 - `1`：Collie 自身错误
 
 ## 6. 执行流程（v0.1）
@@ -888,9 +891,27 @@ backlog 状态列的写法：只改状态表里该批次那一行的最后一列
 v03-b03 的真实验证（ROADMAP：连跑 5 个真实批次）：b03 PASS 后，操作员用 `--continue` 从 b04 起连跑，中途不说「跑」；
 b04 与后续批次的汇报改成每批一个 `docs/ops/` 文件（见 AGENT_KICKOFF.md「交接走仓库」）。
 
-### 12.3 放行与停表（v03-b04，待签；b03 PASS 后 R1 细化）
+### 12.3 放行与停表（v03-b04）
 
-分级放行白名单（ROADMAP）：PASS 且 `claim_mismatches` 空、CI success、diff 范围在条目内、`deps_diff` 空、无许可证变化 → 自动进下一批。
-停表清单：`spec_diff_lines > 0`、`deps_diff` 非空、受保护路径改动、规则 9 连续两次、reviewer `gaps` 非空、同批次第 2 次 BLOCK → 停下等人。
-reviewer JSON 格式错（规则 1）单独处理：同批次只因规则 1 BLOCK 一次时自动重跑一次，第 2 次才停。
+`--continue` 在一个批次 PASS 之后、取下一个之前做一次**放行判定**。PASS 的结论、裁定提交、backlog 状态 `passed` 都不变，判定只决定「继续还是停」。
+
+自动放行（全部满足才继续）：
+- 仲裁 PASS 且本批次没有 `verdict.downgraded`（规则 9 没降过级、没有被规则 8 救回来的验收失败）；
+- `claim_mismatches` 为空；
+- `ci.resolved.conclusion === 'success'` 且 `branch_matched`；
+- `deps_diff` 为空、`spec_diff_lines === 0`、受保护路径改动为 0 行（这三条本来就会 BLOCK / FIX，列在这里是为了让判定自成一体）；
+- reviewer 的 `gaps` 为空。
+
+否则记 `queue.paused`（`reasons` 列出没满足的每一条，字段名用上面的英文：`downgraded` / `claim_mismatches` / `ci` / `deps_diff` / `spec_diff` / `protected` / `gaps`），
+`queue.finished` reason `paused`，退出码 **30**。人看一眼后再 `--continue` 就从下一个批次接着跑——停表不是失败，只是「这一批过了但有话要说」。
+
+停表清单（任何裁决下都停）：
+- 规则 9 降级（`verdict.downgraded` rule=9）在**连续两个批次**出现 → `queue.paused` reason `rule9_twice`（即使第二个批次最终 PASS）。
+- 同一批次第 2 次 BLOCK → 停（现有行为，BLOCK 本来就停）。
+
+规则 1 的特殊处理：reviewer 输出格式错（规则 1）导致的 BLOCK，同批次**第一次**自动重跑一次，记 `batch.retried`（rule 1），**不计入** `fix_max`；
+第二次仍是规则 1 → 停，退出码 20。理由：v02-b04-tests、v02-b04-fix4 都是代码良好、reviewer 格式错，重跑一次就过，不值得叫人。
+
+打扰计数：`queue.finished` 带 `paused_count`（本次 `--continue` 里 `queue.paused` 的次数）。ROADMAP 的通过标准
+「被打扰次数 ≤ 应打扰次数 + 1」用它和 BLOCK 次数之和来数。单批次模式 `collie run <batch>` 不做放行判定、不发 `queue.paused`。
 

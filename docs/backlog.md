@@ -42,7 +42,8 @@
 | 24 | v03-b02 | 工具白名单真正生效：tools 选项、reviewer Bash 黑名单 | v03-b01-fix | passed |
 | 25 | v03-b03 | 队列消费与分流：--continue、fix_max 返工闸、backlog 状态列 | v03-b02 | blocked |
 | 26 | v03-b03-fix | head_sha 按首次 base_sha、取证排除 R2 提交、续接成本判断、中断原因、CLI 总结行、audit | v03-b03 | blocked |
-| 27 | v03-b03-fix2 | 补两条断言、bash_deny 正反用例、tool.denied 进 journal、测试超时 | v03-b03-fix | pending |
+| 27 | v03-b03-fix2 | 补两条断言、bash_deny 正反用例、tool.denied 进 journal、测试超时 | v03-b03-fix | passed |
+| 28 | v03-b04 | 放行判定与停表：queue.paused、规则 1 自动重跑、规则 9 连续两次 | v03-b03-fix2 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -1149,4 +1150,50 @@ v03-b03-fix 第 1 次运行留下的几个小缺口。规格见 SPEC 11.7（取�
 - 改动任何受保护路径
 - 为了让测试过而删除或跳过任何测试
 - 为了让 grep 通过而加注释或改字面：验收 grep 的是断言，不是字符串
+
+记录：第 1 次运行 r-20261027-033610 PASS（裁定 `437fb77`），10/10 验收通过，765 全过（连跑 3 次），11 分 28 秒、71 轮、$4.56、无上下文压缩，R1 复核一致。
+`collie audit` 退出码 0。worker 守住了「grep 的是断言不是字符串」：改的全是真断言，没有凑字符串的注释。
+b03-fix 代码首次在 R2 上生效：progress「提交」一栏只有 `1e00841`，取证排除 R2 提交在真实运行里成立。未在真实运行里验证到的：`stop_reason` 取阶梯 reason、上报总结行措辞、`bash_deny` 放行 `merge-base`（reviewer 改用 `branch -r --contains` 核实推送）。
+测试强度缺口（操作员发现）：三条 `not.toContain` 里 `progressSha` 用 `find` 取到的是最后一轮裁定提交，progress 写在它之前，该断言恒真；`taskSha` 只取到 attempt 2 的。功能已真实验证，不另开批次，记进 R1 自查清单：场景测试对多轮提交的排除断言要逐轮取 sha（`filter` 不是 `find`）。
+**v03-b03 组（b03 / fix / fix2）至此全部收口。从 v03-b04 起用 `--continue --max 1`。**
+
+## v03-b04 放行判定与停表：queue.paused、规则 1 自动重跑、规则 9 连续两次
+
+优先级：28　依赖：v03-b03-fix2
+
+v0.3 最后一个功能批次。规格见 SPEC 12.3、3.6（`queue.paused` / `batch.retried`）、5（退出码 30）。
+**这是第一个由 `--continue` 选中并运行的批次**：它自己的代码在被审核时，R2 跑的还是 b03 的队列代码（没有放行判定），属正常。
+
+条目：
+1. 放行判定（`src/run.ts` 队列循环，PASS 之后、选下一批之前）：按 SPEC 12.3 的七项逐条检查，任一不满足则 `rec.record('queue.paused', {batch_id, reasons})`、
+   `queue.finished` reason=`paused` 带 `paused_count`、退出码 30；全部满足才取下一批。判定函数独立为纯函数 `gateDecision(input): {pass: boolean; reasons: string[]}`
+   放在 `src/arbiter.ts` 旁的 `src/gate.ts`，输入只含 SPEC 12.3 列的字段。`schema` 加两个事件；`cli.ts` 退出码 30。单批次模式不调用
+2. 规则 1 自动重跑与规则 9 连续两次（同一队列循环）：BLOCK 且 `decision.rule === 1` 且本批次此前没有 `batch.retried` → 记 `batch.retried` 立即重跑同批次，
+   不计入 `fix_max`；第二次仍规则 1 → 停、退出码 20。连续两个批次都有 `verdict.downgraded` rule=9 → `queue.paused` reason=`rule9_twice`、退出码 30
+3. 场景 L（`test/scenario-l.test.ts`，fake runner，三组）：a. 批次 PASS 但 reviewer `gaps` 非空 → `queue.paused` reasons 含 `gaps`、backlog 状态 `passed`、退出码 30、
+   `queue.finished` paused_count=1；b. 第一轮 reviewer 输出坏 JSON（规则 1 BLOCK）、第二轮正常 PASS → journal 有 `batch.retried` rule=1、继续到下一批、
+   `fix_max` 计数未增加；c. 两个批次连续 `claims.pushed=false`（规则 9 降级）→ 第二个批次后 `queue.paused` reason=`rule9_twice`。
+   `test/gate.test.ts` 覆盖 `gateDecision` 七项各自单独不满足的情况。`test/invariants.test.ts` 加「`src/gate.ts` 存在且不 import runner」「`scenario-l` 存在」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 场景 L | `npm test -- test/scenario-l.test.ts` | exit 0 |
+| 两个事件进 schema | `grep -qE "queue\.paused" src/schema/index.ts && grep -qE "batch\.retried" src/schema/index.ts` | exit 0 |
+| 判定是纯函数 | `grep -qE "export function gateDecision" src/gate.ts && ! grep -qE "runner\|run\.js" src/gate.ts` | exit 0 |
+| 退出码 30 | `grep -qE "\b30\b" src/cli.ts && grep -qE "\b30\b" test/scenario-l.test.ts` | exit 0 |
+| 规则 1 重跑不计 fix_max | `grep -qE "batch\.retried" src/run.ts && grep -qE "fix_max" test/scenario-l.test.ts` | exit 0 |
+| 规则 9 连续两次 | `grep -qE "rule9_twice" src/run.ts && grep -qE "rule9_twice" test/scenario-l.test.ts` | exit 0 |
+| 七项各有单测 | `grep -cE "^\s+it\(" test/gate.test.ts \| grep -qE "^([7-9]\|[1-9][0-9])$"` | exit 0 |
+| 不变量同步 | `grep -qE "gate\.ts\|scenario-l" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 改动规则 1~10 的实现或仲裁结论：放行判定只决定「继续还是停」，不改 PASS
+- 单批次模式 `collie run <batch>` 发出 `queue.paused` 或返回 30
 
