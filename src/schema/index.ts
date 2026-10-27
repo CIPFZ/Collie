@@ -206,6 +206,9 @@ export const EVENT_TYPES = [
   'queue.paused',
   // v0.3 (SPEC 12.3): rule 1 BLOCK auto-retried once; fields batch_id / rule (fixed 1).
   'batch.retried',
+  // v0.3 (SPEC 12.2 v03-b04-fix): emitted before each batch run in --continue;
+  // fields run_id / batch_id / attempt / why (new / fix_retry / rule1_retry).
+  'queue.batch_started',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);

@@ -32,6 +32,8 @@ export interface TaskContext {
   interrupted_at?: string;
   /** SPEC 11.7: sha of the wip(collie) rescue commit from the previous run. */
   rescue_sha?: string;
+  /** SPEC 11.7 (v03-b04-fix): pre-rendered "上一轮判 FIX" section, appended when non-empty. */
+  fixSection?: string;
 }
 
 export interface TaskEnvelope {
@@ -162,9 +164,10 @@ export function buildTask(batch: Batch, ctx: TaskContext): TaskEnvelope {
   // renderFrontmatter validates, so an invalid context fails here, not at the worker.
   const body = renderBody(batch);
   const interruptSection = ctx.interrupted_at !== undefined ? renderInterruptSection(ctx) : '';
+  const fixSection = ctx.fixSection ?? '';
   return {
     frontmatter,
-    markdown: `${renderFrontmatter(frontmatter)}\n${body}${interruptSection}`,
+    markdown: `${renderFrontmatter(frontmatter)}\n${body}${interruptSection}${fixSection}`,
   };
 }
 

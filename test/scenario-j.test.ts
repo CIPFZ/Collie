@@ -4,9 +4,14 @@
 // 2. B gets FIX 3 times (fix_max=2): 3rd triggers escalated(fix_max), exit 20,
 //    B→blocked, attempt=3, base_sha identical.
 // 3. --max 1: run one batch then stop with queue.finished(limit).
+// 4. (v03-b04-fix) FIX rerun task semantics: gaps in task.md, no "上一轮中断".
+// 5. (v03-b04-fix) fix_max per-queue: historical FIX journals don't exhaust count.
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FakeSceneContext } from '../src/runner/fake.js';
 import { FakeRunner } from '../src/runner/fake.js';
+import { EVENTS_FILE_NAME, RUNS_RELATIVE_DIR } from '../src/journal.js';
 import type { Claims, Report, Verdict } from '../src/schema/index.js';
 import { Sandbox, TEST_CMD } from './support/sandbox.js';
 
@@ -235,7 +240,13 @@ describe('scenario J group 1: PASS → status column → exhausted', { timeout: 
     const finished = events.filter((e) => e.event === 'queue.finished');
     expect(finished).toHaveLength(1);
     expect(finished[0]).toMatchObject({ reason: 'exhausted' });
-    expect(finished[0]?.batches).toEqual(['v99-b01']);
+    // SPEC 12.2 (v03-b04-fix): batches is now {batch_id, run_id, verdict}[]
+    const batchEntries = finished[0]?.batches as
+      { batch_id: string; run_id: string; verdict: string }[] | undefined;
+    const batchEntry = batchEntries?.[0];
+    expect(batchEntry?.batch_id).toBe('v99-b01');
+    expect(batchEntry?.verdict).toBe('PASS');
+    expect(batchEntry?.run_id).toBeTruthy();
   });
 
   it('updates the backlog file status column to passed', async () => {
@@ -377,6 +388,235 @@ describe('scenario J group 3: --max 1 → limit', { timeout: 60_000 }, () => {
     const finished = events.filter((e) => e.event === 'queue.finished');
     expect(finished).toHaveLength(1);
     expect(finished[0]).toMatchObject({ reason: 'limit' });
-    expect(finished[0]?.batches).toEqual(['v99-b01']);
+    // SPEC 12.2 (v03-b04-fix): batches is now {batch_id, run_id, verdict}[]
+    const batchEntries2 = finished[0]?.batches as
+      { batch_id: string; run_id: string; verdict: string }[] | undefined;
+    const batchEntry2 = batchEntries2?.[0];
+    expect(batchEntry2?.batch_id).toBe('v99-b01');
+    expect(batchEntry2?.verdict).toBe('PASS');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Group 4 (v03-b04-fix): FIX rerun task semantics
+// Round 1: reviewer gives FIX with gaps. Round 2: task.md contains those gaps,
+// interrupted_at is null, and does NOT contain "上一轮中断".
+// ---------------------------------------------------------------------------
+
+describe('scenario J group 4: FIX rerun task has 上一轮判 FIX section', { timeout: 60_000 }, () => {
+  let box: Sandbox;
+
+  beforeEach(async () => {
+    box = await Sandbox.create();
+    const backlog = makeBacklog([
+      { priority: 1, id: 'v99-a01', title: '已完成', depends: '—', status: 'passed' },
+      { priority: 2, id: 'v99-b01', title: '待跑', depends: 'v99-a01', status: 'pending' },
+    ]);
+    box.write('docs/backlog.md', backlog);
+    await box.commitAll('chore: fix task semantics backlog');
+  });
+
+  afterEach(() => {
+    box.dispose();
+  });
+
+  it('round 2 task.md contains gaps from round 1 FIX and no 上一轮中断', async () => {
+    // The second worker scene captures the task.md content for inspection.
+    let capturedTask = '';
+
+    const fixGaps = ['missing unit test for edge case', 'lint warning on line 42'];
+    const fixReviewer = (): {
+      expectRole: 'reviewer';
+      effect: (ctx: FakeSceneContext) => void;
+      result: { exitCode: number; finalText: string };
+    } => {
+      const body: Verdict = {
+        schema_version: 1,
+        batch_id: 'v99-b01',
+        verdict: 'FIX',
+        evidence: {
+          commits_actual: ['abc1234'],
+          verify_results: [{ cmd: TEST_CMD, exit_code: 1, summary: '0 passed, 1 failed' }],
+          remote_has_head: true,
+          ci_conclusion: 'success',
+          ci_run_url: '',
+          ci_branch_matched: true,
+          deps_diff: [],
+          spec_diff_lines: 0,
+        },
+        claim_mismatches: [],
+        gaps: fixGaps,
+        reason: 'tests failing',
+      };
+      return {
+        expectRole: 'reviewer',
+        effect: ({ cwd }: FakeSceneContext) => {
+          box.reviewerCwd = cwd;
+        },
+        result: {
+          exitCode: 0,
+          finalText: `# 裁决\n\n修复。\n\n${FENCE}json\n${JSON.stringify(body, null, 2)}\n${FENCE}\n`,
+        },
+      };
+    };
+
+    /** Worker scene for round 2 that captures task.md before acting. */
+    const capturingWorkerScene = (): {
+      expectRole: 'worker';
+      effect: (ctx: FakeSceneContext) => Promise<void>;
+      result: { exitCode: number };
+    } => ({
+      expectRole: 'worker',
+      effect: async ({ cwd }: FakeSceneContext) => {
+        // Capture the task.md that was written for this round.
+        const taskPath = join(cwd, '.collie', 'batches', 'v99-b01', 'task.md');
+        if (existsSync(taskPath)) {
+          capturedTask = readFileSync(taskPath, 'utf8');
+        }
+        workerSceneSeq++;
+        box.write('feature.txt', `feature ${String(workerSceneSeq)}\n`, cwd);
+        box.write('tests/t000.sh', 'exit 0\n', cwd);
+        const head = await box.commitAll('feat: add feature', cwd);
+        const claims: Claims = {
+          commits: [head],
+          tests_passed: 1,
+          tests_failed: 0,
+          pushed: true,
+          ci_passed: false,
+          new_deps: [],
+          spec_touched: false,
+        };
+        const report: Report = {
+          schema_version: 1,
+          batch_id: 'v99-b01',
+          head_sha: head,
+          claims,
+          open_questions: [],
+        };
+        box.write(
+          '.collie/batches/v99-b01/report.md',
+          `# r\n\n## 做了什么\n完成。\n\n## 测试结果\n见。\n\n## 偏离或疑问\n无\n\n## 下一步建议\n无\n\n${FENCE}json\n${JSON.stringify(report, null, 2)}\n${FENCE}\n`,
+          cwd,
+        );
+        await box.commitAll('report(collie): v99-b01', cwd);
+        const { git: gitFn } = await import('../src/git.js');
+        await gitFn(cwd, ['push', '-q', 'origin', 'main']);
+      },
+      result: { exitCode: 0 },
+    });
+
+    const runner = new FakeRunner([
+      // Round 1: worker + reviewer gives FIX
+      queueWorkerScene(box, 'v99-b01', true),
+      fixReviewer(),
+      // Round 2: capturing worker + reviewer gives PASS (so queue ends)
+      capturingWorkerScene(),
+      queueReviewerScene(box, 'v99-b01'),
+    ]);
+
+    const code = await box.cli(['run', '--continue'], runner);
+    expect(code).toBe(0);
+
+    // Verify the captured task from round 2.
+    expect(capturedTask).toBeTruthy();
+    // Must contain "上一轮判 FIX" section
+    expect(capturedTask).toContain('上一轮判 FIX');
+    // Must contain the gaps from round 1
+    for (const gap of fixGaps) {
+      expect(capturedTask).toContain(gap);
+    }
+    // Must NOT contain "上一轮中断" section (FIX is not an interrupt)
+    expect(capturedTask).not.toContain('上一轮中断');
+    // interrupted_at must be null in the frontmatter
+    expect(capturedTask).toMatch(/interrupted_at:\s*null/);
+    // Must contain "只补缺口，不要重做"
+    expect(capturedTask).toContain('只补缺口，不要重做');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Group 5 (v03-b04-fix): fix_max per-queue — historical FIX journals don't count
+// ---------------------------------------------------------------------------
+
+describe('scenario J group 5: fix_max per-queue counting', { timeout: 60_000 }, () => {
+  let box: Sandbox;
+
+  beforeEach(async () => {
+    box = await Sandbox.create();
+    const backlog = makeBacklog([
+      { priority: 1, id: 'v99-a01', title: '已完成', depends: '—', status: 'passed' },
+      { priority: 2, id: 'v99-b01', title: '待跑', depends: 'v99-a01', status: 'pending' },
+    ]);
+    box.write('docs/backlog.md', backlog);
+    await box.commitAll('chore: fix_max per-queue backlog');
+  });
+
+  afterEach(() => {
+    box.dispose();
+  });
+
+  it('historical FIX journals do not exhaust fix_max; --continue still reruns', async () => {
+    // Pre-place two historical FIX runs in .collie/runs/ for v99-b01.
+    // These simulate previous queue sessions that ended with FIX.
+    // Only run.finished events are needed for classifyRun to detect FIX.
+    // Deliberately omit batch.selected to avoid setting an invalid baseSha
+    // that would break evidence gathering in runBatch.
+    for (const runId of ['r-20261018120000', 'r-20261018120001']) {
+      const dir = join(box.root, RUNS_RELATIVE_DIR, runId);
+      mkdirSync(dir, { recursive: true });
+      const events = [
+        {
+          ts: '2026-10-18T12:00:01Z',
+          run_id: runId,
+          event: 'run.finished',
+          batch_id: 'v99-b01',
+          verdict: 'FIX',
+          result: 'ok',
+        },
+      ];
+      writeFileSync(
+        join(dir, EVENTS_FILE_NAME),
+        events.map((e) => JSON.stringify(e)).join('\n') + '\n',
+      );
+    }
+
+    // Now run --continue with fix_max=2: with the old countBatchFinished approach,
+    // the 2 historical FIX runs would count, so even one more FIX would exceed
+    // fix_max (2 existing + 1 new = 3 > 2). With in-memory counting, only FIX
+    // verdicts from THIS queue session count.
+    //
+    // Run 1: FIX → in-memory count = 1 (≤ fix_max=2 → retry).
+    // Run 2: FIX → in-memory count = 2 (≤ fix_max=2 → retry).
+    // Run 3: FIX → in-memory count = 3 (> fix_max=2 → escalated).
+    const runner = new FakeRunner([
+      queueWorkerScene(box, 'v99-b01', true),
+      queueReviewerFixScene(box, 'v99-b01'),
+      queueWorkerScene(box, 'v99-b01', true),
+      queueReviewerFixScene(box, 'v99-b01'),
+      queueWorkerScene(box, 'v99-b01', true),
+      queueReviewerFixScene(box, 'v99-b01'),
+    ]);
+
+    const code = await box.cli(['run', '--continue'], runner);
+    // Should be BLOCK (exit 20) from fix_max, not immediately escalated.
+    expect(code).toBe(20);
+
+    const events = box.events();
+    // 2 historical run.finished events + 3 from this session = 5 total.
+    const runFinished = events.filter(
+      (e) => e.event === 'run.finished' && e.batch_id === 'v99-b01',
+    );
+    expect(runFinished).toHaveLength(5);
+
+    // The escalated event should exist (fix_max exceeded).
+    const escalated = events.filter((e) => e.event === 'escalated');
+    expect(escalated.some((e) => e.reason === 'fix_max')).toBe(true);
+
+    // The queue.batch_started events should exist for each run in this session.
+    const started = events.filter((e) => e.event === 'queue.batch_started');
+    expect(started).toHaveLength(3);
+    expect(started[0]?.why).toBe('new');
+    expect(started[1]?.why).toBe('fix_retry');
+    expect(started[2]?.why).toBe('fix_retry');
   });
 });

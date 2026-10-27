@@ -403,6 +403,42 @@ function realDelay(ms: number): Promise<void> {
 }
 
 /**
+ * SPEC 11.7 (v03-b04-fix): renders the "上一轮判 FIX" section for the task body.
+ * Includes gaps, failed acceptance commands, commit list, and a note to only
+ * fix gaps without re-doing existing work.
+ */
+export function renderFixSection(info: FixInfo): string {
+  const lines = ['', '## 上一轮判 FIX', ''];
+  if (info.gaps.length > 0) {
+    lines.push('### Gaps');
+    lines.push('');
+    for (const gap of info.gaps) {
+      lines.push(`- ${gap}`);
+    }
+    lines.push('');
+  }
+  if (info.failedAcceptance.length > 0) {
+    lines.push('### 未通过的验收命令');
+    lines.push('');
+    for (const fa of info.failedAcceptance) {
+      lines.push(`- \`${fa.cmd}\` → exit ${String(fa.exit_code)}`);
+    }
+    lines.push('');
+  }
+  if (info.commits.length > 0) {
+    lines.push('### 上一轮代码提交');
+    lines.push('');
+    for (const sha of info.commits) {
+      lines.push(`- \`${sha}\``);
+    }
+    lines.push('');
+  }
+  lines.push('这些提交已在审核范围内，只补缺口，不要重做。');
+  lines.push('');
+  return lines.join('\n');
+}
+
+/**
  * SPEC 11.3: guard daemon interval in milliseconds. The daemon polls every
  * GUARD_POLL_MS to check if R2 is still alive; when it's gone, it kills the
  * worker subprocess and exits.
@@ -495,14 +531,31 @@ function registerWorkerKillHandlers(getWorkerPid: () => number | undefined): () 
  * Whether a run ended as an "interrupt" per SPEC 11.7: non-PASS verdict AND one
  * of the abnormal end conditions (stalled / idling / wallclock / orphaned /
  * turns_exhausted / non-zero exit).
+ * FIX is NOT an interrupt (v03-b04-fix): attempt increments but interrupted_at
+ * stays null and the task gets a "上一轮判 FIX" section instead.
  */
-function isInterruptedRun(events: readonly Event[]): boolean {
+function classifyRun(events: readonly Event[]): 'pass' | 'fix' | 'interrupted' {
   const finished = events.findLast((e) => e.event === 'run.finished');
-  if (finished === undefined) return true; // no run.finished means crashed hard
+  if (finished === undefined) return 'interrupted'; // no run.finished means crashed hard
   // SPEC 11.7: PASS runs never count as interrupted.
-  if (finished.verdict === 'PASS') return false;
-  // Any non-PASS termination is an interrupt for task.md injection purposes.
-  return true;
+  if (finished.verdict === 'PASS') return 'pass';
+  // SPEC 11.7 (v03-b04-fix): FIX runs are not interrupted.
+  if (finished.verdict === 'FIX') return 'fix';
+  // Any other non-PASS termination is an interrupt for task.md injection purposes.
+  return 'interrupted';
+}
+
+/**
+ * SPEC 11.7 (v03-b04-fix): context from the previous FIX verdict, used to
+ * generate the "上一轮判 FIX" section in the next task.md.
+ */
+export interface FixInfo {
+  /** Verbatim gaps from the previous verdict. */
+  gaps: readonly string[];
+  /** Acceptance commands that failed, with exit codes. */
+  failedAcceptance: readonly { cmd: string; exit_code: number }[];
+  /** Code commits from the previous run's evidence. */
+  commits: readonly string[];
 }
 
 export interface BatchHistory {
@@ -524,6 +577,12 @@ export interface BatchHistory {
    * contains the last non-R2 commit, the session should NOT be resumed.
    */
   lastRunClean: boolean;
+  /**
+   * SPEC 11.7 (v03-b04-fix): context from the previous FIX verdict.
+   * Present when the last run ended with FIX. Used to render the
+   * "上一轮判 FIX" section in the task body.
+   */
+  fixInfo?: FixInfo;
 }
 
 /** All journal events of every run that touched `batchId`, oldest run first. */
@@ -556,6 +615,7 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
   let lastSessionId: string | undefined;
   let resumeCount = 0;
   let lastRunClean = false;
+  let fixInfo: FixInfo | undefined;
 
   // SPEC 11.7 (v02-e-fix2): the excluded run (the current run) may contain
   // run.orphaned events with heartbeat updated_at timestamps, and worker.rescued
@@ -600,9 +660,46 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
       resumeCount++;
     }
 
-    // Determine if this run was interrupted (SPEC 11.7).
-    if (isInterruptedRun(batchEvents)) {
+    // SPEC 11.7 (v03-b04-fix): three-way classification: pass / fix / interrupted.
+    const classification = classifyRun(batchEvents);
+
+    if (classification === 'pass') {
+      // PASS run: reset interrupt context, attempt does not increment.
+      interruptedAt = undefined;
+      rescueSha = undefined;
+      lastSessionId = undefined;
+      lastRunClean = false;
+      fixInfo = undefined;
+    } else if (classification === 'fix') {
+      // SPEC 11.7 (v03-b04-fix): FIX is not an interrupt. Attempt increments but
+      // interrupted_at stays null. Collect FIX-specific context for the task body.
       attempt++;
+      interruptedAt = undefined;
+      rescueSha = undefined;
+      lastSessionId = undefined;
+      lastRunClean = false;
+
+      // Collect FIX info: gaps + failed acceptance + commits from verdict and journal.
+      let gaps: readonly string[] = [];
+      let commits: readonly string[] = [];
+      try {
+        const verdict = readVerdict(root, batchId);
+        gaps = [...verdict.gaps];
+        commits = [...verdict.evidence.commits_actual];
+      } catch {
+        // verdict.md not readable: use empty
+      }
+      const failedAcceptance = batchEvents
+        .filter((e) => e.event === 'acceptance.failed')
+        .map((e) => ({
+          cmd: typeof e.cmd === 'string' ? e.cmd : '',
+          exit_code: typeof e.exit_code === 'number' ? e.exit_code : -1,
+        }));
+      fixInfo = { gaps, failedAcceptance, commits };
+    } else {
+      // Interrupted: BLOCK / crashed / orphaned.
+      attempt++;
+      fixInfo = undefined;
 
       // Build interrupted_at from the last run's info.
       const finished = batchEvents.findLast((e) => e.event === 'run.finished');
@@ -662,12 +759,6 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
       // complete. Resuming the session is wasteful — set lastRunClean so runBatch
       // can skip resume after confirming the commits are on the remote.
       lastRunClean = workerFinished !== undefined && rescued === undefined;
-    } else {
-      // PASS run: reset interrupt context, attempt does not increment.
-      interruptedAt = undefined;
-      rescueSha = undefined;
-      lastSessionId = undefined;
-      lastRunClean = false;
     }
   }
 
@@ -678,7 +769,16 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
     rescueSha = currentRunRescueSha;
   }
 
-  return { attempt, baseSha, interruptedAt, rescueSha, lastSessionId, resumeCount, lastRunClean };
+  return {
+    attempt,
+    baseSha,
+    interruptedAt,
+    rescueSha,
+    lastSessionId,
+    resumeCount,
+    lastRunClean,
+    fixInfo,
+  };
 }
 
 /**
@@ -1035,6 +1135,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       attempt: history.attempt,
       interrupted_at: history.interruptedAt,
       rescue_sha: history.rescueSha,
+      // SPEC 11.7 (v03-b04-fix): pre-render the FIX section when applicable.
+      ...(history.fixInfo !== undefined ? { fixSection: renderFixSection(history.fixInfo) } : {}),
     });
     writeTask(root, batch, task);
     const relTask = taskPath('', batchId);
@@ -1597,8 +1699,8 @@ export interface QueueOutcome {
   exitCode: number;
   /** Why the queue stopped. */
   reason: string;
-  /** Batches that ran (in order). */
-  batches: string[];
+  /** Batches that ran (in order), each with its run_id and verdict (SPEC 12.2 v03-b04-fix). */
+  batches: { batch_id: string; run_id: string; verdict: string }[];
   /** SPEC 12.3: how many times `queue.paused` fired in this --continue session. */
   pausedCount?: number;
 }
@@ -1625,28 +1727,6 @@ function selectNextBatch(batches: readonly Batch[]): {
     return { selected: batch, skipped };
   }
   return { selected: undefined, skipped };
-}
-
-/**
- * Counts how many `run.finished` events exist for `batchId` across all
- * runs. Used as the FIX retry counter (SPEC 12.2: "计数从 journal 里本批次
- * 的 `run.finished` 数出").
- */
-function countBatchFinished(root: string): Map<string, number> {
-  const counts = new Map<string, number>();
-  const runsDir = join(root, RUNS_RELATIVE_DIR);
-  if (!existsSync(runsDir)) return counts;
-  const journal = createJournal(root);
-  for (const dir of readdirSync(runsDir).sort()) {
-    if (!RunIdSchema.safeParse(dir).success || !existsSync(join(runsDir, dir, EVENTS_FILE_NAME)))
-      continue;
-    for (const event of journal.replay(dir)) {
-      if (event.event === 'run.finished' && typeof event.batch_id === 'string') {
-        counts.set(event.batch_id, (counts.get(event.batch_id) ?? 0) + 1);
-      }
-    }
-  }
-  return counts;
 }
 
 /** Generates a run_id from a Date, with the given prefix (r- for batch, q- for queue). */
@@ -1733,7 +1813,7 @@ function hasBatchRetried(root: string, batchId: string): boolean {
 export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
   const { root } = ctx;
   const config = loadConfig(root);
-  const batchesRun: string[] = [];
+  const batchesRun: { batch_id: string; run_id: string; verdict: string }[] = [];
 
   // Queue-level journal for batch.skipped / batch.status / queue.finished events.
   // Uses a dedicated run_id distinct from individual batch runs.
@@ -1752,6 +1832,14 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
   // SPEC 12.3: track whether the previous batch had a verdict.downgraded rule=9,
   // for the "consecutive two batches" stop condition.
   let prevBatchRule9Downgraded = false;
+
+  // SPEC 12.2 (v03-b04-fix): in-memory FIX counter per batch, scoped to this
+  // --continue session. Does NOT scan historical runs (countBatchFinished removed).
+  const fixCounts = new Map<string, number>();
+
+  // SPEC 12.2 (v03-b04-fix): tracks what the next batch run's "why" should be
+  // for the queue.batch_started event.
+  let nextWhy = 'new';
 
   // Loop until queue is exhausted, blocked, or --max reached.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite loop; exits via return
@@ -1772,6 +1860,17 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
 
     currentBatchId = selected.id;
     const runId = makeRunId('r-', ctx.now());
+
+    // SPEC 12.2 (v03-b04-fix): record queue.batch_started before launching.
+    const history = batchHistory(root, currentBatchId);
+    queueRec.record('queue.batch_started', {
+      run_id: runId,
+      batch_id: currentBatchId,
+      attempt: history.attempt,
+      why: nextWhy,
+    });
+    nextWhy = 'new'; // reset for next iteration
+
     const outcome = await runBatch({
       root,
       batchId: currentBatchId,
@@ -1794,7 +1893,7 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
         ? {}
         : { livenessFingerprint: ctx.livenessFingerprint }),
     });
-    batchesRun.push(currentBatchId);
+    batchesRun.push({ batch_id: currentBatchId, run_id: runId, verdict: outcome.final });
 
     if (outcome.final === 'PASS') {
       // SPEC 12.3: gate decision — check seven conditions before continuing.
@@ -1883,6 +1982,7 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
           } catch {
             // Best effort: the status was written to disk even if commit fails.
           }
+          nextWhy = 'rule1_retry';
           continue;
         }
         // Second rule 1 BLOCK: fall through to normal BLOCK handling.
@@ -1898,12 +1998,13 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
       return { exitCode: EXIT_CODES.BLOCK, reason: 'blocked', batches: batchesRun, pausedCount };
     }
 
-    // SPEC 12.2: FIX → check fix_max. Count from run.finished events.
-    // (At this point outcome.final must be 'FIX' — PASS and BLOCK are handled above.)
-    const finishedCounts = countBatchFinished(root);
-    const count = finishedCounts.get(currentBatchId) ?? 0;
-    if (count <= config.limits.fix_max) {
+    // SPEC 12.2 (v03-b04-fix): FIX → check fix_max using in-memory counter.
+    // Only counts FIX verdicts within this --continue session, not all history.
+    const currentFixes = (fixCounts.get(currentBatchId) ?? 0) + 1;
+    fixCounts.set(currentBatchId, currentFixes);
+    if (currentFixes <= config.limits.fix_max) {
       // Rerun the same batch (attempt will increment via batchHistory).
+      nextWhy = 'fix_retry';
       continue;
     }
     // Exceeded fix_max: escalate → update status to blocked and stop.

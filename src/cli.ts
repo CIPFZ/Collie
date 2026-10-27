@@ -208,7 +208,9 @@ async function runContinue(
       ? {}
       : { livenessFingerprint: deps.livenessFingerprint }),
   });
-  deps.out(`queue: ${outcome.reason} (batches: ${outcome.batches.join(', ') || 'none'})\n`);
+  const batchSummary =
+    outcome.batches.map((b) => `${b.batch_id}:${b.verdict}`).join(', ') || 'none';
+  deps.out(`queue: ${outcome.reason} (batches: ${batchSummary})\n`);
   return outcome.exitCode;
 }
 
@@ -290,6 +292,28 @@ function interruptChain(events: Event[]): string | undefined {
     }
   }
   return lines.join('\n');
+}
+
+/**
+ * SPEC 12.2 (v03-b04-fix): `collie show --queue <q-run_id>` prints the queue
+ * run's event timeline from its journal. Shows batch_started, batch.skipped,
+ * queue.paused, queue.finished, escalated, and other queue-level events.
+ */
+function showQueue(deps: CliDeps, qRunId: string): number {
+  const runsDir = join(deps.cwd, RUNS_RELATIVE_DIR);
+  const journalDir = join(runsDir, qRunId);
+  if (!existsSync(journalDir) || !existsSync(join(journalDir, EVENTS_FILE_NAME))) {
+    deps.err(`no journal found for queue run ${qRunId}\n`);
+    return EXIT_CODES.ERROR;
+  }
+  const journal = createJournal(deps.cwd);
+  const events = journal.replay(qRunId);
+  if (events.length === 0) {
+    deps.out(`queue ${qRunId}: (no events)\n`);
+    return EXIT_CODES.PASS;
+  }
+  deps.out(section(`queue ${qRunId} timeline`, events.map(describeEvent).join('\n')));
+  return EXIT_CODES.PASS;
 }
 
 function show(deps: CliDeps, batchId: string): number {
@@ -504,8 +528,18 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
   program
     .command('show')
     .description('print task / report / verdict and the decision trail of a batch')
-    .argument('<batch_id>')
-    .action((batchId: string) => {
+    .argument('[batch_id]', 'batch id to show (required unless --queue is used)')
+    .option('--queue <q_run_id>', 'show queue run timeline instead of batch details')
+    .action((batchId: string | undefined, opts: { queue?: string }) => {
+      if (opts.queue !== undefined) {
+        code = showQueue(deps, opts.queue);
+        return;
+      }
+      if (batchId === undefined) {
+        deps.err('batch_id is required (or use --queue <q-run_id>)\n');
+        code = EXIT_CODES.ERROR;
+        return;
+      }
       code = show(deps, batchId);
     });
   program

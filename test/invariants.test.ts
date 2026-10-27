@@ -249,4 +249,19 @@ describe('structural invariants (SPEC 3.2)', () => {
     const value = Number(raw.replace(/_/g, ''));
     expect(value).toBeGreaterThanOrEqual(30_000);
   });
+
+  it('src/run.ts contains queue.batch_started recording (v03-b04-fix)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    expect(content).toContain('queue.batch_started');
+  });
+
+  it('src/run.ts does not contain countBatchFinished outside comments (v03-b04-fix)', () => {
+    const lines = readFileSync(join(ROOT, 'src/run.ts'), 'utf8').split('\n');
+    const codeLines = lines.filter((l) => !l.trimStart().startsWith('//'));
+    const hasCountBatchFinished = codeLines.some((l) => l.includes('countBatchFinished'));
+    expect(
+      hasCountBatchFinished,
+      'countBatchFinished should not appear in non-comment code lines',
+    ).toBe(false);
+  });
 });

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AUDIT_EXIT, runIdAt } from '../src/cli.js';
 import { loadConfig, parseConfig } from '../src/config.js';
 import { git, log } from '../src/git.js';
-import { RUNS_RELATIVE_DIR } from '../src/journal.js';
+import { EVENTS_FILE_NAME, RUNS_RELATIVE_DIR } from '../src/journal.js';
 import { REVIEWER_STREAM_FILE_NAME } from '../src/run.js';
 import { FakeRunner } from '../src/runner/fake.js';
 import {
@@ -217,5 +217,55 @@ describe('cli: audit reviewer tool whitelist (SPEC 11.2 v03-b02)', () => {
     ]);
     expect(await box.cli(['audit', RUN_ID], undefined)).toBe(AUDIT_EXIT.NO_DATA);
     expect(box.output.join('')).toContain('no init message');
+  });
+});
+
+describe('cli: show --queue (v03-b04-fix)', () => {
+  let box: Sandbox;
+
+  beforeEach(async () => {
+    box = await Sandbox.create();
+  });
+
+  afterEach(() => {
+    box.dispose();
+  });
+
+  it('prints the queue journal timeline for a given q-run_id', async () => {
+    const qRunId = 'q-20261019120000';
+    const dir = join(box.root, RUNS_RELATIVE_DIR, qRunId);
+    mkdirSync(dir, { recursive: true });
+    const events = [
+      {
+        ts: '2026-10-19T12:00:00Z',
+        run_id: qRunId,
+        event: 'queue.batch_started',
+        batch_id: 'v99-b01',
+        attempt: 1,
+        why: 'new',
+      },
+      {
+        ts: '2026-10-19T12:00:01Z',
+        run_id: qRunId,
+        event: 'queue.finished',
+        reason: 'exhausted',
+        batches: [{ batch_id: 'v99-b01', run_id: 'r-20261019120000', verdict: 'PASS' }],
+        paused_count: 0,
+      },
+    ];
+    writeFileSync(
+      join(dir, EVENTS_FILE_NAME),
+      events.map((e) => JSON.stringify(e)).join('\n') + '\n',
+    );
+    expect(await box.cli(['show', '--queue', qRunId], undefined)).toBe(0);
+    const output = box.output.join('');
+    expect(output).toContain('queue.batch_started');
+    expect(output).toContain('queue.finished');
+    expect(output).toContain(qRunId);
+  });
+
+  it('returns exit 1 when no journal exists for the queue run id', async () => {
+    expect(await box.cli(['show', '--queue', 'q-99999999999999'], undefined)).toBe(1);
+    expect(box.output.join('')).toContain('no journal found');
   });
 });

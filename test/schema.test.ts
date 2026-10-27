@@ -248,7 +248,7 @@ describe('schema: Event round-trip', () => {
   });
 
   it('defines the v0.1 event types plus v0.2 and v0.3 types added so far', () => {
-    expect(EVENT_TYPES).toHaveLength(31);
+    expect(EVENT_TYPES).toHaveLength(32);
     expect(EVENT_TYPES).toContain('ci.wait_timeout');
     expect(EVENT_TYPES).toContain('acceptance.failed');
     // v0.2 additions (SPEC 11.3–11.6)
@@ -274,6 +274,8 @@ describe('schema: Event round-trip', () => {
     // v0.3 additions (SPEC 12.3)
     expect(EVENT_TYPES).toContain('queue.paused');
     expect(EVENT_TYPES).toContain('batch.retried');
+    // v0.3 additions (SPEC 12.2 v03-b04-fix)
+    expect(EVENT_TYPES).toContain('queue.batch_started');
   });
 
   it.each(['../escape', 'a/b', '', '.hidden', 'r 1'])('rejects unsafe run_id %j', (run_id) => {
