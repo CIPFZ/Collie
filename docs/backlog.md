@@ -45,7 +45,7 @@
 | 27 | v03-b03-fix2 | 补两条断言、bash_deny 正反用例、tool.denied 进 journal、测试超时 | v03-b03-fix | passed |
 | 28 | v03-b04 | 放行判定与停表：queue.paused、规则 1 自动重跑、规则 9 连续两次 | v03-b03-fix2 | passed |
 | 29 | v03-b04-fix | FIX 重跑的 task 语义、fix_max 只计本次队列、队列 journal 可还原 | v03-b04 | passed |
-| 30 | v04-b01 | 观测数据补齐：运行级字段、evidence.collected、裁定依据，判定第 6 项与 README 清理 | v03-b04-fix | pending |
+| 30 | v04-b01 | 观测数据补齐：运行级字段、evidence.collected、裁定依据，判定第 6 项与 README 清理 | v03-b04-fix | blocked |
 | 31 | v04-b02 | 投影模块 view.ts 与 collie status | v04-b01 | pending |
 | 32 | v04-b03 | collie timeline：时间轨迹与按版本汇总 | v04-b02 | pending |
 | 33 | v04-b04 | collie why：按 attempt 摊开证据链 | v04-b02 | pending |
