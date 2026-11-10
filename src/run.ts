@@ -984,6 +984,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   let workerExitCode: number | undefined;
   let workerStopReason: string | undefined;
 
+  // eslint-disable-next-line no-restricted-syntax -- SPEC 13.1: reason truncation bound
+  const REASON_MAX = 500;
   const finish = (final: VerdictValue, extra: Partial<RunOutcome> = {}): RunOutcome => {
     rec.record('run.finished', {
       verdict: final,
@@ -991,6 +993,11 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       // SPEC 11.7: run.finished always carries the worker's exit info.
       ...(workerExitCode !== undefined ? { worker_exit_code: workerExitCode } : {}),
       ...(workerStopReason !== undefined ? { worker_stop_reason: workerStopReason } : {}),
+      // SPEC 13.1 (v0.4): rule and reason from the arbiter decision.
+      ...(extra.decision?.rule !== undefined ? { rule: extra.decision.rule } : {}),
+      ...(extra.decision?.reason !== undefined
+        ? { reason: truncate(extra.decision.reason, REASON_MAX) }
+        : {}),
     });
     // SPEC 11.3: heartbeat removed only after run.finished is written.
     removeHeartbeat(root);
@@ -1152,7 +1159,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     }
 
     // E3/E4: the worker, bounded by the wall clock (SPEC 3.3).
-    rec.record('worker.started');
+    rec.record('worker.started', { model: config.agent.worker.model });
 
     // Liveness detection and signal ladder state (SPEC 11.5, 11.6).
     let workerHandle: RunHandle | undefined;
@@ -1332,6 +1339,24 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
           : {}),
         // SPEC 11.7: session_id for resume eligibility in the next attempt.
         ...(result.sessionId === undefined ? {} : { session_id: result.sessionId }),
+        // SPEC 13.1 (v0.4): running-level data — only written when runner provides them.
+        ...(result.numTurns !== undefined ? { num_turns: result.numTurns } : {}),
+        ...(result.costUsd !== undefined ? { cost_usd: result.costUsd } : {}),
+        ...(result.durationMs !== undefined ? { duration_ms: result.durationMs } : {}),
+        ...(result.usage !== undefined
+          ? {
+              usage: {
+                input_tokens: result.usage.inputTokens,
+                output_tokens: result.usage.outputTokens,
+                ...(result.usage.cacheCreationInputTokens !== undefined
+                  ? { cache_creation_input_tokens: result.usage.cacheCreationInputTokens }
+                  : {}),
+                ...(result.usage.cacheReadInputTokens !== undefined
+                  ? { cache_read_input_tokens: result.usage.cacheReadInputTokens }
+                  : {}),
+              },
+            }
+          : {}),
       });
     } catch (error) {
       cleanupTimers();
@@ -1393,7 +1418,10 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
 
       // E5: the reviewer works in the head_sha worktree, where report.md does not exist (SPEC 3.5).
       let finalText: string | undefined;
-      rec.record('reviewer.started', { head_sha: report.head_sha });
+      rec.record('reviewer.started', {
+        head_sha: report.head_sha,
+        model: config.agent.reviewer.model,
+      });
       // SPEC 12.1: reviewer event stream falls to reviewer.stream.ndjson with redaction.
       const reviewerOnEvent = (event: unknown): void => {
         appendStream(root, runId, event, REVIEWER_STREAM_FILE_NAME);
@@ -1419,14 +1447,48 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
           },
         );
         finalText = reviewer.finalText;
+        // SPEC 13.1 (v0.4): reviewer.finished before verdict parsing.
+        rec.record('reviewer.finished', {
+          exit_code: reviewer.exitCode,
+          ...(reviewer.numTurns !== undefined ? { num_turns: reviewer.numTurns } : {}),
+          ...(reviewer.costUsd !== undefined ? { cost_usd: reviewer.costUsd } : {}),
+          ...(reviewer.durationMs !== undefined ? { duration_ms: reviewer.durationMs } : {}),
+          ...(reviewer.usage !== undefined
+            ? {
+                usage: {
+                  input_tokens: reviewer.usage.inputTokens,
+                  output_tokens: reviewer.usage.outputTokens,
+                  ...(reviewer.usage.cacheCreationInputTokens !== undefined
+                    ? { cache_creation_input_tokens: reviewer.usage.cacheCreationInputTokens }
+                    : {}),
+                  ...(reviewer.usage.cacheReadInputTokens !== undefined
+                    ? { cache_read_input_tokens: reviewer.usage.cacheReadInputTokens }
+                    : {}),
+                },
+              }
+            : {}),
+        });
       } catch (error) {
         finalText = undefined;
         rec.record('escalated', { reason: `reviewer failed: ${message(error)}` });
       }
       const verdict = persistVerdict(root, batchId, finalText);
+      // SPEC 13.1 (v0.4): truncate each gap to 300 chars, at most 20.
+      // eslint-disable-next-line no-restricted-syntax -- SPEC 13.1: fixed format bounds
+      const MAX_GAPS = 20;
+      // eslint-disable-next-line no-restricted-syntax -- SPEC 13.1: fixed format bounds
+      const MAX_GAP_CHARS = 300;
+      const truncatedGaps = verdict.ok
+        ? verdict.value.gaps.slice(0, MAX_GAPS).map((g) => truncate(g, MAX_GAP_CHARS))
+        : [];
       rec.record(
         'reviewer.verdict',
-        verdict.ok ? { verdict: verdict.value.verdict } : { error: verdict.error },
+        verdict.ok
+          ? {
+              verdict: verdict.value.verdict,
+              ...(truncatedGaps.length > 0 ? { gaps: truncatedGaps } : {}),
+            }
+          : { error: verdict.error },
       );
 
       // SPEC 11.3: heartbeat transitions to ci phase (evidence collection includes CI polling).
@@ -1486,6 +1548,20 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
           polls: 1,
         });
       }
+
+      // SPEC 13.1 (v0.4): evidence.collected summarizes R2's evidence.
+      const testResult = collected.verify.find((r) => r.tests !== undefined)?.tests;
+      rec.record('evidence.collected', {
+        commits: collected.evidence.commits_actual.length,
+        tests_passed: testResult?.passed ?? null,
+        tests_failed: testResult?.failed ?? null,
+        acceptance_passed: collected.verify.filter((r) => r.passed).length,
+        acceptance_total: collected.verify.length,
+        spec_diff_lines: collected.evidence.spec_diff_lines,
+        deps_diff: collected.evidence.deps_diff.length,
+        remote_has_head: collected.evidence.remote_has_head,
+      });
+
       return { verdict, collected };
     });
     const { verdict, collected } = outcome;

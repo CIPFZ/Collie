@@ -7,6 +7,10 @@ export type AgentRole = 'worker' | 'reviewer';
 export interface Usage {
   inputTokens: number;
   outputTokens: number;
+  /** SPEC 13.1: cache creation input tokens from the SDK (optional, v0.4). */
+  cacheCreationInputTokens?: number;
+  /** SPEC 13.1: cache read input tokens from the SDK (optional, v0.4). */
+  cacheReadInputTokens?: number;
 }
 
 /**
@@ -69,6 +73,12 @@ export interface RunResult {
   finalText?: string;
   /** Why the run ended abnormally (SPEC 11.2); absent on a clean finish. */
   stopReason?: 'turns_exhausted' | 'stopped' | 'error';
+  /** SPEC 13.1: number of turns the agent took (optional, v0.4). */
+  numTurns?: number;
+  /** SPEC 13.1: total cost in USD reported by the SDK (optional, v0.4). */
+  costUsd?: number;
+  /** SPEC 13.1: wall-clock duration of the run in milliseconds (optional, v0.4). */
+  durationMs?: number;
 }
 
 /**

@@ -167,6 +167,7 @@ export const EVENT_TYPES = [
   'worker.finished',
   'worker.crashed',
   'reviewer.started',
+  'reviewer.finished',
   'reviewer.verdict',
   'claim.mismatch',
   'verdict.downgraded',
@@ -202,6 +203,8 @@ export const EVENT_TYPES = [
   'batch.status',
   // v0.3 (SPEC 12.2): --continue queue finished; reason = exhausted / blocked / escalated / fix_max / limit / paused.
   'queue.finished',
+  // v0.4 (SPEC 13.1): R2 evidence collection completed.
+  'evidence.collected',
   // v0.3 (SPEC 12.3): PASS but gate conditions not met; fields batch_id / reasons (array).
   'queue.paused',
   // v0.3 (SPEC 12.3): rule 1 BLOCK auto-retried once; fields batch_id / rule (fixed 1).

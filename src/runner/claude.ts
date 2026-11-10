@@ -182,7 +182,16 @@ interface ResultMessage {
   result?: string;
   session_id?: string;
   errors?: string[];
-  usage?: { input_tokens?: number; output_tokens?: number };
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+  /** SPEC 13.1: total cost from the SDK (v0.4). */
+  total_cost_usd?: number;
+  /** SPEC 13.1: number of turns from the SDK (v0.4). */
+  num_turns?: number;
 }
 
 function isResultMessage(message: unknown): message is ResultMessage {
@@ -195,7 +204,16 @@ function isResultMessage(message: unknown): message is ResultMessage {
 
 function toUsage(usage: ResultMessage['usage']): Usage | undefined {
   if (usage === undefined) return undefined;
-  return { inputTokens: usage.input_tokens ?? 0, outputTokens: usage.output_tokens ?? 0 };
+  return {
+    inputTokens: usage.input_tokens ?? 0,
+    outputTokens: usage.output_tokens ?? 0,
+    ...(usage.cache_creation_input_tokens !== undefined
+      ? { cacheCreationInputTokens: usage.cache_creation_input_tokens }
+      : {}),
+    ...(usage.cache_read_input_tokens !== undefined
+      ? { cacheReadInputTokens: usage.cache_read_input_tokens }
+      : {}),
+  };
 }
 
 /** Extracts session_id from any message that carries one (SPEC 11.2: never lose it). */
@@ -219,6 +237,7 @@ export class ClaudeRunner implements AgentRunner {
   }
 
   async run(opts: RunOptions): Promise<RunResult> {
+    const runStart = Date.now();
     // The model, tools and turn limit come from the role's config (ROADMAP 0.4:
     // model names do not travel through RunOptions).
     const agent = opts.role === 'worker' ? this.config.agent.worker : this.config.agent.reviewer;
@@ -455,6 +474,7 @@ export class ClaudeRunner implements AgentRunner {
       if (!succeeded && result.subtype !== 'success') return 'error';
       return undefined;
     })();
+    const durationMs = Date.now() - runStart;
     return {
       exitCode: succeeded ? EXIT_OK : EXIT_FAILED,
       ...(sessionId === undefined ? {} : { sessionId }),
@@ -462,6 +482,10 @@ export class ClaudeRunner implements AgentRunner {
       // Only a successful run's final text is a deliverable (e.g. the verdict).
       ...(succeeded && result.result !== undefined ? { finalText: result.result } : {}),
       ...(stopReason === undefined ? {} : { stopReason }),
+      // SPEC 13.1: running-level data from the SDK (v0.4).
+      ...(result.total_cost_usd !== undefined ? { costUsd: result.total_cost_usd } : {}),
+      ...(result.num_turns !== undefined ? { numTurns: result.num_turns } : {}),
+      durationMs,
     };
   }
 }

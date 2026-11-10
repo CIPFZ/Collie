@@ -204,12 +204,15 @@ describe('runner-claude: result mapping', () => {
   it('maps a successful result to exit 0, session, usage and finalText', async () => {
     const { query } = scripted([assistant('hello'), success('the answer')]);
     const result = await new ClaudeRunner(config, { query }).run(opts());
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       exitCode: 0,
       sessionId: 'session-1',
       usage: { inputTokens: 1200, outputTokens: 300 },
       finalText: 'the answer',
+      costUsd: 0.25,
     });
+    // SPEC 13.1: durationMs is always set (wall clock measured by the runner).
+    expect(result.durationMs).toBeTypeOf('number');
   });
 
   it.each(['error_during_execution', 'error_max_turns', 'error_max_budget_usd'])(
@@ -230,7 +233,7 @@ describe('runner-claude: result mapping', () => {
       { type: 'result', subtype: 'success', is_error: true, result: 'partial' },
     ]);
     const result = await new ClaudeRunner(config, { query }).run(opts());
-    expect(result).toEqual({ exitCode: 1 });
+    expect(result).toMatchObject({ exitCode: 1 });
   });
 
   it('keeps the last result when a run reports several', async () => {
@@ -246,6 +249,68 @@ describe('runner-claude: result mapping', () => {
     await expect(new ClaudeRunner(config, { query }).run(opts())).rejects.toThrow(
       'ended without a result message',
     );
+  });
+
+  it('extracts total_cost_usd and num_turns from the SDK result (SPEC 13.1)', async () => {
+    const resultMsg = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'done',
+      session_id: 's',
+      usage: { input_tokens: 100, output_tokens: 50 },
+      total_cost_usd: 1.23,
+      num_turns: 7,
+    };
+    const { query } = scripted([resultMsg]);
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.costUsd).toBe(1.23);
+    expect(result.numTurns).toBe(7);
+    expect(result.durationMs).toBeTypeOf('number');
+  });
+
+  it('passes through cache token fields in usage (SPEC 13.1)', async () => {
+    const resultMsg = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'ok',
+      session_id: 's2',
+      usage: {
+        input_tokens: 200,
+        output_tokens: 60,
+        cache_creation_input_tokens: 1000,
+        cache_read_input_tokens: 500,
+      },
+      total_cost_usd: 0.5,
+    };
+    const { query } = scripted([resultMsg]);
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.usage).toEqual({
+      inputTokens: 200,
+      outputTokens: 60,
+      cacheCreationInputTokens: 1000,
+      cacheReadInputTokens: 500,
+    });
+  });
+
+  it('omits costUsd and numTurns when the SDK result lacks them', async () => {
+    const resultMsg = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'ok',
+      session_id: 's3',
+      usage: { input_tokens: 10, output_tokens: 5 },
+    };
+    const { query } = scripted([resultMsg]);
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result).not.toHaveProperty('costUsd');
+    expect(result).not.toHaveProperty('numTurns');
+    // durationMs always present
+    expect(result.durationMs).toBeTypeOf('number');
+    // cache fields absent when SDK does not provide them
+    expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
   });
 });
 
