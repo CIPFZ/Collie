@@ -264,4 +264,15 @@ describe('structural invariants (SPEC 3.2)', () => {
       'countBatchFinished should not appear in non-comment code lines',
     ).toBe(false);
   });
+
+  it('src/schema/index.ts contains evidence.collected and reviewer.finished event types (v04-b01)', () => {
+    const content = readFileSync(join(ROOT, 'src/schema/index.ts'), 'utf8');
+    expect(content).toContain('evidence.collected');
+    expect(content).toContain('reviewer.finished');
+  });
+
+  it('src/gate.ts does not contain protectedDiffLines (v04-b01)', () => {
+    const content = readFileSync(join(ROOT, 'src/gate.ts'), 'utf8');
+    expect(content).not.toContain('protectedDiffLines');
+  });
 });
