@@ -6,8 +6,8 @@
 > 只 grep `src/` 的验收抓不住「接口做了、测试没用上」（b04：只注入 now；b04-fix：指纹可注入但场景 G 没注入）。
 > 凡验收表含 grep 类结构检查的批次，条目正文必须写「同步加进 `test/invariants.test.ts`」，验收加一条 grep 该文件（SPEC 3.2 结构不变量）。
 
-更新时间：2026-10-21
-当前版本：v0.2
+更新时间：2026-11-10
+当前版本：v0.4（v04 五个批次一次签满，见 SPEC 第 13 章）
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -45,6 +45,11 @@
 | 27 | v03-b03-fix2 | 补两条断言、bash_deny 正反用例、tool.denied 进 journal、测试超时 | v03-b03-fix | passed |
 | 28 | v03-b04 | 放行判定与停表：queue.paused、规则 1 自动重跑、规则 9 连续两次 | v03-b03-fix2 | passed |
 | 29 | v03-b04-fix | FIX 重跑的 task 语义、fix_max 只计本次队列、队列 journal 可还原 | v03-b04 | passed |
+| 30 | v04-b01 | 观测数据补齐：运行级字段、evidence.collected、裁定依据，判定第 6 项与 README 清理 | v03-b04-fix | pending |
+| 31 | v04-b02 | 投影模块 view.ts 与 collie status | v04-b01 | pending |
+| 32 | v04-b03 | collie timeline：时间轨迹与按版本汇总 | v04-b02 | pending |
+| 33 | v04-b04 | collie why：按 attempt 摊开证据链 | v04-b02 | pending |
+| 34 | v04-b05 | collie watch：实时跟随 | v04-b02 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -1241,4 +1246,171 @@ v03-b04 第一次队列运行暴露的三处。规格见 SPEC 11.7（FIX 重跑�
 - 为了让测试过而删除或跳过任何测试
 - 为了让验收命令通过而改注释或字面（铁律 26）：匹配到注释就在 report 里指出，照常提交
 - 改动放行判定（`gate.ts`）、规则 1~10、`fix_max` 的默认值
+
+## v04-b01 观测数据补齐：运行级字段、evidence.collected、裁定依据，判定第 6 项与 README 清理
+
+优先级：30　依赖：v03-b04-fix
+
+v0.4 的四个命令只读 journal，本批次先把要看的数据写进 journal。规格见 SPEC 13.1、3.6（两个新事件）、12.3（判定改为六项）。
+
+条目：
+1. 清理：`gate.ts` 删掉 `protectedDiffLines` 与原因码 `protected`，判定共六项，`run.ts` 调用处与 `test/gate.test.ts` 同步；
+   `README.md` 的状态行改成现状（v0.3 功能批次已完成、v0.4 进行中）、铁律条数改 26
+2. 运行级数据进 journal（SPEC 13.1）：`worker.finished` 加 `num_turns` / `cost_usd` / `duration_ms` / `usage` 四个 token 字段；
+   新增 `reviewer.finished`（reviewer 返回后、解析 verdict 前）；`worker.started` / `reviewer.started` 加 `model`。
+   `RunResult` 与 `Usage` 按 13.1 扩展，`claude.ts` 的取值类型从 SDK 导出派生，fake runner 可脚本化这些值；runner 没给的字段不写
+3. 批次级与裁定依据进 journal（SPEC 13.1）：新增 `evidence.collected`；`run.finished` 加 `rule` / `reason`；`reviewer.verdict` 加 `gaps`。
+   新建 `test/journal-fields.test.ts`，用 fake runner 跑完整一轮，逐个断言上面每个新字段出现在 journal 里，并断言 runner 不给用量时这些字段不存在；
+   `test/invariants.test.ts` 加「`src/schema/index.ts` 含 `evidence.collected` 与 `reviewer.finished`」「`src/gate.ts` 不含 `protectedDiffLines`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 判定第 6 项已删（不看注释行） | `! cat src/gate.ts src/run.ts test/gate.test.ts \| grep -vE "^\s*(//\|\*\|/\*)" \| grep -qE "protectedDiffLines"` | exit 0 |
+| README 改成现状 | `! grep -qE "实现未开始\|25 条" README.md && grep -qE "26 条" README.md` | exit 0 |
+| 新字段专项测试通过 | `npm test -- test/journal-fields.test.ts` | exit 0 |
+| 专项测试不少于 6 个 | `grep -cE "^\s+it\(" test/journal-fields.test.ts \| grep -qE "^([6-9]\|[1-9][0-9])$"` | exit 0 |
+| 两个新事件进 schema | `grep -qE "reviewer\.finished" src/schema/index.ts && grep -qE "evidence\.collected" src/schema/index.ts` | exit 0 |
+| 花费取自 SDK 且有测试 | `grep -qE "total_cost_usd" src/runner/claude.ts && grep -qE "total_cost_usd" test/runner-claude.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "evidence\.collected" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试（`test/gate.test.ts` 里 `protected` 那一个用例随条目 1 删除，不算）
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动规则 1~10、队列逻辑、`SCHEMA_VERSION`；新增依赖
+
+## v04-b02 投影模块 view.ts 与 collie status
+
+优先级：31　依赖：v04-b01
+
+规格见 SPEC 13.2。`src/view.ts` 是后面三个命令共用的取数入口，这一批把它立起来。
+
+条目：
+1. `src/view.ts` 读取层 `loadRuns(root)`：扫全部运行目录并重放；单个运行的 journal 校验失败不抛出，记为 `unreadable` 带原因，其余照常
+2. `src/view.ts` 投影层 `projectRuns` / `projectBatches`：纯函数，`now` 由参数传入，不 import `run.ts` / `runner/` / `roles/`；
+   13.1 的字段缺失时给 `null`。`collie status [--json]` 按 13.2 的三段输出，`cli.ts` 只做接线；没有 journal 时打印 `no runs recorded` 退出码 0
+3. `test/view.test.ts`：夹具至少覆盖一次 PASS、FIX 后 PASS、进行中的运行、旧格式 run_id 目录、含坏行的 journal、一次队列运行、不含 13.1 字段的旧 journal；
+   `test/invariants.test.ts` 加「`src/view.ts` 不 import `run.ts` / `runner/` / `roles/`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 投影专项测试通过 | `npm test -- test/view.test.ts` | exit 0 |
+| 专项测试不少于 8 个 | `grep -cE "^\s+it\(" test/view.test.ts \| grep -qE "^([8-9]\|[1-9][0-9])$"` | exit 0 |
+| 投影模块不依赖运行逻辑 | `test -f src/view.ts && ! grep -qE "from '\./(run\|runner\|roles)[./]" src/view.ts` | exit 0 |
+| 坏 journal 有处理且有测试 | `grep -qE "unreadable" src/view.ts && grep -qE "unreadable" test/view.test.ts` | exit 0 |
+| status 命令已接线 | `npx tsx src/cli.ts status` | exit 0 |
+| status --json 输出合法 JSON | `npx tsx src/cli.ts status --json \| node -e "JSON.parse(require('fs').readFileSync(0,'utf8'))"` | exit 0 |
+| 不变量同步 | `grep -qE "view\.ts" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动 `run.ts`、`gate.ts`、`arbiter.ts`、规则 1~10；让 `status` 写任何文件；新增依赖
+
+## v04-b03 collie timeline：时间轨迹与按版本汇总
+
+优先级：32　依赖：v04-b02
+
+规格见 SPEC 13.3。
+
+条目：
+1. `src/view.ts` 加 `projectTimeline`：按时间升序输出节点（批次首次开始、每次运行结束、`batch.status` 变化、队列开始 / 停表 / 结束）
+2. `collie timeline [--since <日期>] [--batch <前缀>] [--by version] [--json]`；`--by version` 按版本前缀汇总，没有花费数据的运行不计入并注明个数；
+   输出末尾固定一行说明 ADR 与发布去 `git log` 看
+3. `test/timeline.test.ts`：覆盖节点顺序、`--since` 与 `--batch` 过滤、按版本汇总、缺花费数据、空目录；`test/invariants.test.ts` 加「`src/cli.ts` 含 `timeline` 命令」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| timeline 专项测试通过 | `npm test -- test/timeline.test.ts` | exit 0 |
+| 专项测试不少于 6 个 | `grep -cE "^\s+it\(" test/timeline.test.ts \| grep -qE "^([6-9]\|[1-9][0-9])$"` | exit 0 |
+| timeline 命令已接线 | `npx tsx src/cli.ts timeline` | exit 0 |
+| 按版本汇总可用 | `npx tsx src/cli.ts timeline --by version` | exit 0 |
+| timeline --json 输出合法 JSON | `npx tsx src/cli.ts timeline --json \| node -e "JSON.parse(require('fs').readFileSync(0,'utf8'))"` | exit 0 |
+| 不变量同步 | `grep -qE "timeline" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动 `run.ts`、`gate.ts`、`arbiter.ts`、规则 1~10；绕过 `src/view.ts` 直接读 journal；让 `timeline` 写任何文件；新增依赖
+
+## v04-b04 collie why：按 attempt 摊开证据链
+
+优先级：33　依赖：v04-b02
+
+规格见 SPEC 13.4。
+
+条目：
+1. `src/view.ts` 加 `projectWhy`：按 attempt 汇集一个批次每次运行的证据链，顺序按 13.4；13.1 的字段缺失时该行显示 `—`，不报错
+2. `collie why <batch_id> [--attempt <n>] [--json]`：每个 attempt 末尾一行结论，由规则号对应的固定模板加 `reason` 生成，不调用模型、不读信封文件；
+   退出码 0 有数据 / 1 批次不在 backlog / 2 批次在 backlog 但本机没有 journal
+3. `test/why.test.ts`：覆盖 PASS、规则 8 的 FIX、规则 2 的 BLOCK、规则 1 的格式错、无 report 的上报、被中断后恢复、三个退出码；
+   `test/invariants.test.ts` 加「`src/cli.ts` 含 `why` 命令」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| why 专项测试通过 | `npm test -- test/why.test.ts` | exit 0 |
+| 专项测试不少于 8 个 | `grep -cE "^\s+it\(" test/why.test.ts \| grep -qE "^([8-9]\|[1-9][0-9])$"` | exit 0 |
+| why 已接线，已知批次不报错、未知批次报错 | `npx tsx src/cli.ts why v03-b04-fix; test $? -ne 1 && ! npx tsx src/cli.ts why no-such-batch` | exit 0 |
+| 不变量同步 | `grep -qE "why" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动 `run.ts`、`gate.ts`、`arbiter.ts`、规则 1~10；改动 `show` 的输出；让 `why` 写任何文件；新增依赖
+
+## v04-b05 collie watch：实时跟随
+
+优先级：34　依赖：v04-b02
+
+规格见 SPEC 13.5。
+
+条目：
+1. `src/watch.ts`：轮询循环，时钟、sleep 与取数函数都由参数注入；每条新事件打印一行，阶段变化时打印 `status` 的「当前」段，
+   静默超过 `stall_secs` 时标出秒数；`run.finished`（队列运行为 `queue.finished`）后结束
+2. `collie watch [--once] [--interval <秒>] [--timeout <秒>]`，`cli.ts` 只做接线；只读：不写 journal、不碰心跳、不发信号
+3. `test/watch.test.ts`：用注入的时钟与 sleep，覆盖 `--once`、跟到 `run.finished` 退出、跟到 `queue.finished` 退出、等待新运行、超时退出、静默标注；
+   `test/invariants.test.ts` 加「`test/watch.test.ts` 不含真实定时器」「`src/watch.ts` 不写文件」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| watch 专项测试通过 | `npm test -- test/watch.test.ts` | exit 0 |
+| 专项测试不少于 6 个 | `grep -cE "^\s+it\(" test/watch.test.ts \| grep -qE "^([6-9]\|[1-9][0-9])$"` | exit 0 |
+| watch --once 可用 | `npx tsx src/cli.ts watch --once` | exit 0 |
+| 测试不用真实定时器 | `test -f test/watch.test.ts && ! grep -qE "setInterval\|setTimeout\(" test/watch.test.ts` | exit 0 |
+| watch 只读（不看注释行） | `test -f src/watch.ts && ! grep -vE "^\s*(//\|\*\|/\*)" src/watch.ts \| grep -qE "writeFileSync\|appendFileSync\|process\.kill"` | exit 0 |
+| 不变量同步 | `grep -qE "watch\.ts" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动 `run.ts`、`gate.ts`、`arbiter.ts`、规则 1~10；绕过 `src/view.ts` 直接读 journal；新增依赖
 

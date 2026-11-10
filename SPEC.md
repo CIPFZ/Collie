@@ -376,6 +376,8 @@ type EventType =
   | 'queue.batch_started' // v0.3（12.2）：队列拉起一次批次运行；字段 run_id / batch_id / attempt / why（new / fix_retry / rule1_retry）
   | 'worker.started' | 'worker.finished' | 'worker.crashed'
   | 'reviewer.started' | 'reviewer.verdict'
+  | 'reviewer.finished'   // v0.4（13.1）：reviewer 运行返回后、解析 verdict 之前记；字段 exit_code 与运行级字段
+  | 'evidence.collected'  // v0.4（13.1）：R2 取证完成后记一次；字段见 13.1
   | 'claim.mismatch' | 'verdict.downgraded'
   | 'escalated'
   | 'ci.wait_timeout'    // 等 CI 超过 ci_wait_secs 仍无结论；字段 head_sha / waited_secs / last_state
@@ -528,6 +530,8 @@ collie show <batch_id>           打印该批次的 task / report / verdict 与�
 - `20`：BLOCK
 - `30`：`--continue` 下停表（结论是 PASS，但触发了 12.3 的停表清单，等人看一眼再继续；v03-b04）
 - `1`：Collie 自身错误
+
+v0.4 增加四个只读命令 `status` / `timeline` / `why` / `watch`，定义与退出码见第 13 章。
 
 ## 6. 执行流程（v0.1）
 
@@ -909,10 +913,13 @@ b04 与后续批次的汇报改成每批一个 `docs/ops/` 文件（见 AGENT_KI
 - 仲裁 PASS 且本批次没有 `verdict.downgraded`（规则 9 没降过级、没有被规则 8 救回来的验收失败）；
 - `claim_mismatches` 为空；
 - `ci.resolved.conclusion === 'success'` 且 `branch_matched`；
-- `deps_diff` 为空、`spec_diff_lines === 0`、受保护路径改动为 0 行（这三条本来就会 BLOCK / FIX，列在这里是为了让判定自成一体）；
+- `deps_diff` 为空、`spec_diff_lines === 0`（这两条本来就会 BLOCK / FIX，列在这里是为了让判定自成一体）；
 - reviewer 的 `gaps` 为空。
 
-否则记 `queue.paused`（`reasons` 列出没满足的每一条，字段名用上面的英文：`downgraded` / `claim_mismatches` / `ci` / `deps_diff` / `spec_diff` / `protected` / `gaps`），
+`spec_diff_lines` 统计的就是全部受保护路径的改动行数（`evidence.ts` 的 `PROTECTED_PATHS`）。v03-b04 曾把「受保护路径改动为 0 行」另列为一项、原因码 `protected`，
+它和 `spec_diff` 取的是同一个数据，一次受保护改动会报两条原因。v04-b01 删除这一项，判定共六项。
+
+否则记 `queue.paused`（`reasons` 列出没满足的每一条，字段名用上面的英文：`downgraded` / `claim_mismatches` / `ci` / `deps_diff` / `spec_diff` / `gaps`），
 `queue.finished` reason `paused`，退出码 **30**。人看一眼后再 `--continue` 就从下一个批次接着跑——停表不是失败，只是「这一批过了但有话要说」。
 
 停表清单（任何裁决下都停）：
@@ -924,4 +931,91 @@ b04 与后续批次的汇报改成每批一个 `docs/ops/` 文件（见 AGENT_KI
 
 打扰计数：`queue.finished` 带 `paused_count`（本次 `--continue` 里 `queue.paused` 的次数）。ROADMAP 的通过标准
 「被打扰次数 ≤ 应打扰次数 + 1」用它和 BLOCK 次数之和来数。单批次模式 `collie run <batch>` 不做放行判定、不发 `queue.paused`。
+
+## 13. v0.4 看见
+
+目标（ROADMAP 第 6 节）：一眼看懂「项目进展到哪了、现在在干什么、那批为什么挂了」。通过标准：不看源码、不翻原始日志，仅凭四个命令能说清每个批次的来龙去脉。
+本章只做追加：规则 1~10、放行判定、队列逻辑都不变，四个命令全部只读。五个批次：13.1 数据补齐，13.2 投影与 `status`，13.3 `timeline`，13.4 `why`，13.5 `watch`。
+
+### 13.1 观测数据补齐（v04-b01）
+
+四个命令只读 journal，所以要看的东西必须先在 journal 里。到 v0.3 为止，轮数、花费、token、测试数、裁定走到哪条规则都不在 journal 里，
+操作员是从 `stream.ndjson` 和 `progress.md` 里抄出来的。本批次补齐，全部是**可选字段**，不升 `SCHEMA_VERSION`（与 `ci_passed` 的先例一致）；
+runner 没给的值不写，不写 0。
+
+- **运行级**：`worker.finished` 追加 `num_turns` / `cost_usd` / `duration_ms` / `usage`
+  （`input_tokens` / `output_tokens` / `cache_creation_input_tokens` / `cache_read_input_tokens`）；
+  新增 `reviewer.finished`，在 reviewer 运行返回后、解析 verdict 之前记，字段 `exit_code` 加同一组运行级字段
+  （规则 1 的路径上没有可用的 `reviewer.verdict`，所以不能挂在它上面）；`worker.started` 与 `reviewer.started` 追加 `model`，取自配置 `[agent.<role>].model`。
+  runner 接口：`RunResult` 加 `numTurns?` / `costUsd?` / `durationMs?`，`Usage` 加两个可选的缓存字段；`claude.ts` 从 SDK 结果消息取值，
+  类型按 11.2 从 SDK 导出派生，不手写；fake runner 能脚本化这些值。
+- **批次级**：新增 `evidence.collected`，R2 取证完成后记一次，字段 `commits`（提交数）/ `tests_passed` / `tests_failed`（取不到为 null）/
+  `acceptance_passed` / `acceptance_total` / `spec_diff_lines` / `deps_diff`（条数）/ `remote_has_head`。
+- **裁定依据**：`run.finished` 追加 `rule`（1~10；上报路径没有规则时不写）与 `reason`（截断至 500 字）；
+  `reviewer.verdict` 追加 `gaps`（数组，至多 20 条，每条截断至 300 字）。
+- 顺带清理：12.3 放行判定删去重复的 `protected` 一项；README 的状态行与铁律条数改成现状。
+
+覆盖率不在 v0.4 范围：项目没有测覆盖率，ROADMAP 第 6 节列的「覆盖率变化」等真有覆盖率数据时再加。
+
+### 13.2 投影模块与 `collie status`（v04-b02）
+
+`src/view.ts` 是四个命令唯一的取数入口，分两层：
+- **读取** `loadRuns(root)`：扫 `.collie/runs/*/events.ndjson`，逐个运行重放。某个运行的 journal 校验失败时不抛出，
+  该运行记为 `unreadable`（带原因），其余照常——历史目录里有 v0.1 / v0.2 的旧格式 run_id 与旧事件，一个坏文件不能让四个命令全部失效。
+- **投影** `projectRuns` / `projectBatches` 等纯函数：输入事件数组，输出记录；不读文件、不读时钟（`now` 由参数传入）、
+  不 import `run.ts` / `runner/` / `roles/`。13.1 的字段在旧 journal 里没有，投影给 `null`，显示为 `—`。
+
+数据源只有 journal。唯一的例外是「队列剩余」读 `docs/backlog.md`（队列的事实源是 backlog）。四个命令不读 `stream.ndjson`、
+`progress.md`、`heartbeat.json` 与信封文件，不写任何文件。
+
+`collie status [--json]`，三段：
+- **当前**：进行中的运行（有 `run.started`、没有 `run.finished` 的最新一个）的批次、attempt、阶段（worker / reviewer / 取证）、已运行时长、
+  距最后一条事件的秒数；没有进行中的运行则写 `idle`，并给出最近一次结束的运行与结论。
+- **队列**：backlog 里 `pending` 的个数、下一个可执行批次、`blocked` 的清单。
+- **最近一次队列运行**：`reason`、跑过的批次与结论、`paused_count`。
+
+没有任何 journal 时打印 `no runs recorded`，退出码 0。`--json` 输出同一结构。退出码：0 正常，1 Collie 自身错误。
+
+### 13.3 `collie timeline`（v04-b03）
+
+项目时间轨迹，按时间升序每行一个节点：批次第一次开始、每次运行结束（结论、attempt、用时）、`batch.status` 变化、队列运行的开始 / 停表 / 结束。
+回答「某批次是什么时间完成的」。选项：`--since <日期>`、`--batch <前缀>`、`--json`；
+`--by version` 按批次号的版本前缀（`v03-`）汇总：首次开始、最后结束、批次数、运行数、FIX 与 BLOCK 次数、总花费（没有数据的运行不计入并注明个数）。
+
+ADR 批准与发布不进时间轨迹：它们是 R1 与人的动作，不经过 R2，journal 里没有对应事件，v0.4 不为此造事件。输出末尾固定一行说明去 `git log` 看。
+
+### 13.4 `collie why <batch_id>`（v04-b04）
+
+按 attempt 摊开一个批次每次运行的证据链，顺序固定：worker 怎么结束的（退出码、`stop_reason`、轮数、花费）→ 取证摘要（`evidence.collected`）→
+每条 `acceptance.failed`（命令、退出码、期望）→ `claim.mismatch` → reviewer 结论与 `gaps` → CI（`ci.resolved` / `ci.wait_timeout`）→
+`verdict.downgraded` / `escalated` → 中断与恢复（`run.orphaned` / `worker.signaled` / `worker.rescued` / `worker.resumed`）→ `tool.denied` → 推送。
+每个 attempt 末尾一行「结论：<verdict>，规则 <n>：<一句话>」，一句话由规则号对应的固定模板加 `reason` 生成，**不调用模型**。
+PASS 的批次同样可以问：列出放行依据，以及有没有 `queue.paused`。选项：`--attempt <n>`、`--json`。
+
+退出码：0 有数据；1 批次不在 backlog；2 批次在 backlog 但本机没有它的 journal（沿用 `audit` 的「无数据」语义）。
+与 `show` 的分工：`show` 打印信封原文与事件原样；`why` 只读 journal，给出因果。
+
+### 13.5 `collie watch`（v04-b05）
+
+实时跟随：轮询 journal（`--interval <秒>`，默认 2），每出现一条新事件打印一行，阶段变化时打印一次 `status` 的「当前」段。
+距最后一条事件超过配置的 `stall_secs` 时，在该行标出静默秒数。单批次运行在 `run.finished` 后退出，队列运行在 `queue.finished` 后退出，退出码 0。
+`--once`：打印当前一帧后立即退出。没有进行中的运行且不带 `--once` 时等待新运行出现；`--timeout <秒>` 到时退出码 0，缺省不超时。
+
+实现放在 `src/watch.ts`，只读：不写 journal、不碰心跳、不发信号。轮询用注入的时钟与 sleep，测试不用真实定时器。
+
+### 13.6 队列运行用固定版本的 R2
+
+`--continue` 连跑多个批次时，R2 不从 worker 正在改的工作树启动：操作员按 11.3「R2 自救」的做法，从开跑前最近一次 PASS 的裁定提交建 worktree，
+用它的 `src/cli.ts` 启动，cwd 仍是主仓库根。理由：批次之间 R2 会重新加载代码，从工作树启动等于让上一批刚写、只经过一次审核的代码去裁定下一批。
+代价：队列中途改好的 R2 行为要到下一次队列才生效，13.1 的新字段在本次队列的 journal 里也不会出现。验收命令在检出于 `head_sha` 的独立 worktree 里跑，测的是 worker 的新代码，不受 R2 版本影响；
+但那个 worktree 里没有历史 journal，四个命令在真实运行目录上的表现要由操作员在队列结束后另跑一次（13.7）。
+
+### 13.7 验证
+
+v04 的五个批次用一次 `--continue --max 5` 跑完，同时是 ROADMAP 第 5 节 v0.3 的收口实验：数 `queue.paused` 与 BLOCK 的次数，逐个判断该不该打扰；零误放行才算过。
+v0.4 自己的验证放在下一次队列运行：操作员不看源码、不翻原始日志，只用四个命令写出队列汇报；写不出来的每一处记为缺口，进下一个修补批次。
+
+### 13.8 明确不做
+
+Web dashboard、指标聚合与告警、任何可观测框架（ROADMAP 第 6 节）；覆盖率；ADR 与发布节点；让四个命令写文件或调用模型。
 
