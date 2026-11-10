@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-run_id: r-20261110151133
+run_id: r-20261110153637
 batch_id: v04-b01
 base_sha: 0fdc3f9fa279396d02fe5689e677d5872575a79b
-created_at: 2026-11-10T15:11:33.601Z
-attempt: 1
+created_at: 2026-11-10T15:36:37.973Z
+attempt: 2
 interrupted_at: null
 issued_by: collie
 ---
@@ -54,3 +54,14 @@ issued_by: collie
 完成后写 `.collie/batches/v04-b01/report.md`：固定四段（做了什么 / 测试结果 / 偏离或疑问 / 下一步建议）
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v04-b01` 为提交信息单独提交并推送该文件。
+
+## 上一轮判 FIX
+
+### 上一轮代码提交
+
+- `7a7d6fd70cec1205558e51808f854a67f2460416`
+- `7600a4c6ca44043248fb252da31b817878e0d9d2`
+- `89288a6377921144297bf96684874b6da4c47bdf`
+- `e0dcdcfb4469ad135b163ea1ed8c4ccbfff9c0e0`
+
+这些提交已在审核范围内，只补缺口，不要重做。
