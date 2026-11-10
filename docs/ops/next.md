@@ -2,31 +2,36 @@
 
 基准提交：见本文件末尾。`git pull --ff-only` 后 `git merge-base --is-ancestor <基准> HEAD` 必须成功，否则停下报告。
 
-## 本轮：`--continue --max 1`（应选中 v03-b04-fix）
+## 本轮：`--continue --max 5`，R2 用固定版本（应依次选中 v04-b01 到 v04-b05）
 
-b04 维持 PASS。`--continue` 第一次真实运行成立：选批对、FIX 自动重跑、`base_sha` 沿用、R2 写 backlog 状态列只动一格（你的逐字节比对是本轮最硬的证据）。
-你的四条建议全部采纳：
-- 「不得为过验收改字面」升为铁律 26（CONSTRAINTS），worker 手册 4.2、reviewer 手册核对表同步。reviewer 以后遇到这种情况 gaps 要写「转 R1」。
-- FIX 重跑：attempt 递增、`interrupted_at` 为 null、不写「上一轮中断」、写「上一轮判 FIX」（SPEC 11.7）。
-- `fix_max` 只计本次队列（SPEC 12.2）。
-- 队列 journal 加 `queue.batch_started`，`queue.finished.batches` 带 run_id 与 verdict（SPEC 12.2 / 3.6）。
-三条进 v03-b04-fix。这一轮 b04 的放行判定（`gateDecision` / `queue.paused` / 退出码 30）第一次在 R2 上生效。
+v03-b04-fix 维持 PASS。你第 5 段的两条都采纳：
+- 放行判定第 6 项按 (a) 删除：SPEC 12.3 已改成六项，代码进 v04-b01 条目 1。
+- 不止 `--max 2`：v0.4 的五个批次一次签满（SPEC 第 13 章），这一轮跑 `--max 5`。它同时是 v0.3 的收口实验（连跑 5 批、零误放行）。
+
+新规则（SPEC 13.6）：队列运行的 R2 从固定版本启动，不从 worker 正在改的工作树启动。固定版本是 `e042215`（v03-b04-fix 的裁定提交）。
 
 步骤：
 1. `git pull --ff-only`，确认基准是 HEAD 祖先、工作区干净、`heartbeat.json` 不存在、无残留 claude / `node -e` 进程。
-2. `npx tsx src/cli.ts smoke` 一次。
-3. `npx tsx src/cli.ts run --continue --max 1`。预期选中 v03-b04-fix。选了别的或报无可执行批次，停下抄事件。
-4. 每个 run_id 各跑一次 `npx tsx src/cli.ts audit <run_id>`，有 reviewer 时必须 0。
+2. `git worktree add /tmp/collie-r2 e042215 && (cd /tmp/collie-r2 && npm ci)`。
+3. 在主仓库根执行 `npx tsx /tmp/collie-r2/src/cli.ts show v04-b01`，确认读得到批次且状态是 pending。读不到就停下抄输出。
+4. 在主仓库根执行 `npx tsx /tmp/collie-r2/src/cli.ts smoke` 一次，非 0 就停。
+5. 在主仓库根执行 `npx tsx /tmp/collie-r2/src/cli.ts run --continue --max 5`。中途不干预、不重跑。
+6. 结束后不管退出码是多少，每个 run_id 各跑一次 `npx tsx /tmp/collie-r2/src/cli.ts audit <run_id>`，有 reviewer 时必须 0。
+7. 退出码是 20 或 30 时停下写汇报，不要自己再 `--continue`。
+8. worktree 先不删，等确认。
 
 重点看（写进汇报）：
-- **放行判定首次生效**：PASS 之后 journal 里有没有 `queue.paused`；退出码是 0 还是 30；`queue.finished` 是否带 `paused_count`。
-  若是 30，把 `queue.paused.reasons` 原样抄下来——这是「打扰」的第一个真实样本，要判断它该不该打扰。
-- 若有 FIX 重跑：这轮 R2 还是 b04 代码，task 仍会错写「上一轮中断 / unknown」（属已知，本批次修）；看 worker 有没有被误导。
-- 若 reviewer 又判验收匹配到注释：看它的 gaps 是否按新手册写「转 R1」，worker 是否按铁律 26 不改字面。
-- backlog 状态列改动是否仍只动一格；队列 journal 内容原样。
-- 常规项：audit、`tool.denied`、推送到信封间隔、轮数花费压缩、`ci.verdict_commit` 查 `2bbda1b` 应 success。
+- **批次之间的放行**：这是放行判定第一次在两个批次之间做决定。每个批次之间队列 journal 的 `queue.batch_started` 原样抄
+  （v03-b04-fix 的代码第一次在 R2 上生效）。
+- **打扰计数**：`queue.paused` 与 BLOCK 各几次，`reasons` 原样抄，每一次写上你的判断：该不该打扰。
+- **误放行**：队列结束后，用主仓库 HEAD 的代码在真实的 `.collie/runs/` 上把已经做出来的命令各跑一次
+  （`status`、`timeline`、`why <某个 v03 批次>`、`watch --once`）。任何一个报错或输出明显不对，原样抄。
+  R2 的验收命令在 `head_sha` 的独立 worktree 里跑，那里没有历史 journal，所以这一步是验收测不到的。
+- **固定版本的副作用**：本次队列的 journal 不会有 SPEC 13.1 的新字段，属预期。四个命令遇到旧 journal 应显示 `—`，不应报错。
+- **花费与墙钟**：每批花费与合计；单批超过 $30 标出来（不中断）。有没有批次跑到 3600 秒被 soft 停。
+- 常规项：audit、`tool.denied`、推送到信封的间隔、backlog 状态列是否每次只动一格、`ci.verdict_commit`。
 
-汇报：`docs/ops/v03-b04-fix-r<attempt>.md`（每次运行一份）+ `docs/ops/queue-20261027-2.md`。提交 `ops: report v03-b04-fix + queue`，推送，
-对话里回「已写 docs/ops/v03-b04-fix-r1.md」。
+汇报：每个批次一份 `docs/ops/<batch>-r<attempt>.md`，外加一份 `docs/ops/queue-<日期>.md`。提交 `ops: report v04 queue`，推送，
+对话里回「已写 docs/ops/queue-<日期>.md」。
 
-基准提交：59a9579
+基准提交：3461333
