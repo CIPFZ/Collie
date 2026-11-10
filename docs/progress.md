@@ -680,4 +680,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b01 · r-20261110153637 · FIX（reviewer 原判 PASS，规则 9 降级）
+
+- 时间：2026-11-10T15:45:57.536Z
+- 裁定：规则 9，ci_conclusion=unknown, ci_branch_matched=null
+- 提交：`7600a4c` `89288a6` `e0dcdcf`
+- 验收命令：10/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，826 passed, 0 failed
+  - `! cat src/gate.ts src/run.ts test/gate.test.ts | grep -vE "^\s*(//|\*|/\*)" | grep -qE "protectedDiffLines"` → exit 0，exit 0
+  - `! grep -qE "实现未开始|25 条" README.md && grep -qE "26 条" README.md` → exit 0，exit 0
+  - `npm test -- test/journal-fields.test.ts` → exit 0，9 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/journal-fields.test.ts | grep -qE "^([6-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `grep -qE "reviewer\.finished" src/schema/index.ts && grep -qE "evidence\.collected" src/schema/index.ts` → exit 0，exit 0
+  - `grep -qE "total_cost_usd" src/runner/claude.ts && grep -qE "total_cost_usd" test/runner-claude.test.ts` → exit 0，exit 0
+  - `grep -qE "evidence\.collected" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：unknown，监听分支未能取证
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
