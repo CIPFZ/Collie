@@ -1,9 +1,9 @@
-# 批次 v04-b01 汇报（attempt 2）
+# 批次 v04-b01 汇报（attempt 3）
 
 ## 做了什么
 
-本轮为 attempt 2。上一轮（attempt 1）所有 10 条验收命令均已通过，代码完整无缺口。
-FIX 原因是「规则 9，ci_conclusion=unknown, ci_branch_matched=null」——reviewer 无法验证 CI。
+本轮为 attempt 3。前两轮（attempt 1、2）所有 10 条验收命令均已通过，代码完整无缺口。
+FIX 原因均为「规则 9，ci_conclusion=unknown, ci_branch_matched=null」——仲裁器无法验证 CI。
 代码提交 `7600a4c` / `89288a6` / `e0dcdcf` 均来自 attempt 1，本轮无新代码提交。
 
 三个条目的实现回顾（均在 attempt 1 完成，本轮验证仍全部通过）：
@@ -41,16 +41,16 @@ $ npm run typecheck
 $ npm test
  Test Files  40 passed (40)
       Tests  826 passed (826)
-   Duration  13.39s
+   Duration  13.00s
 ```
 
-全部 10 条验收命令逐个实跑 exit 0（与 attempt 1 结果一致）。
+全部 10 条验收命令逐个实跑 exit 0（与 attempt 1、2 结果一致）。
 
 ## 偏离或疑问
 
-上一轮 FIX 原因是 ci_conclusion=unknown / ci_branch_matched=null。这属于 reviewer 环境无 GitHub 凭据所致，
+前两轮 FIX 原因均为 ci_conclusion=unknown / ci_branch_matched=null。这属于 reviewer 环境无法查询 GitHub CI 所致，
 不是代码缺陷。本轮代码无任何变更，仅确认远端已包含全部提交并重新提交 report。
-若本轮 reviewer 环境仍无凭据，CI 仍将无法取证，这超出 worker 能力范围。
+按 AGENT-worker.md 要求，worker 不等 CI、不查 CI、不探测 token。
 
 ## 下一步建议
 
@@ -63,13 +63,13 @@ v04-b02 投影模块与 `collie status` 命令：`src/view.ts` 读取 journal �
   "batch_id": "v04-b01",
   "head_sha": "e0dcdcfb4469ad135b163ea1ed8c4ccbfff9c0e0",
   "claims": {
-    "commits": [],
+    "commits": ["7600a4c6ca44043248fb252da31b817878e0d9d2", "89288a6377921144297bf96684874b6da4c47bdf", "e0dcdcfb4469ad135b163ea1ed8c4ccbfff9c0e0"],
     "tests_passed": 826,
     "tests_failed": 0,
     "pushed": true,
     "new_deps": [],
     "spec_touched": false
   },
-  "open_questions": ["上一轮 FIX 原因是 CI 无法取证（ci_conclusion=unknown），本轮代码无变更。若 reviewer 环境仍无 GitHub 凭据，结果可能相同。"]
+  "open_questions": []
 }
 ```
