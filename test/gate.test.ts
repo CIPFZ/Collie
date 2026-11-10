@@ -1,4 +1,4 @@
-// Unit tests for gateDecision (SPEC 12.3): seven conditions, each independently tested.
+// Unit tests for gateDecision (SPEC 12.3): six conditions, each independently tested.
 import { describe, expect, it } from 'vitest';
 import { gateDecision, type GateInput } from '../src/gate.js';
 
@@ -11,13 +11,12 @@ function passingInput(): GateInput {
     ciBranchMatched: true,
     depsDiffCount: 0,
     specDiffLines: 0,
-    protectedDiffLines: 0,
     gapsCount: 0,
   };
 }
 
 describe('gateDecision (SPEC 12.3)', () => {
-  it('passes when all seven conditions are satisfied', () => {
+  it('passes when all six conditions are satisfied', () => {
     const result = gateDecision(passingInput());
     expect(result.pass).toBe(true);
     expect(result.reasons).toEqual([]);
@@ -63,12 +62,6 @@ describe('gateDecision (SPEC 12.3)', () => {
     const result = gateDecision({ ...passingInput(), specDiffLines: 5 });
     expect(result.pass).toBe(false);
     expect(result.reasons).toContain('spec_diff');
-  });
-
-  it('fails with "protected" when protected diff lines are non-zero', () => {
-    const result = gateDecision({ ...passingInput(), protectedDiffLines: 3 });
-    expect(result.pass).toBe(false);
-    expect(result.reasons).toContain('protected');
   });
 
   it('fails with "gaps" when reviewer gaps exist', () => {

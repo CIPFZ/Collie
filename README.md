@@ -6,7 +6,7 @@ Collie 把「与好模型讨论方案 → 下发工作 Agent 实现 → 审核 A
 这个循环自动化，让人只保留头（需求阐述与方案讨论）与尾（裁决），
 不再在多个 Agent 窗口之间搬运上下文。
 
-状态：v0.1 规格已定稿，实现未开始。
+状态：v0.3 功能批次已完成，v0.4 进行中。
 
 ## 定位
 
@@ -53,7 +53,7 @@ Collie 把「与好模型讨论方案 → 下发工作 Agent 实现 → 审核 A
 | [SPEC.md](./SPEC.md) | 唯一方案来源，v0.1 详细规格 |
 | [ROADMAP.md](./ROADMAP.md) | 八个版本的功能边界与验证目标 |
 | [ROLES.md](./ROLES.md) | 角色职责、权限矩阵、八个环节、失败矩阵 |
-| [CONSTRAINTS.md](./CONSTRAINTS.md) | 25 条全局铁律 |
+| [CONSTRAINTS.md](./CONSTRAINTS.md) | 26 条全局铁律 |
 | [AGENT-worker.md](./AGENT-worker.md) | R3 工作手册 |
 | [AGENT-reviewer.md](./AGENT-reviewer.md) | R4 工作手册 |
 | [docs/backlog.md](./docs/backlog.md) | 批次队列（优先级已排定） |

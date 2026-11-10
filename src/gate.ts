@@ -1,5 +1,5 @@
 // SPEC 12.3: gate decision — pure function that decides "continue or stop" after
-// a batch PASSes in --continue mode. The seven conditions are self-contained:
+// a batch PASSes in --continue mode. The six conditions are self-contained:
 // zero external imports, no journal dependency, no side effects.
 
 /**
@@ -7,7 +7,9 @@
  * evidence, journal events, and verdict. The caller collects them; this function
  * only interprets them.
  *
- * SPEC 12.3 lists seven conditions; the input carries exactly the data needed.
+ * SPEC 12.3 lists six conditions; the input carries exactly the data needed.
+ * (v04-b01: the duplicate "protected" condition was removed — spec_diff_lines
+ * already covers all protected-path changes via evidence.ts PROTECTED_PATHS.)
  */
 export interface GateInput {
   /** Whether any `verdict.downgraded` event was recorded for this batch (rule 9 or 8 rescue). */
@@ -22,25 +24,19 @@ export interface GateInput {
   depsDiffCount: number;
   /** Lines of spec diff (evidence.spec_diff_lines). */
   specDiffLines: number;
-  /**
-   * Lines of protected-path diff. In the current evidence model this equals
-   * specDiffLines, but the gate treats it as a logically separate condition
-   * per SPEC 12.3 ("受保护路径改动为 0 行").
-   */
-  protectedDiffLines: number;
   /** Count of reviewer gaps (verdict.gaps.length). */
   gapsCount: number;
 }
 
 export interface GateResult {
-  /** True when all seven conditions are satisfied and the queue may continue. */
+  /** True when all six conditions are satisfied and the queue may continue. */
   pass: boolean;
   /** Reason codes for each unsatisfied condition (SPEC 12.3 field names). */
   reasons: string[];
 }
 
 /**
- * SPEC 12.3: evaluates the seven "auto-release" conditions after a PASS.
+ * SPEC 12.3: evaluates the six "auto-release" conditions after a PASS.
  *
  * Conditions (all must hold for pass=true):
  *   1. No verdict.downgraded in this batch          -> 'downgraded'
@@ -48,8 +44,7 @@ export interface GateResult {
  *   3. ci success + branch matched                  -> 'ci'
  *   4. deps_diff empty                              -> 'deps_diff'
  *   5. spec_diff_lines === 0                        -> 'spec_diff'
- *   6. protected path changes === 0                 -> 'protected'
- *   7. reviewer gaps empty                          -> 'gaps'
+ *   6. reviewer gaps empty                          -> 'gaps'
  */
 export function gateDecision(input: GateInput): GateResult {
   const reasons: string[] = [];
@@ -69,10 +64,7 @@ export function gateDecision(input: GateInput): GateResult {
   // 5. spec_diff_lines === 0
   if (input.specDiffLines > 0) reasons.push('spec_diff');
 
-  // 6. protected path changes === 0
-  if (input.protectedDiffLines > 0) reasons.push('protected');
-
-  // 7. reviewer gaps empty
+  // 6. reviewer gaps empty
   if (input.gapsCount > 0) reasons.push('gaps');
 
   return { pass: reasons.length === 0, reasons };

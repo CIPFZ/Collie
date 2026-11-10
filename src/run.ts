@@ -1904,7 +1904,6 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
         ciBranchMatched: outcome.evidence?.ci_branch_matched ?? null,
         depsDiffCount: outcome.evidence?.deps_diff.length ?? 0,
         specDiffLines: outcome.evidence?.spec_diff_lines ?? 0,
-        protectedDiffLines: outcome.evidence?.spec_diff_lines ?? 0,
         gapsCount: outcome.gaps?.length ?? 0,
       };
       const gate = gateDecision(gateInput);
