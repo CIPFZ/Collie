@@ -300,4 +300,10 @@ describe('structural invariants (SPEC 3.2)', () => {
     // SPEC 13.5: watch is read-only: no journal writes, no heartbeat, no signals.
     expect(content).not.toMatch(/writeFileSync|appendFileSync|process\.kill/);
   });
+
+  it('src/run.ts contains evidence_unavailable (v04-b06)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    // SPEC 13.9: environment fault handling — evidence_unavailable cause in code.
+    expect(content).toContain('evidence_unavailable');
+  });
 });
