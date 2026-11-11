@@ -6,8 +6,8 @@
 > 只 grep `src/` 的验收抓不住「接口做了、测试没用上」（b04：只注入 now；b04-fix：指纹可注入但场景 G 没注入）。
 > 凡验收表含 grep 类结构检查的批次，条目正文必须写「同步加进 `test/invariants.test.ts`」，验收加一条 grep 该文件（SPEC 3.2 结构不变量）。
 
-更新时间：2026-11-10
-当前版本：v0.4（v04 五个批次一次签满，见 SPEC 第 13 章）
+更新时间：2026-11-11
+当前版本：v0.4（见 SPEC 第 13 章；v04-b01 已裁定采纳，队列从 v04-b02 起）
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -46,10 +46,12 @@
 | 28 | v03-b04 | 放行判定与停表：queue.paused、规则 1 自动重跑、规则 9 连续两次 | v03-b03-fix2 | passed |
 | 29 | v03-b04-fix | FIX 重跑的 task 语义、fix_max 只计本次队列、队列 journal 可还原 | v03-b04 | passed |
 | 30 | v04-b01 | 观测数据补齐：运行级字段、evidence.collected、裁定依据，判定第 6 项与 README 清理 | v03-b04-fix | blocked |
-| 31 | v04-b02 | 投影模块 view.ts 与 collie status | v04-b01 | pending |
+| 31 | v04-b02 | 投影模块 view.ts 与 collie status | v03-b04-fix | pending |
 | 32 | v04-b03 | collie timeline：时间轨迹与按版本汇总 | v04-b02 | pending |
 | 33 | v04-b04 | collie why：按 attempt 摊开证据链 | v04-b02 | pending |
 | 34 | v04-b05 | collie watch：实时跟随 | v04-b02 | pending |
+| 35 | v04-b06 | 环境故障不当成 worker 的 FIX：token 读不到就启动失败、证据取不到时队列不重跑 | v03-b04-fix | pending |
+| 36 | v04-b07 | 队列收尾：queue.batch_started 归位、fix_max 提交推送、FIX 重跑写明降级原因 | v04-b06 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -1284,18 +1286,26 @@ v0.4 的四个命令只读 journal，本批次先把要看的数据写进 journa
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 改动规则 1~10、队列逻辑、`SCHEMA_VERSION`；新增依赖
 
+记录：队列 q-20261110151133 里跑了 3 次（r-20261110151133 / 153637 / 154601），每次都是验收 10/10 通过、reviewer 判 PASS、
+规则 9 因 CI 证据取不到降为 FIX（操作员机器上 `ci.token_file` 指向的文件丢失，匿名配额为 0），第 3 次后 `fix_max` 停下。
+这是环境问题，不是 worker 的问题。裁定（2026-11-11，SPEC 13.11）：标 blocked，`7600a4c`、`89288a6`、`e0dcdcf` 采纳，不重跑；
+依据是 R1 复核与 GitHub Actions 页面上 `e0dcdcf` 的 Run 178 成功，不是 R2 取到的证据。缺口进 v04-b02（钩子超时）、v04-b06、v04-b07。
+
 ## v04-b02 投影模块 view.ts 与 collie status
 
-优先级：31　依赖：v04-b01
+优先级：31　依赖：v03-b04-fix
 
 规格见 SPEC 13.2。`src/view.ts` 是后面三个命令共用的取数入口，这一批把它立起来。
+v04-b01 标 blocked、代码已采纳（SPEC 13.11），所以依赖指向 v03-b04-fix；13.1 的字段与事件已经在 main 上。
 
 条目：
 1. `src/view.ts` 读取层 `loadRuns(root)`：扫全部运行目录并重放；单个运行的 journal 校验失败不抛出，记为 `unreadable` 带原因，其余照常
 2. `src/view.ts` 投影层 `projectRuns` / `projectBatches`：纯函数，`now` 由参数传入，不 import `run.ts` / `runner/` / `roles/`；
    13.1 的字段缺失时给 `null`。`collie status [--json]` 按 13.2 的三段输出，`cli.ts` 只做接线；没有 journal 时打印 `no runs recorded` 退出码 0
 3. `test/view.test.ts`：夹具至少覆盖一次 PASS、FIX 后 PASS、进行中的运行、旧格式 run_id 目录、含坏行的 journal、一次队列运行、不含 13.1 字段的旧 journal；
-   `test/invariants.test.ts` 加「`src/view.ts` 不 import `run.ts` / `runner/` / `roles/`」
+   `test/invariants.test.ts` 加「`src/view.ts` 不 import `run.ts` / `runner/` / `roles/`」。
+   另：`vitest.config.ts` 加 `hookTimeout`，与 `testTimeout` 同值（SPEC 13.11：`test/journal-fields.test.ts` 的 `beforeAll` 跑完整一轮，
+   默认的 10 秒在有负载的机器上会超时，一超时整个文件的用例被跳过、`npm test` 失败）；本批次新写的测试若在钩子里跑完整一轮，同样受它保护
 
 验收标准：
 
@@ -1311,6 +1321,7 @@ v0.4 的四个命令只读 journal，本批次先把要看的数据写进 journa
 | status 命令已接线 | `npx tsx src/cli.ts status` | exit 0 |
 | status --json 输出合法 JSON | `npx tsx src/cli.ts status --json \| node -e "JSON.parse(require('fs').readFileSync(0,'utf8'))"` | exit 0 |
 | 不变量同步 | `grep -qE "view\.ts" test/invariants.test.ts` | exit 0 |
+| 钩子超时已配置（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" vitest.config.ts \| grep -qE "hookTimeout"` | exit 0 |
 
 额外禁止：
 - 改动任何受保护路径
@@ -1413,4 +1424,76 @@ v0.4 的四个命令只读 journal，本批次先把要看的数据写进 journa
 - 为了让测试过而删除或跳过任何测试
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 改动 `run.ts`、`gate.ts`、`arbiter.ts`、规则 1~10；绕过 `src/view.ts` 直接读 journal；新增依赖
+
+## v04-b06 环境故障不当成 worker 的 FIX：token 读不到就启动失败、证据取不到时队列不重跑
+
+优先级：35　依赖：v03-b04-fix
+
+队列 q-20261110151133 暴露：token 文件丢失被悄悄当成未配置，CI 证据取不到又被当成 worker 的 FIX 重跑了两次。规格见 SPEC 13.9、3.1、3.6、4.3。
+规则 9 的结论不变（没有 CI 证据就不能 PASS），变的是 R2 怎么报、队列怎么停。
+
+条目：
+1. token 文件（SPEC 13.9）：读 token 的代码收成一处；配了 `ci.token_file` 但文件不存在、读不了或为空时，`collie run`（两种模式）在签发 task 之前退出码 1，
+   stderr 含 `ci.token_file`、展开后的路径与原因。测试不得依赖真实 home 目录：凡是会走到 `run` 的夹具，配置要么不配 `token_file`，要么指向临时目录里的文件
+   （GitHub 的 CI 机器上没有这个文件，直接读仓库里 toml 的现有用例在本批次之后会在 CI 上失败，要一并改）
+2. `collie smoke`（SPEC 13.9）：先查 token 文件再调 runner；runner 通过后用 token 对当前 `HEAD` 查一次 CI，请求失败退出码 1 并打印原因，成功打印 `ci ok`；
+   报错、事件与输出里不得出现 token 内容
+3. 证据取不到（SPEC 13.9）：规则 9 触发且属于 13.9 列的三种情况时，`verdict.downgraded` 加 `cause: "evidence_unavailable"` 与 `detail`；
+   `--continue` 遇到它不重跑、不计 `fix_max`、不改 backlog 状态，记 `escalated` 与 `queue.finished`（reason 都是 `evidence_unavailable`），退出码 20。
+   新建 `test/scenario-m.test.ts`：token 文件缺失时启动失败且没有签发 task；限流时单批次模式的 FIX 带 `cause`；`--continue` 只跑一次就停、backlog 状态仍是 `pending`、退出码 20；
+   对照组 CI `failure` 仍按普通 FIX 重跑；smoke 的两种失败。`test/invariants.test.ts` 加「`src/run.ts` 含 `evidence_unavailable`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 场景 M 通过 | `npm test -- test/scenario-m.test.ts` | exit 0 |
+| 场景 M 不依赖真实 home 目录 | `HOME=$(mktemp -d) npm test -- test/scenario-m.test.ts` | exit 0 |
+| 场景 M 不少于 6 个用例 | `grep -cE "^\s+it\(" test/scenario-m.test.ts \| grep -qE "^([6-9]\|[1-9][0-9])$"` | exit 0 |
+| 原因码进代码与测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "evidence_unavailable" && grep -qE "evidence_unavailable" test/scenario-m.test.ts` | exit 0 |
+| token 文件缺失时 smoke 报错并指出配置项 | `HOME=$(mktemp -d) npx tsx src/cli.ts smoke --runner fake 2>&1 \| grep -qE "token_file"` | exit 0 |
+| 不变量同步 | `grep -qE "evidence_unavailable" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动规则 1~10 的判定（规则 9 的结论仍是 FIX）、放行判定、`fix_max` 的默认值；让报错、事件或输出里出现 token 内容；新增依赖
+
+## v04-b07 队列收尾：queue.batch_started 归位、fix_max 提交推送、FIX 重跑写明降级原因
+
+优先级：36　依赖：v04-b06
+
+同一次队列运行暴露的三处，都在 v03-b04-fix 的代码里。规格见 SPEC 13.10、3.6、11.7、12.2。
+
+条目：
+1. journal 归位（SPEC 13.10）：`queue.batch_started` 的批次运行号字段改名 `batch_run_id`，事件落在队列的 `q-` journal；`Recorder.record` 遇到名为 `ts` / `run_id` / `event` 的扩展字段抛错；
+   `show --queue` 与现有夹具同步。`reviewer.verdict` 的 `gaps` 在 verdict 可解析时总是写，没有缺口写空数组
+2. `fix_max` 升级时的 backlog 提交按 SPEC 12.1 推送，在队列 journal 记 `verdict.pushed` 或 `verdict.push_failed`
+3. FIX 重跑的 task（SPEC 13.10、11.7）：「上一轮判 FIX」一节加小节「降级原因」，写上一轮 `verdict.downgraded` 的规则号与 `reason`，有 `cause` / `detail` 时一并写；
+   提交清单只列 worker 的代码提交（按 R2 提交前缀排除）。新建 `test/queue-journal.test.ts`：`queue.batch_started` 在 `q-` journal 里、不在 `r-` journal 里；
+   `Recorder` 拒绝信封键；`fix_max` 之后远端含 HEAD 且有 `verdict.pushed`；规则 9 的 FIX 重跑 task 含降级原因；清单不含 `docs: issue` 提交；没有缺口时 `gaps` 是空数组。
+   `test/invariants.test.ts` 加「`src/run.ts` 含 `batch_run_id`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 队列 journal 专项测试通过 | `npm test -- test/queue-journal.test.ts` | exit 0 |
+| 专项测试不少于 6 个 | `grep -cE "^\s+it\(" test/queue-journal.test.ts \| grep -qE "^([6-9]\|[1-9][0-9])$"` | exit 0 |
+| 字段改名进代码与测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "batch_run_id" && grep -qE "batch_run_id" test/queue-journal.test.ts` | exit 0 |
+| 降级原因进 task 生成与测试 | `grep -rqE "降级原因" src && grep -qE "降级原因" test/queue-journal.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "batch_run_id" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动规则 1~10、放行判定、`fix_max` 的默认值与计数方式；新增依赖
 

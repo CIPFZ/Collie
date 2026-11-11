@@ -152,7 +152,9 @@ token_file = "~/.config/collie/github-token"   # 可选。只读 PAT（Actions: 
 `token_file`（v02-b04-fix2 后）：`~` 展开为 home；相对路径相对**仓库根**而非进程 cwd（fix3 条目 3 对齐实现，现为 cwd）。
 R2 在取证前读取该文件内容（去首尾空白）作为 `queryCi` 的 `token`，
 **不**放进环境变量。runner 拉起 worker / reviewer 时必须从子进程环境里删除 `GITHUB_TOKEN`、`GH_TOKEN`，
-worker 的事件流会原样落盘（Q5），不能让它看见密钥。文件不存在时与未配置相同。
+worker 的事件流会原样落盘（Q5），不能让它看见密钥。
+配了 `token_file` 但文件不存在、读不了或内容为空时，`collie run` 与 `collie smoke` 启动即报错（13.9，v04-b06）；
+v04-b06 之前的实现把它当作未配置，悄悄退回匿名查询。
 推荐放在仓库外；若放在 `.collie/` 下，`.collie/github-token` 在 `.gitignore` 与 `collie init` 的忽略清单里。
 
 `permission_mode` 取值 `default` / `acceptEdits` / `bypassPermissions`，省略时沿用 SDK 默认（逐次询问）。
@@ -370,15 +372,16 @@ type EventType =
   | 'batch.selected' | 'batch.task_written'
   | 'batch.skipped'      // v0.3：依赖未满足；字段 batch_id / missing（依赖清单）
   | 'batch.status'       // v0.3：R2 改写 backlog 状态列；字段 batch_id / from / to
-  | 'queue.finished'     // v0.3：--continue 结束；字段 reason（exhausted / blocked / escalated / fix_max / limit / paused）/ batches（本次跑过的）/ paused_count
+  | 'queue.finished'     // v0.3：--continue 结束；字段 reason（exhausted / blocked / escalated / fix_max / limit / paused / evidence_unavailable）/ batches（本次跑过的）/ paused_count
   | 'queue.paused'       // v0.3（12.3）：PASS 但触发停表清单；字段 batch_id / reasons（数组）
   | 'batch.retried'      // v0.3（12.3）：规则 1 BLOCK 后自动重跑一次；字段 batch_id / rule（固定 1）
-  | 'queue.batch_started' // v0.3（12.2）：队列拉起一次批次运行；字段 run_id / batch_id / attempt / why（new / fix_retry / rule1_retry）
+  | 'queue.batch_started' // v0.3（12.2）：队列拉起一次批次运行；字段 batch_run_id（v04-b07 前叫 run_id，见 13.10）/ batch_id / attempt / why（new / fix_retry / rule1_retry）
   | 'worker.started' | 'worker.finished' | 'worker.crashed'
   | 'reviewer.started' | 'reviewer.verdict'
   | 'reviewer.finished'   // v0.4（13.1）：reviewer 运行返回后、解析 verdict 之前记；字段 exit_code 与运行级字段
   | 'evidence.collected'  // v0.4（13.1）：R2 取证完成后记一次；字段见 13.1
-  | 'claim.mismatch' | 'verdict.downgraded'
+  | 'claim.mismatch'
+  | 'verdict.downgraded'  // 字段 from / to / rule / reason；v0.4（13.9）：规则 9 且证据是因环境取不到时追加 cause（固定 evidence_unavailable）/ detail
   | 'escalated'
   | 'ci.wait_timeout'    // 等 CI 超过 ci_wait_secs 仍无结论；字段 head_sha / waited_secs / last_state
   | 'ci.resolved'        // 取到 CI 结论；字段 head_sha / conclusion / branch_matched / run_url / waited_secs / polls / attributed_sha（采信后代时）
@@ -489,6 +492,7 @@ R2 实测 `remote_has_head=false`、CI 未取证；规则 5 只查「声称已�
 **不豁免 `unknown`**：无 token 环境只能得到 FIX，这是有意的；3.1 的「限流不等待」只省时间，不替代证据。
 后续 attempt 沿用首次 `base_sha`（本节上文），所以未推送的提交在 FIX 重跑时仍在审核范围内。
 规则 9 是「证据缺失」不是「声称失实」，记 `verdict.downgraded`（字段 rule / reason），不记 `claim.mismatch`。
+证据是因环境取不到（限流、认证失败、网络、`git fetch` 失败）时结论仍是 FIX，但 R2 标出 `cause`，队列不重跑（13.9，v04-b06）。
 
 **上报（无 report）**：worker 退出后没有可解析的 report.md 时不进入规则链，直接 BLOCK + `escalated`。
 这不是「规则 0」，progress 与 `collie show` 一律写「上报：无 report」。
@@ -795,6 +799,7 @@ v0.1 的 `wallclock_secs` 超时从「直接 abort + 记 crashed」改为走本�
 `base_sha` 沿用首次，但 frontmatter 的 `interrupted_at` 为 `null`、正文**不写**「上一轮中断」一节，
 改写一节「上一轮判 FIX」：原样列出上一轮 verdict 的 `gaps` 与未通过的验收命令及其退出码，以及上一轮的代码提交清单，
 并写明「这些提交已在审核范围内，只补缺口，不要重做」。v03-b04 第 2 次把 FIX 写成了「中断、原因 unknown」，worker 靠自己读 progress 才没被误导。
+v04-b07 起这一节还要写上一轮的降级规则与原因，提交清单只列 worker 的代码提交（13.10）。
 无论哪种结束方式，`run.finished` 事件与 `docs/progress.md` 的运行记录都带 worker 的
 `exit_code` 与 `stop_reason`，让人看得出它是怎么结束的（2.3）。
 下一次对同一批次 `collie run` 时：
@@ -887,12 +892,13 @@ v0.2 期间每轮有两个人工动作：操作员推送 R2 的裁定提交、�
 - PASS → R2 把 backlog 状态表该行改为 `passed`（记 `batch.status`）、提交进裁定提交、推送（12.1），取下一个；
 - FIX → 同批次返工计数 +1；**计数只数本次 `--continue` 内本批次的 FIX 次数**（不是所有历史运行的 `run.finished`——v03-b04 的实现跨全部历史累计，
   同一批次以前单批次模式跑过的 FIX 会把队列一上来就顶到 `fix_max`）；计数 ≤ `fix_max` 则立即重跑同批次
-  （attempt 递增、沿用首次 `base_sha`，11.7）；超过则按 BLOCK 处理并记 `escalated`（reason `fix_max`）；
+  （attempt 递增、沿用首次 `base_sha`，11.7）；超过则按 BLOCK 处理并记 `escalated`（reason `fix_max`），
+  这条路径上的 backlog 提交同样按 12.1 推送（13.10；v04-b07 前没有推）；
 - BLOCK / 上报 → 停下，退出码 20；backlog 状态改为 `blocked`。
 依赖未满足的批次跳过并记 `batch.skipped`；队列里没有可执行批次则记 `queue.finished`（reason `exhausted` 或 `escalated`）退出码 0 / 20。
 `--max N` 限制本次最多跑 N 个批次（缺省不限；数的是 PASS 的批次，FIX 重跑不计），到数记 `queue.finished`（reason `limit`）退出码 0。
 队列 journal（`q-` 运行目录）要能独立还原队列做了什么：每次拉起批次运行前记 `queue.batch_started`
-（字段 run_id / batch_id / attempt / why：`new` / `fix_retry` / `rule1_retry`），`queue.finished.batches` 改为对象数组
+（字段 batch_run_id / batch_id / attempt / why：`new` / `fix_retry` / `rule1_retry`；批次运行号不能叫 `run_id`，见 13.10），`queue.finished.batches` 改为对象数组
 `{batch_id, run_id, verdict}`。只有一行 `queue.finished` 且不带 run_id 的队列 journal（v03-b04）不够。
 run_id 格式：批次运行 `r-YYYYMMDDHHMMSS`、队列运行 `q-YYYYMMDDHHMMSS`，v03-b03 起不再有中间的 `-`；两种前缀都要被 `show` / `audit` 接受。
 每个批次结束后仍执行 11.3 的清理与 12.1 的推送；批次之间不共享任何进程，每个批次的 worker / reviewer / 守护进程都是新拉起的。
@@ -935,7 +941,8 @@ b04 与后续批次的汇报改成每批一个 `docs/ops/` 文件（见 AGENT_KI
 ## 13. v0.4 看见
 
 目标（ROADMAP 第 6 节）：一眼看懂「项目进展到哪了、现在在干什么、那批为什么挂了」。通过标准：不看源码、不翻原始日志，仅凭四个命令能说清每个批次的来龙去脉。
-本章只做追加：规则 1~10、放行判定、队列逻辑都不变，四个命令全部只读。五个批次：13.1 数据补齐，13.2 投影与 `status`，13.3 `timeline`，13.4 `why`，13.5 `watch`。
+本章只做追加：规则 1~10、放行判定、队列逻辑都不变，四个命令全部只读。原定五个批次：13.1 数据补齐，13.2 投影与 `status`，13.3 `timeline`，13.4 `why`，13.5 `watch`。
+第一次队列运行（2026-11-10）之后追加两个修补批次：13.9 环境故障（v04-b06），13.10 队列收尾（v04-b07）；这两个批次改的是 R2，不在「队列逻辑不变」之内。v04-b01 的裁定见 13.11。
 
 ### 13.1 观测数据补齐（v04-b01）
 
@@ -947,12 +954,13 @@ runner 没给的值不写，不写 0。
   （`input_tokens` / `output_tokens` / `cache_creation_input_tokens` / `cache_read_input_tokens`）；
   新增 `reviewer.finished`，在 reviewer 运行返回后、解析 verdict 之前记，字段 `exit_code` 加同一组运行级字段
   （规则 1 的路径上没有可用的 `reviewer.verdict`，所以不能挂在它上面）；`worker.started` 与 `reviewer.started` 追加 `model`，取自配置 `[agent.<role>].model`。
-  runner 接口：`RunResult` 加 `numTurns?` / `costUsd?` / `durationMs?`，`Usage` 加两个可选的缓存字段；`claude.ts` 从 SDK 结果消息取值，
-  类型按 11.2 从 SDK 导出派生，不手写；fake runner 能脚本化这些值。
+  runner 接口：`RunResult` 加 `numTurns?` / `costUsd?` / `durationMs?`，`Usage` 加两个可选的缓存字段；`claude.ts` 的轮数、花费、token 从 SDK 结果消息取值，
+  `duration_ms` 是 runner 自己量的墙钟，结果消息的形状沿用 `claude.ts` 里本地收窄的接口（v04-b01 的实现如此，13.11 裁定接受）；fake runner 能脚本化这些值。
 - **批次级**：新增 `evidence.collected`，R2 取证完成后记一次，字段 `commits`（提交数）/ `tests_passed` / `tests_failed`（取不到为 null）/
   `acceptance_passed` / `acceptance_total` / `spec_diff_lines` / `deps_diff`（条数）/ `remote_has_head`。
 - **裁定依据**：`run.finished` 追加 `rule`（1~10；上报路径没有规则时不写）与 `reason`（截断至 500 字）；
-  `reviewer.verdict` 追加 `gaps`（数组，至多 20 条，每条截断至 300 字）。
+  `reviewer.verdict` 追加 `gaps`（数组，至多 20 条，每条截断至 300 字）。verdict 可解析时总是写，没有缺口写空数组
+  （v04-b07；v04-b01 的实现在没有缺口时不写）。
 - 顺带清理：12.3 放行判定删去重复的 `protected` 一项；README 的状态行与铁律条数改成现状。
 
 覆盖率不在 v0.4 范围：项目没有测覆盖率，ROADMAP 第 6 节列的「覆盖率变化」等真有覆盖率数据时再加。
@@ -1012,10 +1020,72 @@ PASS 的批次同样可以问：列出放行依据，以及有没有 `queue.paus
 
 ### 13.7 验证
 
-v04 的五个批次用一次 `--continue --max 5` 跑完，同时是 ROADMAP 第 5 节 v0.3 的收口实验：数 `queue.paused` 与 BLOCK 的次数，逐个判断该不该打扰；零误放行才算过。
+v04 的批次用一次 `--continue` 连跑，同时是 ROADMAP 第 5 节 v0.3 的收口实验：数 `queue.paused` 与 BLOCK 的次数，逐个判断该不该打扰；零误放行才算过。
+第一次（2026-11-10，`--max 5`）只跑了 v04-b01 就因环境故障停下（13.11），收口实验没有做成；第二次从 v04-b02 起，`--max 6`。
 v0.4 自己的验证放在下一次队列运行：操作员不看源码、不翻原始日志，只用四个命令写出队列汇报；写不出来的每一处记为缺口，进下一个修补批次。
 
 ### 13.8 明确不做
 
 Web dashboard、指标聚合与告警、任何可观测框架（ROADMAP 第 6 节）；覆盖率；ADR 与发布节点；让四个命令写文件或调用模型。
+
+### 13.9 环境故障不当成 worker 的 FIX（v04-b06）
+
+来源：队列 q-20261110151133。操作员机器上 `ci.token_file` 指向的文件丢失，R2 按 3.1 的旧条文当作未配置、改用匿名查询，而匿名配额是 0；
+规则 9 把 PASS 降为 FIX（这一步是对的），队列又把它当成 worker 的 FIX 重跑了两次，最后以 `fix_max` 停下。两次重跑不可能改变结果。
+规则 9 本身不变：没有 CI 证据就不能 PASS。变的是下面两件事。
+
+**token 文件读不到就启动失败。** 配了 `ci.token_file`，但文件不存在、读不了或去掉空白后为空：
+- `collie run`（两种模式）在签发 task 之前退出，退出码 1，stderr 一行，含 `ci.token_file`、展开后的路径与原因；不签发 task、不拉起 worker。
+- `collie smoke` 先做同样的检查，再调用 runner（检查失败不花模型费用）；runner 通过后，用 token 对当前 `HEAD` 查一次 CI（`queryCi`，不等待）：
+  请求失败（认证、限流、网络）退出码 1 并打印原因，成功打印一行 `ci ok`；查不到运行不算失败。
+- 没配 `token_file` 时行为不变。
+- 读 token 的代码收成一处（现在 `evidence.ts` 与 `run.ts` 各有一份）；`.token_file` 仍只在这两个文件里访问（现有不变量）。报错、事件与输出里不得出现 token 内容。
+
+**证据取不到时标出原因，队列不重跑。** 规则 9 触发且下列任一成立时，R2 在 `verdict.downgraded` 上追加 `cause: "evidence_unavailable"` 与 `detail`（错误原文，截断至 300 字）：
+- 判断「已推送」时 `git fetch` 失败；
+- 查询 CI 的请求本身失败：限流、HTTP 错误、网络错误、响应不是合法 JSON；
+- 等待 CI 时最后一次轮询是 `rate_limited`。
+
+下列情况不算，照旧是普通的 FIX：CI 跑了但失败或被取消；CI 没有触发（`no_runs`）；等到 `ci_wait_secs` 仍是 `pending`；fetch 成功但远端没有 `head_sha`（worker 没推送）；分支不符。
+
+带 `cause` 的 FIX，结论与 progress 记录不变（仍是 FIX，退出码 10），单批次模式的总结行多写一句原因。`--continue` 下：
+- 不重跑，不计入 `fix_max`；
+- backlog 状态不动（仍是 `pending`），不记 `batch.status`；
+- 队列 journal 记 `escalated`（reason `evidence_unavailable`，带 batch_id）与 `queue.finished`（reason `evidence_unavailable`），退出码 20，
+  标准输出的总结行是 `queue: evidence_unavailable (...)`，stderr 一行写 `detail`。
+
+环境修好后再 `--continue`，该批次仍是队首，按 11.7 的 FIX 重跑语义再跑一次（attempt 递增）。不做「只重新取证、不拉 worker」的模式：为省一次便宜的重跑多一个运行模式，不值。
+
+### 13.10 队列收尾的三处（v04-b07）
+
+同一次队列运行暴露，都在 v03-b04-fix 的代码里。
+
+- **`queue.batch_started` 写错了 journal。** 12.2 把批次运行号这个字段也叫 `run_id`，与事件信封的键同名；`Recorder.record` 先写信封再展开扩展字段，
+  队列的 `run_id` 被覆盖，事件落进了批次的 `r-` journal，队列 journal 里一条都没有。修订：字段改名 `batch_run_id`（3.6、12.2 已同步）；
+  `Recorder.record` 遇到名为 `ts` / `run_id` / `event` 的扩展字段直接抛错。`queue.finished.batches[]` 里的 `run_id` 是嵌套对象的键，不受影响。
+  这是规格的错，不是实现的错：扩展字段的名字今后不得与信封键相同。
+- **`fix_max` 升级时的提交没有推送。** 这条路径把 backlog 状态改成 `blocked` 并提交，但没有走 12.1：提交后按 12.1 推送，
+  在队列 journal 记 `verdict.pushed` 或 `verdict.push_failed`。
+- **FIX 重跑的 task 说不清上一轮为什么 FIX。** 规则 9 的降级既没有 `gaps` 也没有失败的验收，「上一轮判 FIX」一节只剩提交清单，
+  worker 靠自己读 progress 才知道原因。修订：这一节加一个小节「降级原因」，写上一轮 `verdict.downgraded` 的规则号与 `reason`，有 `cause` / `detail` 时一并写；
+  提交清单只列 worker 的代码提交，按 11.7 的 R2 提交前缀排除，不原样采用 reviewer 自报的 `commits_actual`（v04-b01 的清单里混进了 `docs: issue` 的信封提交）。
+
+另：`reviewer.verdict` 的 `gaps` 在 verdict 可解析时总是写，没有缺口写空数组（13.1 已同步）。读 journal 的一方靠它区分「没有缺口」与「旧 journal 没有这个字段」。
+
+### 13.11 v04-b01 的裁定（2026-11-11）
+
+v04-b01 在队列 q-20261110151133 里三次都是：验收 10/10 通过、reviewer 判 PASS、规则 9 因 CI 证据取不到降为 FIX，随后 `fix_max` 停下，backlog 状态 `blocked`。
+所有者裁定：状态保持 `blocked`，代码提交 `7600a4c` / `89288a6` / `e0dcdcf` 采纳，不重跑；v04-b02 的依赖改为 v03-b04-fix。
+不重跑的原因：重跑要先把状态改回 `pending`，而 R1 在同一批次两次运行之间不得改受保护路径（AGENT_KICKOFF「R1 的约束」）。
+这次采纳**不是** R2 取到的证据。依据是 R1 的复核（lint 与类型检查通过、826 个测试通过、验收逐条通过、受保护路径零改动），
+以及 GitHub Actions 公开页面上 `e0dcdcf` 的 Run 178 成功。
+
+R1 复核发现的出入与处置：
+- `gaps` 在没有缺口时不写：v04-b07 改（13.10）。
+- `duration_ms` 由 runner 自己计时、结果消息的形状沿用本地收窄的接口：接受，13.1 已按实现修订。
+- `test/journal-fields.test.ts` 在 `beforeAll` 里跑完整一轮，而钩子超时是 vitest 默认的 10 秒（测试超时是 30 秒）。有负载的机器上钩子会超时，
+  该文件 7 个用例全部跳过、`npm test` 失败：R1 的机器上，默认超时下 9 次全量运行有 3 次如此，把钩子超时放到 30 秒后的 5 次没有再出现。
+  v04-b02 把 `hookTimeout` 设成与 `testTimeout` 相同。
+- 同一时段 R1 的机器上另有 4 次零散失败（`scenario-a`、`scenario-l` 各 1 次，`cli.test` 2 次，都是期望的退出码变成了 20），与钩子超时无关，
+  单独跑这些文件不复现，原因没有查清。操作员机器与 GitHub 的 CI 上至今没有出现过。先观察，不签批次。
 

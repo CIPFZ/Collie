@@ -214,6 +214,10 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
   https 凭据一失效（全局 `credential.helper store` 里的旧凭据）fetch 就 401，`remote_has_head` 变 false，规则 9 直接 FIX，
   CI 也不会去查（2026-10-23 e-fix 开跑前发现）。开跑前的自检加一条：`git fetch --quiet origin` 应在 5 秒内成功。
 - 不要用全局环境变量改 remote 或 git 配置（会污染测试里的临时仓库）。
+- 开跑前确认 `ci.token_file` 指向的文件还在、认证有效（2026-11-10：整个 `~/.config/collie/` 丢失，R2 悄悄退回匿名接口，一个批次白跑三次后 `fix_max`）。
+  两步都不要把 token 打印出来：`test -s ~/.config/collie/github-token`；
+  `curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $(cat ~/.config/collie/github-token)" "https://api.github.com/repos/CIPFZ/Collie/actions/runs?per_page=1"` 应输出 200。
+  任一步不对就停下报告，不开跑。v04-b06 生效后 `collie smoke` 会自己查（SPEC 13.9）。
 
 ## 第一步
 
