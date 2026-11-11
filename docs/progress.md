@@ -791,4 +791,16 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b04 · r-20261111055746 · BLOCK
+
+- 时间：2026-11-11T06:12:51.660Z
+- 裁定：上报：无 report — no valid report: /data/workspace/Collie/.collie/batches/v04-b04/report.md: cannot read report: ENOENT: no such file or directory, open '/data/workspace/Collie/.collie/batches/v04-b04/report.md'
+- 提交：`5607c85`
+- 验收命令：0/0 通过
+- 已推送：否
+- CI：unknown，监听分支未能取证
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0（idling）
 <!-- collie:runs:end -->
