@@ -286,9 +286,6 @@ export function projectQueueRun(events: readonly Event[]): QueueProjection {
   };
 }
 
-/* eslint-disable-next-line no-restricted-syntax -- unit conversion, not a threshold */
-const MS_PER_SECOND = 1000;
-
 /**
  * SPEC 13.2: builds the status view.
  * `now` is passed in so the function stays pure / testable.
@@ -401,6 +398,244 @@ export function buildStatus(
 }
 
 // ---------------------------------------------------------------------------
+// Layer 2: Timeline projection (SPEC 13.3)
+// ---------------------------------------------------------------------------
+
+/** The kind of each node in the project timeline. */
+export type TimelineNodeKind =
+  'batch_start' | 'run_end' | 'batch_status' | 'queue_start' | 'queue_paused' | 'queue_end';
+
+/** A single node in the project timeline (SPEC 13.3). */
+export interface TimelineNode {
+  ts: string;
+  kind: TimelineNodeKind;
+  batchId: string | null;
+  runId: string | null;
+  /** Extra detail varies by kind. */
+  detail: Record<string, string | number | null>;
+}
+
+/** Version summary for --by version (SPEC 13.3). */
+export interface VersionSummary {
+  version: string;
+  firstStart: string | null;
+  lastEnd: string | null;
+  batchCount: number;
+  runCount: number;
+  fixCount: number;
+  blockCount: number;
+  totalCostUsd: number;
+  runsWithoutCost: number;
+}
+
+/**
+ * SPEC 13.3: projects a flat, time-sorted list of timeline nodes from all runs.
+ * Node kinds:
+ *   - batch_start: first time a batch's run.started is seen
+ *   - run_end: each run.finished (verdict, attempt, duration)
+ *   - batch_status: batch.status change
+ *   - queue_start: queue run run.started
+ *   - queue_paused: queue.paused
+ *   - queue_end: queue.finished
+ */
+export function projectTimeline(runDataList: readonly RunData[]): TimelineNode[] {
+  const nodes: TimelineNode[] = [];
+  const batchFirstSeen = new Set<string>();
+
+  for (const rd of runDataList) {
+    if (rd.status !== 'ok') continue;
+    const isQueue = rd.runId.startsWith('q-');
+
+    for (const e of rd.events) {
+      // Batch first start: the first run.started we see for a given batch_id.
+      if (e.event === 'run.started' && !isQueue) {
+        const bid = asString(e.batch_id);
+        if (bid !== null && !batchFirstSeen.has(bid)) {
+          batchFirstSeen.add(bid);
+          nodes.push({ ts: e.ts, kind: 'batch_start', batchId: bid, runId: e.run_id, detail: {} });
+        }
+      }
+
+      // Each run end.
+      if (e.event === 'run.finished' && !isQueue) {
+        const bid = asString(e.batch_id);
+        const verdict = asString(e.verdict);
+        const attempt = asNumber(e.attempt);
+        // Look up worker.finished for duration in the same run.
+        const wf = rd.events.find((ev) => ev.event === 'worker.finished');
+        const durationMs = wf !== undefined ? asNumber(wf.duration_ms) : null;
+        const costUsd = wf !== undefined ? asNumber(wf.cost_usd) : null;
+        nodes.push({
+          ts: e.ts,
+          kind: 'run_end',
+          batchId: bid,
+          runId: e.run_id,
+          detail: { verdict, attempt, durationMs, costUsd },
+        });
+      }
+
+      // batch.status change (queue events).
+      if (e.event === 'batch.status') {
+        const bid = asString(e.batch_id);
+        const from = asString(e.from);
+        const to = asString(e.to);
+        nodes.push({
+          ts: e.ts,
+          kind: 'batch_status',
+          batchId: bid,
+          runId: e.run_id,
+          detail: { from, to },
+        });
+      }
+
+      // Queue run start.
+      if (e.event === 'run.started' && isQueue) {
+        nodes.push({
+          ts: e.ts,
+          kind: 'queue_start',
+          batchId: null,
+          runId: e.run_id,
+          detail: {},
+        });
+      }
+
+      // Queue paused.
+      if (e.event === 'queue.paused') {
+        const bid = asString(e.batch_id);
+        const reasons = Array.isArray(e.reasons)
+          ? (e.reasons as unknown[]).filter((r): r is string => typeof r === 'string').join(', ')
+          : null;
+        nodes.push({
+          ts: e.ts,
+          kind: 'queue_paused',
+          batchId: bid,
+          runId: e.run_id,
+          detail: { reasons },
+        });
+      }
+
+      // Queue finished.
+      if (e.event === 'queue.finished') {
+        const reason = asString(e.reason);
+        nodes.push({
+          ts: e.ts,
+          kind: 'queue_end',
+          batchId: null,
+          runId: e.run_id,
+          detail: { reason },
+        });
+      }
+    }
+  }
+
+  // Sort ascending by timestamp.
+  nodes.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  return nodes;
+}
+
+/**
+ * Extracts the version prefix from a batch_id, e.g. "v03-b04" → "v03".
+ * Returns null if the format doesn't match.
+ */
+function versionPrefix(batchId: string): string | null {
+  const match = /^(v\d+)-/.exec(batchId);
+  return match?.[1] ?? null;
+}
+
+/**
+ * SPEC 13.3 --by version: groups timeline nodes by version prefix and summarises.
+ * Runs without cost data are not counted towards totalCostUsd and are noted via runsWithoutCost.
+ */
+export function projectVersionSummary(nodes: readonly TimelineNode[]): VersionSummary[] {
+  const map = new Map<
+    string,
+    {
+      firstStart: string | null;
+      lastEnd: string | null;
+      batches: Set<string>;
+      runCount: number;
+      fixCount: number;
+      blockCount: number;
+      totalCostUsd: number;
+      runsWithoutCost: number;
+    }
+  >();
+
+  function getOrCreate(ver: string) {
+    let entry = map.get(ver);
+    if (entry === undefined) {
+      entry = {
+        firstStart: null,
+        lastEnd: null,
+        batches: new Set<string>(),
+        runCount: 0,
+        fixCount: 0,
+        blockCount: 0,
+        totalCostUsd: 0,
+        runsWithoutCost: 0,
+      };
+      map.set(ver, entry);
+    }
+    return entry;
+  }
+
+  for (const node of nodes) {
+    const bid = node.batchId;
+    if (bid === null) continue;
+    const ver = versionPrefix(bid);
+    if (ver === null) continue;
+    const entry = getOrCreate(ver);
+    entry.batches.add(bid);
+
+    if (node.kind === 'batch_start') {
+      if (entry.firstStart === null || node.ts < entry.firstStart) {
+        entry.firstStart = node.ts;
+      }
+    }
+
+    if (node.kind === 'run_end') {
+      entry.runCount++;
+      if (entry.lastEnd === null || node.ts > entry.lastEnd) {
+        entry.lastEnd = node.ts;
+      }
+      const verdict = node.detail.verdict;
+      if (verdict === 'FIX') entry.fixCount++;
+      if (verdict === 'BLOCK') entry.blockCount++;
+      const cost = node.detail.costUsd;
+      if (typeof cost === 'number') {
+        entry.totalCostUsd += cost;
+      } else {
+        entry.runsWithoutCost++;
+      }
+    }
+  }
+
+  // Sort by version prefix.
+  const versions = [...map.keys()].sort();
+  return versions.map((ver) => {
+    const e = map.get(ver)!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- guaranteed by loop
+    return {
+      version: ver,
+      firstStart: e.firstStart,
+      lastEnd: e.lastEnd,
+      batchCount: e.batches.size,
+      runCount: e.runCount,
+      fixCount: e.fixCount,
+      blockCount: e.blockCount,
+      totalCostUsd: e.totalCostUsd,
+      runsWithoutCost: e.runsWithoutCost,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Text formatting helpers (shared)
+// ---------------------------------------------------------------------------
+
+/* eslint-disable-next-line no-restricted-syntax -- unit conversion, not a threshold */
+const MS_PER_SECOND = 1000;
+
+// ---------------------------------------------------------------------------
 // Text formatting for `collie status`
 // ---------------------------------------------------------------------------
 
@@ -472,5 +707,75 @@ export function formatStatus(status: StatusView): string {
   }
   lines.push('');
 
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Text formatting for `collie timeline` (SPEC 13.3)
+// ---------------------------------------------------------------------------
+
+/** SPEC 13.3: fixed footer line for timeline output. */
+const TIMELINE_FOOTER = 'ADR approvals and releases are in `git log`.';
+
+/* eslint-disable-next-line no-restricted-syntax -- display precision for USD, not a threshold */
+const COST_DECIMALS = 2;
+
+function formatTimelineNode(node: TimelineNode): string {
+  const ts = node.ts;
+  switch (node.kind) {
+    case 'batch_start':
+      return `${ts}  batch_start  ${dash(node.batchId)}`;
+    case 'run_end': {
+      const v = dash(node.detail.verdict);
+      const a = dash(node.detail.attempt);
+      const d = formatDuration(
+        typeof node.detail.durationMs === 'number' ? node.detail.durationMs : null,
+      );
+      const c =
+        typeof node.detail.costUsd === 'number'
+          ? `$${node.detail.costUsd.toFixed(COST_DECIMALS)}`
+          : '—';
+      return `${ts}  run_end      ${dash(node.batchId)} ${dash(node.runId)} ${v} attempt=${a} ${d} ${c}`;
+    }
+    case 'batch_status':
+      return `${ts}  batch_status ${dash(node.batchId)} ${dash(node.detail.from)} → ${dash(node.detail.to)}`;
+    case 'queue_start':
+      return `${ts}  queue_start  ${dash(node.runId)}`;
+    case 'queue_paused':
+      return `${ts}  queue_paused ${dash(node.batchId)} reasons=${dash(node.detail.reasons)}`;
+    case 'queue_end':
+      return `${ts}  queue_end    ${dash(node.runId)} reason=${dash(node.detail.reason)}`;
+  }
+}
+
+/** Formats timeline nodes as human-readable text with the fixed footer. */
+export function formatTimeline(nodes: readonly TimelineNode[]): string {
+  const lines = nodes.map(formatTimelineNode);
+  lines.push('');
+  lines.push(TIMELINE_FOOTER);
+  lines.push('');
+  return lines.join('\n');
+}
+
+/** Formats version summary as human-readable text with the fixed footer. */
+export function formatVersionSummary(summaries: readonly VersionSummary[]): string {
+  const lines: string[] = [];
+  for (const s of summaries) {
+    lines.push(`${s.version}:`);
+    lines.push(`  first: ${dash(s.firstStart)}  last: ${dash(s.lastEnd)}`);
+    lines.push(
+      `  batches: ${String(s.batchCount)}  runs: ${String(s.runCount)}  FIX: ${String(s.fixCount)}  BLOCK: ${String(s.blockCount)}`,
+    );
+    if (s.runsWithoutCost > 0) {
+      lines.push(
+        `  cost: $${s.totalCostUsd.toFixed(COST_DECIMALS)} (${String(s.runsWithoutCost)} run(s) without cost data)`,
+      );
+    } else {
+      lines.push(`  cost: $${s.totalCostUsd.toFixed(COST_DECIMALS)}`);
+    }
+  }
+  lines.push('');
+  lines.push(TIMELINE_FOOTER);
+  lines.push('');
   return lines.join('\n');
 }

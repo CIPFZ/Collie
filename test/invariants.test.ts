@@ -283,4 +283,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(content).not.toMatch(/from '\.\/runner[./]/);
     expect(content).not.toMatch(/from '\.\/roles[./]/);
   });
+
+  it('src/cli.ts contains the timeline command (v04-b03)', () => {
+    const content = readFileSync(join(ROOT, 'src/cli.ts'), 'utf8');
+    expect(content).toContain('timeline');
+  });
 });

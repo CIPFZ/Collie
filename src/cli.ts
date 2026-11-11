@@ -18,7 +18,15 @@ import { EXIT_CODES, readEnvelope, REVIEWER_STREAM_FILE_NAME, runBatch, runQueue
 import { ClaudeRunner } from './runner/claude.js';
 import type { AgentRunner } from './runner/index.js';
 import { RunIdSchema, type Event } from './schema/index.js';
-import { buildStatus, formatStatus, loadRuns } from './view.js';
+import {
+  buildStatus,
+  formatStatus,
+  formatTimeline,
+  formatVersionSummary,
+  loadRuns,
+  projectTimeline,
+  projectVersionSummary,
+} from './view.js';
 
 /** How `collie run` obtains its runner (SPEC 5: default is the real one). */
 export type RunnerChoice =
@@ -500,6 +508,57 @@ function status(deps: CliDeps, json: boolean): number {
   return EXIT_CODES.PASS;
 }
 
+/**
+ * SPEC 13.3: `collie timeline [--since <date>] [--batch <prefix>] [--by version] [--json]`.
+ * Project timeline: time-ordered nodes. No journal → "no runs recorded", exit 0.
+ */
+function timeline(
+  deps: CliDeps,
+  opts: { since?: string; batch?: string; by?: string; json?: boolean },
+): number {
+  const runDataList = loadRuns(deps.cwd);
+  if (runDataList.length === 0) {
+    if (opts.json === true) {
+      deps.out(JSON.stringify({ message: 'no runs recorded' }) + '\n');
+    } else {
+      deps.out('no runs recorded\n');
+    }
+    return EXIT_CODES.PASS;
+  }
+
+  let nodes = projectTimeline(runDataList);
+
+  // Apply --since filter.
+  if (opts.since !== undefined) {
+    const sinceDate = opts.since;
+    nodes = nodes.filter((n) => n.ts >= sinceDate);
+  }
+
+  // Apply --batch filter (prefix match on batchId).
+  if (opts.batch !== undefined) {
+    const prefix = opts.batch;
+    nodes = nodes.filter((n) => n.batchId?.startsWith(prefix) === true);
+  }
+
+  if (opts.by === 'version') {
+    const summaries = projectVersionSummary(nodes);
+    if (opts.json === true) {
+      // eslint-disable-next-line no-restricted-syntax, @typescript-eslint/no-magic-numbers -- standard JSON indent
+      deps.out(JSON.stringify(summaries, null, 2) + '\n');
+    } else {
+      deps.out(formatVersionSummary(summaries));
+    }
+  } else {
+    if (opts.json === true) {
+      // eslint-disable-next-line no-restricted-syntax, @typescript-eslint/no-magic-numbers -- standard JSON indent
+      deps.out(JSON.stringify(nodes, null, 2) + '\n');
+    } else {
+      deps.out(formatTimeline(nodes));
+    }
+  }
+  return EXIT_CODES.PASS;
+}
+
 /** Parses argv (without node and script) and runs one command; resolves with the exit code. */
 export async function main(argv: readonly string[], deps: CliDeps): Promise<number> {
   let code: number = EXIT_CODES.ERROR;
@@ -604,6 +663,16 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
     .option('--json', 'output as JSON')
     .action((opts: { json?: boolean }) => {
       code = status(deps, opts.json === true);
+    });
+  program
+    .command('timeline')
+    .description('project timeline: time-ordered nodes for batches, runs, queues (SPEC 13.3)')
+    .option('--since <date>', 'show only nodes at or after this ISO date')
+    .option('--batch <prefix>', 'filter nodes by batch_id prefix')
+    .option('--by <mode>', 'group mode: "version" to summarise by version prefix')
+    .option('--json', 'output as JSON')
+    .action((opts: { since?: string; batch?: string; by?: string; json?: boolean }) => {
+      code = timeline(deps, opts);
     });
 
   try {
