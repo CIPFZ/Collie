@@ -27,6 +27,7 @@ import {
   projectTimeline,
   projectVersionSummary,
 } from './view.js';
+import { DEFAULT_INTERVAL_SECS, watch } from './watch.js';
 
 /** How `collie run` obtains its runner (SPEC 5: default is the real one). */
 export type RunnerChoice =
@@ -56,6 +57,8 @@ export interface CliDeps {
   livenessSetTimer?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>;
   /** Test hook: injected fingerprint function for the liveness monitor (SPEC 11.5, v02-b04-fix). */
   livenessFingerprint?: (root: string) => Promise<string>;
+  /** Test hook: injected sleep for `collie watch` (SPEC 13.5). */
+  watchSleep?: (ms: number) => Promise<void>;
 }
 
 const TEMPLATE = join(import.meta.dirname, '..', 'templates', 'collie.toml');
@@ -559,6 +562,51 @@ function timeline(
   return EXIT_CODES.PASS;
 }
 
+/** Real elapsed-time sleep for `collie watch` (SPEC 13.5); tests inject one. */
+const realSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+/**
+ * SPEC 13.5: `collie watch [--once] [--interval <secs>] [--timeout <secs>]`.
+ * Wiring only; the loop lives in src/watch.ts. Read-only: no journal writes,
+ * no heartbeat, no signals.
+ */
+async function watchCommand(
+  deps: CliDeps,
+  opts: { once?: boolean; interval?: number; timeout?: number },
+): Promise<number> {
+  const intervalSecs = opts.interval ?? DEFAULT_INTERVAL_SECS;
+  if (!Number.isFinite(intervalSecs) || intervalSecs <= 0) {
+    deps.err('--interval must be a positive number of seconds\n');
+    return EXIT_CODES.ERROR;
+  }
+  const timeoutSecs = opts.timeout;
+  if (timeoutSecs !== undefined && (!Number.isFinite(timeoutSecs) || timeoutSecs <= 0)) {
+    deps.err('--timeout must be a positive number of seconds\n');
+    return EXIT_CODES.ERROR;
+  }
+  let stallSecs: number;
+  try {
+    stallSecs = loadConfig(deps.cwd).limits.stall_secs;
+  } catch (error) {
+    deps.err(`collie: ${error instanceof Error ? error.message : String(error)}\n`);
+    return EXIT_CODES.ERROR;
+  }
+  return watch({
+    root: deps.cwd,
+    once: opts.once === true,
+    intervalSecs,
+    timeoutSecs: timeoutSecs ?? null,
+    stallSecs,
+    now: deps.now,
+    sleep: deps.watchSleep ?? realSleep,
+    load: loadRuns,
+    out: deps.out,
+  });
+}
+
 /** Parses argv (without node and script) and runs one command; resolves with the exit code. */
 export async function main(argv: readonly string[], deps: CliDeps): Promise<number> {
   let code: number = EXIT_CODES.ERROR;
@@ -673,6 +721,15 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
     .option('--json', 'output as JSON')
     .action((opts: { since?: string; batch?: string; by?: string; json?: boolean }) => {
       code = timeline(deps, opts);
+    });
+  program
+    .command('watch')
+    .description('follow the running journal live, one line per new event (SPEC 13.5)')
+    .option('--once', 'print the current frame and exit')
+    .option('--interval <secs>', 'polling interval in seconds', parseInt)
+    .option('--timeout <secs>', 'exit 0 after this many seconds', parseInt)
+    .action(async (opts: { once?: boolean; interval?: number; timeout?: number }) => {
+      code = await watchCommand(deps, opts);
     });
 
   try {

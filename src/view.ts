@@ -654,29 +654,34 @@ function formatDuration(ms: number | null): string {
   return mins > 0 ? `${String(mins)}m${String(secs)}s` : `${String(secs)}s`;
 }
 
+/**
+ * Formats only the `status` current section (SPEC 13.2). `collie watch` prints
+ * this frame on phase changes (SPEC 13.5).
+ */
+export function formatCurrentSection(current: CurrentStatus): string {
+  const lines: string[] = ['== current =='];
+  if (current.state === 'running') {
+    lines.push(
+      `running: ${dash(current.batchId)} (${dash(current.runId)}) attempt ${dash(current.attempt)} phase ${dash(current.phase)}`,
+    );
+    lines.push(
+      `  elapsed ${formatDuration(current.elapsedMs)} since-last ${formatDuration(current.sinceLast)}`,
+    );
+  } else if (current.lastRunId !== null) {
+    lines.push(`idle (last: ${current.lastRunId} ${dash(current.lastVerdict)})`);
+  } else {
+    lines.push('idle');
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
 /** Formats the status as human-readable text (SPEC 13.2). */
 export function formatStatus(status: StatusView): string {
   const lines: string[] = [];
 
-  // Current section.
-  lines.push('== current ==');
-  if (status.current.state === 'running') {
-    const c = status.current;
-    lines.push(
-      `running: ${dash(c.batchId)} (${dash(c.runId)}) attempt ${dash(c.attempt)} phase ${dash(c.phase)}`,
-    );
-    lines.push(
-      `  elapsed ${formatDuration(c.elapsedMs)} since-last ${formatDuration(c.sinceLast)}`,
-    );
-  } else {
-    const c = status.current;
-    if (c.lastRunId !== null) {
-      lines.push(`idle (last: ${c.lastRunId} ${dash(c.lastVerdict)})`);
-    } else {
-      lines.push('idle');
-    }
-  }
-  lines.push('');
+  // Current section (shared with `collie watch`, SPEC 13.5).
+  lines.push(formatCurrentSection(status.current));
 
   // Queue section.
   lines.push('== queue ==');
