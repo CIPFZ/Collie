@@ -18,6 +18,7 @@ import { EXIT_CODES, readEnvelope, REVIEWER_STREAM_FILE_NAME, runBatch, runQueue
 import { ClaudeRunner } from './runner/claude.js';
 import type { AgentRunner } from './runner/index.js';
 import { RunIdSchema, type Event } from './schema/index.js';
+import { buildStatus, formatStatus, loadRuns } from './view.js';
 
 /** How `collie run` obtains its runner (SPEC 5: default is the real one). */
 export type RunnerChoice =
@@ -468,6 +469,33 @@ function audit(deps: CliDeps, runId: string): number {
   return AUDIT_EXIT.MISMATCH;
 }
 
+/**
+ * SPEC 13.2: `collie status [--json]`. Three sections: current, queue, last queue run.
+ * No journal at all → print "no runs recorded" and exit 0.
+ */
+function status(deps: CliDeps, json: boolean): number {
+  const runDataList = loadRuns(deps.cwd);
+  if (runDataList.length === 0) {
+    deps.out('no runs recorded\n');
+    return EXIT_CODES.PASS;
+  }
+  let batches: readonly { id: string; title: string; status: string; depends_on: string[] }[];
+  try {
+    batches = loadBacklog(deps.cwd);
+  } catch {
+    // If backlog is unavailable, still show what we can with an empty batch list.
+    batches = [];
+  }
+  const view = buildStatus(runDataList, batches, deps.now());
+  if (json) {
+    // eslint-disable-next-line no-restricted-syntax, @typescript-eslint/no-magic-numbers -- standard JSON indent
+    deps.out(JSON.stringify(view, null, 2) + '\n');
+  } else {
+    deps.out(formatStatus(view));
+  }
+  return EXIT_CODES.PASS;
+}
+
 /** Parses argv (without node and script) and runs one command; resolves with the exit code. */
 export async function main(argv: readonly string[], deps: CliDeps): Promise<number> {
   let code: number = EXIT_CODES.ERROR;
@@ -565,6 +593,13 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
     .argument('<run_id>')
     .action((runId: string) => {
       code = audit(deps, runId);
+    });
+  program
+    .command('status')
+    .description('show current run, queue state, and last queue run (SPEC 13.2)')
+    .option('--json', 'output as JSON')
+    .action((opts: { json?: boolean }) => {
+      code = status(deps, opts.json === true);
     });
 
   try {

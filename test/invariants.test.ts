@@ -275,4 +275,12 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/gate.ts'), 'utf8');
     expect(content).not.toContain('protectedDiffLines');
   });
+
+  it('src/view.ts does not import run.ts, runner/, or roles/ (v04-b02)', () => {
+    const content = readFileSync(join(ROOT, 'src/view.ts'), 'utf8');
+    // SPEC 13.2: projection module must not depend on runtime execution modules.
+    expect(content).not.toMatch(/from '\.\/run[./]/);
+    expect(content).not.toMatch(/from '\.\/runner[./]/);
+    expect(content).not.toMatch(/from '\.\/roles[./]/);
+  });
 });
