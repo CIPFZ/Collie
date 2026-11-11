@@ -333,4 +333,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'test/view-real.test.ts'), 'utf8');
     expect(content).toContain('Sandbox.create');
   });
+
+  it('src/cli.ts contains the why command (v04-b09)', () => {
+    const content = readFileSync(join(ROOT, 'src/cli.ts'), 'utf8');
+    expect(content).toContain('why');
+  });
 });
