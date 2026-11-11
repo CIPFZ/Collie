@@ -724,4 +724,27 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b02 · r-20261111051219 · FIX
+
+- 时间：2026-11-11T05:33:31.442Z
+- 裁定：规则 10，11 条验收命令中第 9 条（status --json 输出合法 JSON）失败：无 journal 时 --json 仍输出纯文本。其余 10 条全部通过。CI 以 R2 取证为准。
+- 提交：`23da11e`
+- 验收命令：10/11 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，846 passed, 0 failed
+  - `npm test -- test/view.test.ts` → exit 0，15 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/view.test.ts | grep -qE "^([8-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `test -f src/view.ts && ! grep -qE "from '\./(run|runner|roles)[./]" src/view.ts` → exit 0，exit 0
+  - `grep -qE "unreadable" src/view.ts && grep -qE "unreadable" test/view.test.ts` → exit 0，exit 0
+  - `npx tsx src/cli.ts status` → exit 0，no runs recorded
+  - `npx tsx src/cli.ts status --json | node -e "JSON.parse(require('fs').readFileSync(0,'utf8'))"` → exit 1，Node.js v22.23.2
+  - `grep -qE "view\.ts" test/invariants.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" vitest.config.ts | grep -qE "hookTimeout"` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/42965833013
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
