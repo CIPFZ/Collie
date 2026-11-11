@@ -908,4 +908,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b10 · r-20261111113528 · PASS
+
+- 时间：2026-11-11T11:56:17.694Z
+- 裁定：规则 10，All 9 acceptance commands pass. All 3 task conditions implemented correctly: interrupt auto-retry with proper guard (idling/stalled/wallclock only, one retry per batch per session), acceptance.failed now recorded for all R2-measured failures regardless of verdict, queue.gate_passed recorded after gate passes. 6 scenario N tests cover all behavioral requirements and pass. No protected files modified, no dependency changes, no scope creep. CI 以 R2 取证为准。
+- 提交：`76f7693`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，922 passed, 0 failed
+  - `npm test -- test/scenario-n.test.ts` → exit 0，6 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/scenario-n.test.ts | grep -qE "^([6-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `test -f test/scenario-n.test.ts && ! grep -qE "setInterval|setTimeout\(" test/scenario-n.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "interrupt_retry" && grep -qE "interrupt_retry" test/scenario-n.test.ts` → exit 0，exit 0
+  - `grep -qE "queue\.gate_passed" src/schema/index.ts && grep -qE "queue\.gate_passed" test/scenario-n.test.ts` → exit 0，exit 0
+  - `grep -qE "queue\.gate_passed" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43014935559
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->

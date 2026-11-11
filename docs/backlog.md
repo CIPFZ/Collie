@@ -56,7 +56,7 @@
 | 36 | v04-b07 | 队列收尾：queue.batch_started 归位、fix_max 提交推送、FIX 重跑写明降级原因 | v04-b06 | passed |
 | 37 | v04-b08 | 投影取值修补：attempt 按 R2 口径推算、运行用时、花费缺数据、空数据的 --json | v04-b03 | passed |
 | 38 | v04-b09 | collie why：按 attempt 摊开证据链（重签 v04-b04） | v04-b08 | passed |
-| 39 | v04-b10 | 队列里的中断自动续跑一次、验收失败全记、放行留痕 | v04-b07 | pending |
+| 39 | v04-b10 | 队列里的中断自动续跑一次、验收失败全记、放行留痕 | v04-b07 | passed |
 | 40 | v04-b11 | R2 的后台 git 读取不抢索引锁 | v04-b10 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
