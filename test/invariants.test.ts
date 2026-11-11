@@ -306,4 +306,11 @@ describe('structural invariants (SPEC 3.2)', () => {
     // SPEC 13.9: environment fault handling — evidence_unavailable cause in code.
     expect(content).toContain('evidence_unavailable');
   });
+
+  it('src/run.ts contains batch_run_id in queue.batch_started recording (v04-b07)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    // SPEC 13.10: queue.batch_started uses batch_run_id, not run_id (which would
+    // collide with the event envelope key).
+    expect(content).toContain('batch_run_id');
+  });
 });
