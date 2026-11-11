@@ -845,4 +845,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b07 · r-20261111102121 · PASS
+
+- 时间：2026-11-11T10:45:09.237Z
+- 裁定：规则 10，All 9 acceptance commands pass (exit 0). All 3 task items implemented correctly: batch_run_id field rename in queue.batch_started, Recorder envelope key guard, allBatchEvents q- journal exclusion, fix_max push with verdict.pushed/push_failed, 降级原因 subsection in FIX rerun task, gaps always present as empty array. 8 queue-journal tests pass, invariants test updated, cli fixture synced. No protected files modified, no new dependencies. CI 以 R2 取证为准。
+- 提交：`23a5a01` `c35425a`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，891 passed, 0 failed
+  - `npm test -- test/queue-journal.test.ts` → exit 0，8 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/queue-journal.test.ts | grep -qE "^([7-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `grep -qE "interrupted_at" test/queue-journal.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "batch_run_id" && grep -qE "batch_run_id" test/queue-journal.test.ts` → exit 0，exit 0
+  - `grep -rqE "降级原因" src && grep -qE "降级原因" test/queue-journal.test.ts` → exit 0，exit 0
+  - `grep -qE "batch_run_id" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43005269109
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
