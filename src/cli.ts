@@ -30,9 +30,11 @@ import {
   formatStatus,
   formatTimeline,
   formatVersionSummary,
+  formatWhy,
   loadRuns,
   projectTimeline,
   projectVersionSummary,
+  projectWhy,
 } from './view.js';
 import { DEFAULT_INTERVAL_SECS, watch } from './watch.js';
 
@@ -478,6 +480,11 @@ async function smoke(deps: CliDeps, runnerChoice?: RunnerChoice): Promise<number
 export const AUDIT_EXIT = { MATCH: 0, MISMATCH: 1, NO_DATA: 2 } as const;
 /* eslint-enable no-restricted-syntax, @typescript-eslint/no-magic-numbers */
 
+/* eslint-disable no-restricted-syntax, @typescript-eslint/no-magic-numbers -- why-specific exit codes (SPEC 13.4) */
+/** Exit codes for `collie why` (SPEC 13.4). */
+export const WHY_EXIT = { HAS_DATA: 0, NOT_IN_BACKLOG: 1, NO_JOURNAL: 2 } as const;
+/* eslint-enable no-restricted-syntax, @typescript-eslint/no-magic-numbers */
+
 /**
  * `collie audit <run_id>`: reads reviewer.stream.ndjson, extracts the init
  * message's tool list, compares it with the reviewer whitelist from config.
@@ -624,6 +631,42 @@ function timeline(
     }
   }
   return EXIT_CODES.PASS;
+}
+
+/**
+ * SPEC 13.4: `collie why <batch_id> [--attempt <n>] [--json]`.
+ * Evidence chain per attempt. Only reads journal, does not call model or read envelopes.
+ * Exit 0 = data, 1 = not in backlog, 2 = in backlog but no journal.
+ */
+function why(deps: CliDeps, batchId: string, opts: { attempt?: number; json?: boolean }): number {
+  // Check if batch is in backlog.
+  let batches: readonly { id: string }[];
+  try {
+    batches = loadBacklog(deps.cwd);
+  } catch {
+    batches = [];
+  }
+  const inBacklog = batches.some((b) => b.id === batchId);
+  if (!inBacklog) {
+    deps.err(`batch ${batchId} is not in docs/backlog.md\n`);
+    return WHY_EXIT.NOT_IN_BACKLOG;
+  }
+
+  // Load runs and project.
+  const runDataList = loadRuns(deps.cwd);
+  const proj = projectWhy(runDataList, batchId, opts.attempt);
+  if (proj === null) {
+    deps.err(`batch ${batchId} is in backlog but has no journal data on this machine\n`);
+    return WHY_EXIT.NO_JOURNAL;
+  }
+
+  if (opts.json === true) {
+    // eslint-disable-next-line no-restricted-syntax, @typescript-eslint/no-magic-numbers -- standard JSON indent
+    deps.out(JSON.stringify(proj, null, 2) + '\n');
+  } else {
+    deps.out(formatWhy(proj));
+  }
+  return WHY_EXIT.HAS_DATA;
 }
 
 /** Real elapsed-time sleep for `collie watch` (SPEC 13.5); tests inject one. */
@@ -794,6 +837,15 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
     .option('--timeout <secs>', 'exit 0 after this many seconds', parseInt)
     .action(async (opts: { once?: boolean; interval?: number; timeout?: number }) => {
       code = await watchCommand(deps, opts);
+    });
+  program
+    .command('why')
+    .description('evidence chain per attempt for a batch (SPEC 13.4)')
+    .argument('<batch_id>')
+    .option('--attempt <n>', 'show only the given attempt number', parseInt)
+    .option('--json', 'output as JSON')
+    .action((batchId: string, opts: { attempt?: number; json?: boolean }) => {
+      code = why(deps, batchId, opts);
     });
 
   try {

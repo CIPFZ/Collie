@@ -808,6 +808,493 @@ export function formatTimeline(nodes: readonly TimelineNode[]): string {
   return lines.join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// Why projection (SPEC 13.4)
+// ---------------------------------------------------------------------------
+
+/** One attempt's evidence chain for `collie why`. */
+export interface WhyAttempt {
+  attempt: number;
+  runId: string;
+  started: string | null;
+  finished: string | null;
+
+  /** 1. Worker ending: exit code, stop_reason, turns, cost (SPEC 13.4 order). */
+  worker: {
+    exitCode: number | null;
+    stopReason: string | null;
+    turns: number | null;
+    costUsd: number | null;
+  } | null;
+
+  /** 2. Evidence summary from evidence.collected (SPEC 13.1). */
+  evidence: Record<string, unknown> | null;
+
+  /** 3. Each acceptance.failed (SPEC 13.4). */
+  failedAcceptance: { cmd: string; exitCode: number; expect: string }[];
+
+  /** 4. claim.mismatch entries (SPEC 13.4). */
+  claimMismatches: { field: string; claimed: unknown; actual: unknown }[];
+
+  /** 5. Reviewer conclusion and gaps (SPEC 13.4). */
+  reviewer: { verdict: string | null; gaps: string[] } | null;
+
+  /** 6. CI evidence (SPEC 13.4). */
+  ciResolved: {
+    conclusion: string | null;
+    branchMatched: boolean | null;
+    waitedSecs: number | null;
+    runUrl: string | null;
+  } | null;
+  ciWaitTimeout: { waitedSecs: number | null; lastState: string | null } | null;
+
+  /** 7. verdict.downgraded / escalated (SPEC 13.4). */
+  downgraded: {
+    from: string;
+    to: string;
+    rule: number;
+    reason: string;
+    cause: string | null;
+  } | null;
+  escalated: string | null;
+
+  /** 8. Interrupts: run.orphaned / worker.signaled / worker.rescued / worker.resumed. */
+  interrupts: { event: string; ts: string; detail: Record<string, unknown> }[];
+
+  /** 9. tool.denied (SPEC 13.4). */
+  toolDenied: { command: string | null; pattern: string | null }[];
+
+  /** 10. Push events: verdict.pushed / push_failed / push_skipped (SPEC 13.4). */
+  pushEvents: { event: string; ts: string; detail: Record<string, unknown> }[];
+
+  /** Conclusion: verdict, rule, reason from run.finished. */
+  verdict: string | null;
+  rule: number | null;
+  reason: string | null;
+}
+
+/** Full why projection for a batch (SPEC 13.4). */
+export interface WhyProjection {
+  batchId: string;
+  attempts: WhyAttempt[];
+  /** SPEC 13.14: queue.gate_passed events found for this batch. */
+  gatePassedCount: number;
+  /** queue.paused events for this batch. */
+  queuePaused: { reasons: string[] }[];
+  /** Gate facts for PASS batches when no queue.gate_passed is available (SPEC 13.4). */
+  gateFacts: {
+    downgraded: boolean | null;
+    claimMismatches: number | null;
+    ciConclusion: string | null;
+    ciBranchMatched: boolean | null;
+    depsDiff: number | null;
+    specDiffLines: number | null;
+    gaps: number | null;
+  } | null;
+}
+
+/** SPEC 13.4 interrupt event types. */
+const WHY_INTERRUPT_TYPES = new Set([
+  'run.orphaned',
+  'worker.signaled',
+  'worker.rescued',
+  'worker.resumed',
+]);
+
+/** SPEC 13.4 push event types. */
+const WHY_PUSH_TYPES = new Set(['verdict.pushed', 'verdict.push_failed', 'verdict.push_skipped']);
+
+/** Extracts non-envelope fields from an event as a plain record. */
+function eventDetail(e: Event): Record<string, unknown> {
+  const skip = new Set(['ts', 'run_id', 'batch_id', 'event']);
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(e)) {
+    if (!skip.has(k) && v !== undefined) result[k] = v;
+  }
+  return result;
+}
+
+/**
+ * SPEC 13.4: projects a single attempt's evidence chain from its run events.
+ */
+function projectWhyAttempt(events: readonly Event[], attempt: number, runId: string): WhyAttempt {
+  const started = findEvent(events, 'run.started');
+  const finished = findEvent(events, 'run.finished');
+  const workerFinished = findEvent(events, 'worker.finished');
+
+  // 1. Worker ending.
+  const worker =
+    workerFinished !== undefined
+      ? {
+          exitCode: asNumber(workerFinished.exit_code),
+          stopReason: asString(workerFinished.stop_reason),
+          turns: asNumber(workerFinished.num_turns),
+          costUsd: asNumber(workerFinished.cost_usd),
+        }
+      : null;
+
+  // 2. Evidence summary.
+  const evidenceEvent = findEvent(events, 'evidence.collected');
+  const evidence = evidenceEvent !== undefined ? eventDetail(evidenceEvent) : null;
+
+  // 3. Acceptance failures.
+  const failedAcceptance = events
+    .filter((e) => e.event === 'acceptance.failed')
+    .map((e) => ({
+      cmd: asString(e.cmd) ?? '—',
+      exitCode: asNumber(e.exit_code) ?? -1,
+      expect: asString(e.expect) ?? '—',
+    }));
+
+  // 4. Claim mismatches.
+  const claimMismatches = events
+    .filter((e) => e.event === 'claim.mismatch')
+    .map((e) => ({
+      field: asString(e.field) ?? '—',
+      claimed: e.claimed,
+      actual: e.actual,
+    }));
+
+  // 5. Reviewer.
+  const reviewerEvent = findEvent(events, 'reviewer.verdict');
+  const reviewer =
+    reviewerEvent !== undefined
+      ? {
+          verdict: asString(reviewerEvent.verdict),
+          gaps: Array.isArray(reviewerEvent.gaps)
+            ? (reviewerEvent.gaps as unknown[]).filter((g): g is string => typeof g === 'string')
+            : [],
+        }
+      : null;
+
+  // 6. CI.
+  const ciResolvedEvent = findEvent(events, 'ci.resolved');
+  const ciResolved =
+    ciResolvedEvent !== undefined
+      ? {
+          conclusion: asString(ciResolvedEvent.conclusion),
+          branchMatched:
+            typeof ciResolvedEvent.branch_matched === 'boolean'
+              ? ciResolvedEvent.branch_matched
+              : null,
+          waitedSecs: asNumber(ciResolvedEvent.waited_secs),
+          runUrl: asString(ciResolvedEvent.run_url),
+        }
+      : null;
+
+  const ciTimeoutEvent = findEvent(events, 'ci.wait_timeout');
+  const ciWaitTimeout =
+    ciTimeoutEvent !== undefined
+      ? {
+          waitedSecs: asNumber(ciTimeoutEvent.waited_secs),
+          lastState: asString(ciTimeoutEvent.last_state),
+        }
+      : null;
+
+  // 7. Downgraded / escalated.
+  const downgradeEvent = findEvent(events, 'verdict.downgraded');
+  const downgraded =
+    downgradeEvent !== undefined
+      ? {
+          from: asString(downgradeEvent.from) ?? '—',
+          to: asString(downgradeEvent.to) ?? '—',
+          rule: asNumber(downgradeEvent.rule) ?? 0,
+          reason: asString(downgradeEvent.reason) ?? '—',
+          cause: asString(downgradeEvent.cause),
+        }
+      : null;
+
+  const escalatedEvent = findEvent(events, 'escalated');
+  const escalated =
+    escalatedEvent !== undefined ? (asString(escalatedEvent.reason) ?? '上报：无 report') : null;
+
+  // 8. Interrupts.
+  const interrupts = events
+    .filter((e) => WHY_INTERRUPT_TYPES.has(e.event))
+    .map((e) => ({ event: e.event, ts: e.ts, detail: eventDetail(e) }));
+
+  // 9. Tool denied.
+  const toolDenied = events
+    .filter((e) => e.event === 'tool.denied')
+    .map((e) => ({
+      command: asString(e.command),
+      pattern: asString(e.pattern),
+    }));
+
+  // 10. Push events.
+  const pushEvents = events
+    .filter((e) => WHY_PUSH_TYPES.has(e.event))
+    .map((e) => ({ event: e.event, ts: e.ts, detail: eventDetail(e) }));
+
+  // Conclusion.
+  const verdict = finished !== undefined ? asString(finished.verdict) : null;
+  const rule = finished !== undefined ? asNumber(finished.rule) : null;
+  const reason = finished !== undefined ? asString(finished.reason) : null;
+
+  return {
+    attempt,
+    runId,
+    started: started?.ts ?? null,
+    finished: finished?.ts ?? null,
+    worker,
+    evidence,
+    failedAcceptance,
+    claimMismatches,
+    reviewer,
+    ciResolved,
+    ciWaitTimeout,
+    downgraded,
+    escalated,
+    interrupts,
+    toolDenied,
+    pushEvents,
+    verdict,
+    rule,
+    reason,
+  };
+}
+
+/**
+ * SPEC 13.4: projects the full why view for a batch across all its attempts.
+ * Returns null when no runs exist for this batch (caller maps to exit code 2).
+ */
+export function projectWhy(
+  runDataList: readonly RunData[],
+  batchId: string,
+  filterAttempt?: number,
+): WhyProjection | null {
+  // Collect batch runs (non-queue runs for this batch), sorted by start time.
+  const batchRuns: { runId: string; events: Event[]; startedTs: string }[] = [];
+  for (const rd of runDataList) {
+    if (rd.status !== 'ok' || rd.runId.startsWith('q-')) continue;
+    const bid = rd.events.find((e) => e.batch_id !== undefined)?.batch_id;
+    if (bid !== batchId) continue;
+    const started = findEvent(rd.events, 'run.started');
+    if (started === undefined) continue;
+    batchRuns.push({ runId: rd.runId, events: [...rd.events], startedTs: started.ts });
+  }
+
+  if (batchRuns.length === 0) return null;
+
+  batchRuns.sort((a, b) => (a.startedTs < b.startedTs ? -1 : a.startedTs > b.startedTs ? 1 : 0));
+
+  // Project each attempt.
+  const attempts: WhyAttempt[] = [];
+  for (const br of batchRuns) {
+    const attempt = computeAttempt(runDataList, br.runId, batchId);
+    if (filterAttempt !== undefined && attempt !== filterAttempt) continue;
+    attempts.push(projectWhyAttempt(br.events, attempt, br.runId));
+  }
+
+  // SPEC 13.14: look for queue.gate_passed in queue journals.
+  let gatePassedCount = 0;
+  const queuePaused: { reasons: string[] }[] = [];
+  for (const rd of runDataList) {
+    if (rd.status !== 'ok' || !rd.runId.startsWith('q-')) continue;
+    for (const e of rd.events) {
+      // SPEC 13.14: queue.gate_passed may not be in the event type enum yet;
+      // cast to string so we can detect it in journals produced by future R2 versions.
+      if ((e.event as string) === 'queue.gate_passed' && e.batch_id === batchId) {
+        gatePassedCount++;
+      }
+      if (e.event === 'queue.paused' && e.batch_id === batchId) {
+        const reasons = Array.isArray(e.reasons)
+          ? (e.reasons as unknown[]).filter((r): r is string => typeof r === 'string')
+          : [];
+        queuePaused.push({ reasons });
+      }
+    }
+  }
+
+  // SPEC 13.4: gate facts for the last PASS attempt when no queue.gate_passed.
+  let gateFacts: WhyProjection['gateFacts'] = null;
+  const lastPassAttempt = [...attempts].reverse().find((a) => a.verdict === 'PASS');
+  if (lastPassAttempt !== undefined && gatePassedCount === 0) {
+    const ev = lastPassAttempt.evidence;
+    const rv = lastPassAttempt.reviewer;
+    gateFacts = {
+      downgraded: lastPassAttempt.downgraded !== null,
+      claimMismatches:
+        lastPassAttempt.claimMismatches.length > 0 ? lastPassAttempt.claimMismatches.length : 0,
+      ciConclusion: lastPassAttempt.ciResolved?.conclusion ?? null,
+      ciBranchMatched: lastPassAttempt.ciResolved?.branchMatched ?? null,
+      depsDiff: ev !== null && typeof ev.deps_diff === 'number' ? ev.deps_diff : null,
+      specDiffLines:
+        ev !== null && typeof ev.spec_diff_lines === 'number' ? ev.spec_diff_lines : null,
+      gaps: rv !== null ? rv.gaps.length : null,
+    };
+  }
+
+  return { batchId, attempts, gatePassedCount, queuePaused, gateFacts };
+}
+
+// ---------------------------------------------------------------------------
+// Rule templates (SPEC 13.4): fixed per rule number, combined with `reason`.
+// ---------------------------------------------------------------------------
+
+/* eslint-disable no-restricted-syntax, @typescript-eslint/no-magic-numbers -- SPEC 4.3 rule numbers used as template keys */
+const RULE_TEMPLATES: Record<number, string> = {
+  1: '裁决不可解析',
+  2: '改动受保护文件',
+  3: '未批准依赖',
+  4: 'reviewer 发现声称不符',
+  5: '声称已推送但远端无提交',
+  6: '测试计数不符',
+  7: '声称 CI 通过但未通过',
+  8: '验收命令未满足',
+  9: '证据缺失',
+  10: '采用 reviewer 原值',
+};
+/* eslint-enable no-restricted-syntax, @typescript-eslint/no-magic-numbers */
+
+/** Formats the conclusion line for an attempt (SPEC 13.4). */
+function conclusionLine(a: WhyAttempt): string {
+  if (a.escalated !== null) {
+    return `结论：BLOCK，上报：${a.escalated}`;
+  }
+  if (a.verdict === null) {
+    return '结论：（运行未完成）';
+  }
+  const template = a.rule !== null ? (RULE_TEMPLATES[a.rule] ?? `规则 ${String(a.rule)}`) : '';
+  const rulePart = a.rule !== null ? `规则 ${String(a.rule)}：${template}` : '';
+  const reasonPart = a.reason !== null ? ` — ${a.reason}` : '';
+  return `结论：${a.verdict}，${rulePart}${reasonPart}`;
+}
+
+/** Formats why as human-readable text (SPEC 13.4). */
+export function formatWhy(proj: WhyProjection): string {
+  const lines: string[] = [];
+
+  for (const a of proj.attempts) {
+    lines.push(`== attempt ${String(a.attempt)} (${a.runId}) ==`);
+
+    // 1. Worker ending.
+    if (a.worker !== null) {
+      const w = a.worker;
+      const parts = [
+        `exit_code=${dash(w.exitCode)}`,
+        `stop_reason=${dash(w.stopReason)}`,
+        `turns=${dash(w.turns)}`,
+        `cost=${w.costUsd !== null ? `$${w.costUsd.toFixed(COST_DECIMALS)}` : '—'}`,
+      ];
+      lines.push(`worker: ${parts.join(' ')}`);
+    } else {
+      lines.push('worker: —');
+    }
+
+    // 2. Evidence.
+    if (a.evidence !== null) {
+      const ev = a.evidence;
+      const parts = Object.entries(ev).map(([k, v]) => {
+        if (v === null || v === undefined) return `${k}=—`;
+        if (typeof v === 'object') return `${k}=${JSON.stringify(v)}`;
+        if (typeof v === 'string') return `${k}=${v}`;
+        return `${k}=${JSON.stringify(v)}`;
+      });
+      lines.push(`evidence: ${parts.join(' ')}`);
+    } else {
+      lines.push('evidence: —');
+    }
+
+    // 3. Acceptance failures.
+    if (a.failedAcceptance.length > 0) {
+      for (const f of a.failedAcceptance) {
+        lines.push(
+          `acceptance.failed: \`${f.cmd}\` exit ${String(f.exitCode)} (expect ${f.expect})`,
+        );
+      }
+    }
+
+    // 4. Claim mismatches.
+    if (a.claimMismatches.length > 0) {
+      for (const m of a.claimMismatches) {
+        lines.push(
+          `claim.mismatch: ${m.field} claimed=${JSON.stringify(m.claimed)} actual=${JSON.stringify(m.actual)}`,
+        );
+      }
+    }
+
+    // 5. Reviewer.
+    if (a.reviewer !== null) {
+      const gapStr = a.reviewer.gaps.length > 0 ? `, gaps: ${JSON.stringify(a.reviewer.gaps)}` : '';
+      lines.push(`reviewer: ${dash(a.reviewer.verdict)}${gapStr}`);
+    } else {
+      lines.push('reviewer: —');
+    }
+
+    // 6. CI.
+    if (a.ciResolved !== null) {
+      const ci = a.ciResolved;
+      const parts = [dash(ci.conclusion), `branch_matched=${dash(ci.branchMatched)}`];
+      if (ci.waitedSecs !== null) parts.push(`waited ${String(ci.waitedSecs)}s`);
+      lines.push(`ci: ${parts.join(' ')}`);
+    } else if (a.ciWaitTimeout !== null) {
+      lines.push(
+        `ci.wait_timeout: waited ${dash(a.ciWaitTimeout.waitedSecs)}s last_state=${dash(a.ciWaitTimeout.lastState)}`,
+      );
+    }
+
+    // 7. Downgraded / escalated.
+    if (a.downgraded !== null) {
+      const d = a.downgraded;
+      const causePart = d.cause !== null ? ` cause=${d.cause}` : '';
+      lines.push(
+        `verdict.downgraded: ${d.from} → ${d.to}, rule ${String(d.rule)}: ${d.reason}${causePart}`,
+      );
+    }
+    if (a.escalated !== null) {
+      lines.push(`escalated: ${a.escalated}`);
+    }
+
+    // 8. Interrupts.
+    for (const int of a.interrupts) {
+      const detail = Object.entries(int.detail)
+        .map(([k, v]) => `${k}=${String(v)}`)
+        .join(' ');
+      lines.push(`${int.event}: ${int.ts}${detail !== '' ? ` ${detail}` : ''}`);
+    }
+
+    // 9. Tool denied.
+    for (const td of a.toolDenied) {
+      lines.push(`tool.denied: command=${dash(td.command)} pattern=${dash(td.pattern)}`);
+    }
+
+    // 10. Push.
+    for (const p of a.pushEvents) {
+      const detail = Object.entries(p.detail)
+        .map(([k, v]) => `${k}=${String(v)}`)
+        .join(' ');
+      lines.push(`${p.event}: ${p.ts}${detail !== '' ? ` ${detail}` : ''}`);
+    }
+
+    // Conclusion line.
+    lines.push(conclusionLine(a));
+    lines.push('');
+  }
+
+  // Gate / paused info for PASS batches.
+  const lastAttempt = proj.attempts[proj.attempts.length - 1];
+  if (lastAttempt?.verdict === 'PASS') {
+    if (proj.gatePassedCount > 0) {
+      lines.push(`放行：queue.gate_passed ×${String(proj.gatePassedCount)}`);
+    } else if (proj.gateFacts !== null) {
+      const gf = proj.gateFacts;
+      lines.push('放行判定（无 queue.gate_passed）：');
+      lines.push(
+        `  downgraded=${dash(gf.downgraded)} claim_mismatches=${dash(gf.claimMismatches)} ci=${dash(gf.ciConclusion)} branch_matched=${dash(gf.ciBranchMatched)} deps_diff=${dash(gf.depsDiff)} spec_diff=${dash(gf.specDiffLines)} gaps=${dash(gf.gaps)}`,
+      );
+    }
+    if (proj.queuePaused.length > 0) {
+      for (const qp of proj.queuePaused) {
+        lines.push(`queue.paused: reasons=${qp.reasons.join(', ')}`);
+      }
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
 /** Formats version summary as human-readable text with the fixed footer. */
 export function formatVersionSummary(summaries: readonly VersionSummary[]): string {
   const lines: string[] = [];
