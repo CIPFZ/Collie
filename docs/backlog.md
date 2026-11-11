@@ -51,7 +51,7 @@
 | 31 | v04-b02 | 投影模块 view.ts 与 collie status | v03-b04-fix | passed |
 | 32 | v04-b03 | collie timeline：时间轨迹与按版本汇总 | v04-b02 | passed |
 | 33 | v04-b04 | collie why：按 attempt 摊开证据链 | v04-b02 | blocked |
-| 34 | v04-b05 | collie watch：实时跟随 | v04-b02 | pending |
+| 34 | v04-b05 | collie watch：实时跟随 | v04-b02 | passed |
 | 35 | v04-b06 | 环境故障不当成 worker 的 FIX：token 读不到就启动失败、证据取不到时队列不重跑 | v03-b04-fix | pending |
 | 36 | v04-b07 | 队列收尾：queue.batch_started 归位、fix_max 提交推送、FIX 重跑写明降级原因 | v04-b06 | pending |
 | 37 | v04-b08 | 投影取值修补：attempt 按 R2 口径推算、运行用时、花费缺数据、空数据的 --json | v04-b03 | pending |

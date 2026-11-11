@@ -803,4 +803,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0（idling）
+
+### v04-b05 · r-20261111093302 · PASS
+
+- 时间：2026-11-11T09:58:48.487Z
+- 裁定：规则 10，All 9 acceptance commands pass. 3 items fully implemented: watch.ts polling loop with fully injected deps, cli.ts wiring only, 7 tests covering all 6 required scenarios. 2 new invariants added. No protected file changes, no dependency changes, no prohibited file modifications. CI 以 R2 取证为准。
+- 提交：`4b6febd` `9873af7`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，875 passed, 0 failed
+  - `npm test -- test/watch.test.ts` → exit 0，7 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/watch.test.ts | grep -qE "^([6-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `npx tsx src/cli.ts watch --once` → exit 0，no runs recorded
+  - `test -f test/watch.test.ts && ! grep -qE "setInterval|setTimeout\(" test/watch.test.ts` → exit 0，exit 0
+  - `test -f src/watch.ts && ! grep -vE "^\s*(//|\*|/\*)" src/watch.ts | grep -qE "writeFileSync|appendFileSync|process\.kill"` → exit 0，exit 0
+  - `grep -qE "watch\.ts" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/42998962095
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
