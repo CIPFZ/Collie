@@ -159,7 +159,15 @@ class Recorder {
     private readonly now: () => Date,
   ) {}
 
+  /** SPEC 13.10: extension field names that collide with the event envelope. */
+  private static readonly RESERVED_KEYS: ReadonlySet<string> = new Set(['ts', 'run_id', 'event']);
+
   record(event: EventType, fields: Record<string, Event[string]> = {}): void {
+    for (const key of Object.keys(fields)) {
+      if (Recorder.RESERVED_KEYS.has(key)) {
+        throw new Error(`Recorder.record: extension field '${key}' collides with envelope key`);
+      }
+    }
     this.journal.append({
       ts: this.now().toISOString(),
       run_id: this.runId,
@@ -411,6 +419,19 @@ function realDelay(ms: number): Promise<void> {
  */
 export function renderFixSection(info: FixInfo): string {
   const lines = ['', '## 上一轮判 FIX', ''];
+  // SPEC 13.10 (v04-b07): downgrade reason subsection.
+  if (info.downgrade !== undefined) {
+    lines.push('### 降级原因');
+    lines.push('');
+    lines.push(`- 规则 ${String(info.downgrade.rule)}：${info.downgrade.reason}`);
+    if (info.downgrade.cause !== undefined) {
+      lines.push(`- cause：${info.downgrade.cause}`);
+    }
+    if (info.downgrade.detail !== undefined) {
+      lines.push(`- detail：${info.downgrade.detail}`);
+    }
+    lines.push('');
+  }
   if (info.gaps.length > 0) {
     lines.push('### Gaps');
     lines.push('');
@@ -556,8 +577,15 @@ export interface FixInfo {
   gaps: readonly string[];
   /** Acceptance commands that failed, with exit codes. */
   failedAcceptance: readonly { cmd: string; exit_code: number }[];
-  /** Code commits from the previous run's evidence. */
+  /** Code commits from the previous run's evidence (R2 commits excluded, SPEC 13.10). */
   commits: readonly string[];
+  /** SPEC 13.10 (v04-b07): downgrade rule, reason, and optional cause/detail. */
+  downgrade?: {
+    rule: number;
+    reason: string;
+    cause?: string;
+    detail?: string;
+  };
 }
 
 export interface BatchHistory {
@@ -587,7 +615,11 @@ export interface BatchHistory {
   fixInfo?: FixInfo;
 }
 
-/** All journal events of every run that touched `batchId`, oldest run first. */
+/** All journal events of every run that touched `batchId`, oldest run first.
+ * SPEC 13.10: only journals that contain a `run.started` event count as batch
+ * runs.  Queue journals (`q-` prefix) may hold batch-scoped events like
+ * `queue.batch_started` but are not batch runs themselves.
+ */
 function allBatchEvents(root: string): Map<string, Event[]> {
   const runsDir = join(root, RUNS_RELATIVE_DIR);
   if (!existsSync(runsDir)) return new Map();
@@ -599,7 +631,17 @@ function allBatchEvents(root: string): Map<string, Event[]> {
       !existsSync(join(runsDir, runId, EVENTS_FILE_NAME))
     )
       continue;
-    runs.set(runId, journal.replay(runId));
+    // SPEC 13.10: queue journals (q- prefix) are not batch runs.
+    if (runId.startsWith('q-')) continue;
+    const events = journal.replay(runId);
+    // SPEC 13.10: only journals with run.started are batch runs.
+    if (!events.some((e) => e.event === 'run.started')) {
+      // Legacy: pre-13.10 orphan journals may lack run.started but still have
+      // batch.selected. Include them to preserve backward compatibility with
+      // existing orphan-rescue tests and real journals.
+      if (!events.some((e) => e.event === 'batch.selected')) continue;
+    }
+    runs.set(runId, events);
   }
   return runs;
 }
@@ -697,7 +739,20 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
           cmd: typeof e.cmd === 'string' ? e.cmd : '',
           exit_code: typeof e.exit_code === 'number' ? e.exit_code : -1,
         }));
-      fixInfo = { gaps, failedAcceptance, commits };
+
+      // SPEC 13.10 (v04-b07): collect downgrade info from journal.
+      const downgradedEvt = batchEvents.findLast((e) => e.event === 'verdict.downgraded');
+      let downgrade: FixInfo['downgrade'];
+      if (downgradedEvt !== undefined) {
+        downgrade = {
+          rule: typeof downgradedEvt.rule === 'number' ? downgradedEvt.rule : 0,
+          reason: typeof downgradedEvt.reason === 'string' ? downgradedEvt.reason : '',
+          ...(typeof downgradedEvt.cause === 'string' ? { cause: downgradedEvt.cause } : {}),
+          ...(typeof downgradedEvt.detail === 'string' ? { detail: downgradedEvt.detail } : {}),
+        };
+      }
+
+      fixInfo = { gaps, failedAcceptance, commits, downgrade };
     } else {
       // Interrupted: BLOCK / crashed / orphaned.
       attempt++;
@@ -1515,7 +1570,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         verdict.ok
           ? {
               verdict: verdict.value.verdict,
-              ...(truncatedGaps.length > 0 ? { gaps: truncatedGaps } : {}),
+              // SPEC 13.10: gaps is always present when verdict is parseable.
+              gaps: truncatedGaps,
             }
           : { error: verdict.error },
       );
@@ -2010,7 +2066,7 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
     // SPEC 12.2 (v03-b04-fix): record queue.batch_started before launching.
     const history = batchHistory(root, currentBatchId);
     queueRec.record('queue.batch_started', {
-      run_id: runId,
+      batch_run_id: runId,
       batch_id: currentBatchId,
       attempt: history.attempt,
       why: nextWhy,
@@ -2180,6 +2236,22 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
       await commit(root, `progress: ${currentBatchId} fix_max`, [BACKLOG_RELATIVE_PATH]);
     } catch {
       // Best effort: the status was written to disk even if commit fails.
+    }
+    // SPEC 13.10 (v04-b07): push the fix_max commit per SPEC 12.1;
+    // on failure record verdict.push_failed, on success verdict.pushed.
+    try {
+      await push(root, ctx.remote, config.ci.expected_branch);
+      const pushSha = await revParse(root, 'HEAD');
+      queueRec.record('verdict.pushed', {
+        sha: pushSha,
+        remote: ctx.remote,
+        branch: config.ci.expected_branch,
+      });
+    } catch (pushError) {
+      queueRec.record('verdict.push_failed', {
+        sha: await revParse(root, 'HEAD').catch(() => 'unknown'),
+        error: message(pushError),
+      });
     }
     queueRec.record('escalated', { reason: 'fix_max', batch_id: currentBatchId });
     queueRec.record('queue.finished', {

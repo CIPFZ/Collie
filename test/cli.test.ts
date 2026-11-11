@@ -241,6 +241,7 @@ describe('cli: show --queue (v03-b04-fix)', () => {
         run_id: qRunId,
         event: 'queue.batch_started',
         batch_id: 'v99-b01',
+        batch_run_id: 'r-20261019120000',
         attempt: 1,
         why: 'new',
       },
