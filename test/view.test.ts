@@ -66,7 +66,6 @@ function passRunEvents(): Event[] {
       event: 'batch.selected',
       batch_id: BATCH_A,
       base_sha: 'aaaaaaa',
-      attempt: 1,
     }),
     makeEvent({
       run_id: RUN_ID_1,
@@ -136,7 +135,6 @@ function fixThenPassEvents(): { fix: Event[]; pass: Event[] } {
       event: 'batch.selected',
       batch_id: BATCH_A,
       base_sha: 'aaaaaaa',
-      attempt: 1,
     }),
     makeEvent({ run_id: RUN_ID_1, event: 'worker.started', batch_id: BATCH_A }),
     makeEvent({
@@ -180,7 +178,6 @@ function fixThenPassEvents(): { fix: Event[]; pass: Event[] } {
       event: 'batch.selected',
       batch_id: BATCH_A,
       base_sha: 'aaaaaaa',
-      attempt: 2,
     }),
     makeEvent({ run_id: RUN_ID_2, event: 'worker.started', batch_id: BATCH_A }),
     makeEvent({
@@ -238,7 +235,8 @@ describe('view.ts', () => {
     expect(proj.verdict).toBe('PASS');
     expect(proj.numTurns).toBe(42);
     expect(proj.costUsd).toBe(3.5);
-    expect(proj.durationMs).toBe(300000);
+    // SPEC 13.13: run duration = run.finished.ts − run.started.ts = 12:10 − 12:00 = 600000ms.
+    expect(proj.durationMs).toBe(600000);
     expect(proj.rule).toBe(10);
     expect(proj.exitCode).toBe(0);
     expect(proj.testsPassed).toBe(100);
@@ -274,7 +272,6 @@ describe('view.ts', () => {
         event: 'batch.selected',
         batch_id: BATCH_A,
         base_sha: 'aaaaaaa',
-        attempt: 1,
       }),
       makeEvent({
         run_id: RUN_ID_1,
@@ -405,7 +402,9 @@ describe('view.ts', () => {
     const proj = projectRun(events);
     expect(proj.numTurns).toBeNull();
     expect(proj.costUsd).toBeNull();
-    expect(proj.durationMs).toBeNull();
+    // SPEC 13.13: durationMs is now computed from run.finished.ts − run.started.ts,
+    // not worker.finished.duration_ms. Both events share the default ts, so duration = 0.
+    expect(proj.durationMs).toBe(0);
     expect(proj.testsPassed).toBeNull(); // No evidence.collected event
     expect(proj.testsFailed).toBeNull();
   });
@@ -474,7 +473,6 @@ describe('view.ts', () => {
         event: 'batch.selected',
         batch_id: BATCH_A,
         base_sha: 'aaaaaaa',
-        attempt: 1,
       }),
       makeEvent({
         run_id: RUN_ID_1,

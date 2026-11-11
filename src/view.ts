@@ -161,6 +161,42 @@ function inferPhase(events: readonly Event[]): string | null {
   return null;
 }
 
+/**
+ * SPEC 13.13: computes the attempt number for a batch run from all loaded runs.
+ * attempt = 1 + count of same-batch runs that started before this one
+ * and whose final verdict is NOT PASS (no run.finished also counts as non-PASS).
+ * A batch run = a non-queue journal with run.started (SPEC 13.10).
+ */
+export function computeAttempt(
+  allRunData: readonly RunData[],
+  targetRunId: string,
+  targetBatchId: string,
+): number {
+  // Collect batch runs for this batch, excluding queue runs.
+  const batchRuns: { runId: string; startedTs: string; verdict: string | null }[] = [];
+  for (const rd of allRunData) {
+    if (rd.status !== 'ok' || rd.runId.startsWith('q-')) continue;
+    const started = findEvent(rd.events, 'run.started');
+    if (started === undefined) continue;
+    const bid = rd.events.find((e) => e.batch_id !== undefined)?.batch_id;
+    if (bid !== targetBatchId) continue;
+    const finished = findEvent(rd.events, 'run.finished');
+    const verdict = finished !== undefined ? asString(finished.verdict) : null;
+    batchRuns.push({ runId: rd.runId, startedTs: started.ts, verdict });
+  }
+  // Sort by start time.
+  batchRuns.sort((a, b) => (a.startedTs < b.startedTs ? -1 : a.startedTs > b.startedTs ? 1 : 0));
+
+  const targetIndex = batchRuns.findIndex((r) => r.runId === targetRunId);
+  if (targetIndex < 0) return 1;
+
+  let priorNonPass = 0;
+  for (let i = 0; i < targetIndex; i++) {
+    if (batchRuns[i]?.verdict !== 'PASS') priorNonPass++;
+  }
+  return 1 + priorNonPass;
+}
+
 /** Projects a single run's events into a RunProjection. */
 export function projectRun(events: readonly Event[]): RunProjection {
   const started = findEvent(events, 'run.started');
@@ -176,7 +212,14 @@ export function projectRun(events: readonly Event[]): RunProjection {
   // SPEC 13.1 optional fields from worker.finished.
   const numTurns = workerFinished !== undefined ? asNumber(workerFinished.num_turns) : null;
   const costUsd = workerFinished !== undefined ? asNumber(workerFinished.cost_usd) : null;
-  const durationMs = workerFinished !== undefined ? asNumber(workerFinished.duration_ms) : null;
+
+  // SPEC 13.13: run duration = run.finished.ts − run.started.ts.
+  let durationMs: number | null = null;
+  if (started !== undefined && finished !== undefined) {
+    const startMs = new Date(started.ts).getTime();
+    const endMs = new Date(finished.ts).getTime();
+    durationMs = endMs - startMs;
+  }
 
   // Rule and exit_code from run.finished.
   const rule = finished !== undefined ? asNumber(finished.rule) : null;
@@ -321,11 +364,9 @@ export function buildStatus(
     const lastTs = lastEvent?.ts !== undefined ? new Date(lastEvent.ts).getTime() : null;
     const nowMs = now.getTime();
 
-    // Attempt from batch.selected or queue.batch_started.
-    const batchSelected =
-      findEvent(currentRun.events, 'queue.batch_started') ??
-      findEvent(currentRun.events, 'batch.selected');
-    const attempt = batchSelected !== undefined ? asNumber(batchSelected.attempt) : null;
+    // SPEC 13.13: attempt computed from all runs for this batch.
+    const attempt =
+      proj.batchId !== null ? computeAttempt(runDataList, currentRun.runId, proj.batchId) : null;
 
     current = {
       state: 'running',
@@ -460,10 +501,15 @@ export function projectTimeline(runDataList: readonly RunData[]): TimelineNode[]
       if (e.event === 'run.finished' && !isQueue) {
         const bid = asString(e.batch_id);
         const verdict = asString(e.verdict);
-        const attempt = asNumber(e.attempt);
-        // Look up worker.finished for duration in the same run.
+        // SPEC 13.13: attempt computed from all runs for this batch.
+        const attempt = bid !== null ? computeAttempt(runDataList, rd.runId, bid) : null;
+        // SPEC 13.13: run duration = run.finished.ts − run.started.ts.
+        const runStarted = findEvent(rd.events, 'run.started');
+        const durationMs =
+          runStarted !== undefined
+            ? new Date(e.ts).getTime() - new Date(runStarted.ts).getTime()
+            : null;
         const wf = rd.events.find((ev) => ev.event === 'worker.finished');
-        const durationMs = wf !== undefined ? asNumber(wf.duration_ms) : null;
         const costUsd = wf !== undefined ? asNumber(wf.cost_usd) : null;
         nodes.push({
           ts: e.ts,
@@ -771,7 +817,10 @@ export function formatVersionSummary(summaries: readonly VersionSummary[]): stri
     lines.push(
       `  batches: ${String(s.batchCount)}  runs: ${String(s.runCount)}  FIX: ${String(s.fixCount)}  BLOCK: ${String(s.blockCount)}`,
     );
-    if (s.runsWithoutCost > 0) {
+    // SPEC 13.13: show — when no runs in the version have any cost data.
+    if (s.runsWithoutCost === s.runCount) {
+      lines.push('  cost: —');
+    } else if (s.runsWithoutCost > 0) {
       lines.push(
         `  cost: $${s.totalCostUsd.toFixed(COST_DECIMALS)} (${String(s.runsWithoutCost)} run(s) without cost data)`,
       );

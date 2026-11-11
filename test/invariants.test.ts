@@ -313,4 +313,24 @@ describe('structural invariants (SPEC 3.2)', () => {
     // collide with the event envelope key).
     expect(content).toContain('batch_run_id');
   });
+
+  it('src/view.ts does not contain batchSelected.attempt in non-comment code (v04-b08)', () => {
+    const lines = readFileSync(join(ROOT, 'src/view.ts'), 'utf8').split('\n');
+    const codeLines = lines.filter(
+      (l) =>
+        !l.trimStart().startsWith('//') &&
+        !l.trimStart().startsWith('*') &&
+        !l.trimStart().startsWith('/*'),
+    );
+    const hasBatchSelectedAttempt = codeLines.some((l) => l.includes('batchSelected.attempt'));
+    expect(
+      hasBatchSelectedAttempt,
+      'batchSelected.attempt should not appear in non-comment code lines',
+    ).toBe(false);
+  });
+
+  it('test/view-real.test.ts contains Sandbox.create (v04-b08)', () => {
+    const content = readFileSync(join(ROOT, 'test/view-real.test.ts'), 'utf8');
+    expect(content).toContain('Sandbox.create');
+  });
 });

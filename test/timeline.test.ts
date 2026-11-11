@@ -60,7 +60,6 @@ function passRunEvents(
       event: 'batch.selected',
       batch_id: batchId,
       base_sha: 'aaaaaaa',
-      attempt: 1,
     }),
     makeEvent({ run_id: runId, event: 'worker.started', batch_id: batchId }),
     makeEvent({
@@ -93,7 +92,6 @@ function fixRunEvents(runId: string, batchId: string, startTs: string, endTs: st
       event: 'batch.selected',
       batch_id: batchId,
       base_sha: 'aaaaaaa',
-      attempt: 1,
     }),
     makeEvent({ run_id: runId, event: 'worker.started', batch_id: batchId }),
     makeEvent({
@@ -419,7 +417,8 @@ describe('timeline (SPEC 13.3)', () => {
     const runEnd = nodes.find((n) => n.kind === 'run_end');
     expect(runEnd).toBeDefined();
     expect(runEnd?.detail.costUsd).toBe(5.25);
-    expect(runEnd?.detail.durationMs).toBe(300000);
+    // SPEC 13.13: run duration = run.finished.ts − run.started.ts = 10:30 − 10:00 = 1800000ms.
+    expect(runEnd?.detail.durationMs).toBe(1800000);
     expect(runEnd?.detail.verdict).toBe('PASS');
   });
 });

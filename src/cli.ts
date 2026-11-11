@@ -547,18 +547,17 @@ function audit(deps: CliDeps, runId: string): number {
 
 /**
  * SPEC 13.2: `collie status [--json]`. Three sections: current, queue, last queue run.
- * No journal at all → print "no runs recorded" and exit 0.
+ * No journal at all → text prints "no runs recorded", JSON still outputs same structure (SPEC 13.13).
  */
 function status(deps: CliDeps, json: boolean): number {
   const runDataList = loadRuns(deps.cwd);
-  if (runDataList.length === 0) {
-    if (json) {
-      deps.out(JSON.stringify({ message: 'no runs recorded' }) + '\n');
-    } else {
-      deps.out('no runs recorded\n');
-    }
+
+  // SPEC 13.13: text mode prints "no runs recorded" for empty; --json always outputs same structure.
+  if (runDataList.length === 0 && !json) {
+    deps.out('no runs recorded\n');
     return EXIT_CODES.PASS;
   }
+
   let batches: readonly { id: string; title: string; status: string; depends_on: string[] }[];
   try {
     batches = loadBacklog(deps.cwd);
@@ -578,7 +577,7 @@ function status(deps: CliDeps, json: boolean): number {
 
 /**
  * SPEC 13.3: `collie timeline [--since <date>] [--batch <prefix>] [--by version] [--json]`.
- * Project timeline: time-ordered nodes. No journal → "no runs recorded", exit 0.
+ * Project timeline: time-ordered nodes. No journal → text "no runs recorded", JSON [] (SPEC 13.13).
  */
 function timeline(
   deps: CliDeps,
@@ -587,7 +586,7 @@ function timeline(
   const runDataList = loadRuns(deps.cwd);
   if (runDataList.length === 0) {
     if (opts.json === true) {
-      deps.out(JSON.stringify({ message: 'no runs recorded' }) + '\n');
+      deps.out('[]\n');
     } else {
       deps.out('no runs recorded\n');
     }
