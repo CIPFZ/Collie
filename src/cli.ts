@@ -476,7 +476,11 @@ function audit(deps: CliDeps, runId: string): number {
 function status(deps: CliDeps, json: boolean): number {
   const runDataList = loadRuns(deps.cwd);
   if (runDataList.length === 0) {
-    deps.out('no runs recorded\n');
+    if (json) {
+      deps.out(JSON.stringify({ message: 'no runs recorded' }) + '\n');
+    } else {
+      deps.out('no runs recorded\n');
+    }
     return EXIT_CODES.PASS;
   }
   let batches: readonly { id: string; title: string; status: string; depends_on: string[] }[];
