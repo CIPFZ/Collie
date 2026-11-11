@@ -155,7 +155,7 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
    - 仲裁走到哪条规则，最终结果与退出码
    - 你观察到的 Collie 本身的问题（规格缺口、误判、手册不管用、流程卡点）——这一段最有价值
    - 需要项目所有者决定的事（逐条列，每条给你的建议）
-   然后停下等指令。
+   然后**不要结束对话**，按下节「不用人传话」等下一条指令。
 
 ## 交接走仓库（v03-b02 之后）
 
@@ -164,7 +164,22 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
   R1 看不到 journal 原文，所以关键事件（`ci.resolved`、`verdict.pushed`、`tool.denied`、`run.orphaned` 等）要像现在一样把那一行原样抄进汇报。
 - **R1 → 你**：指令在 `docs/ops/next.md`，R1 每轮改写它并推送。你每轮开始先 `git pull --ff-only`，读 `docs/ops/next.md`，
   里面写着这一轮要跑什么、重点看什么、有没有一次性动作。它写的「基准提交」不是 HEAD 的祖先（`git merge-base --is-ancestor <sha> HEAD` 失败）就停下报告。
-- 中间人对你只会说一个字「拉」（= pull、读 next.md、照做），对 R1 只会说「看」。没有别的话就是没有别的指令。
+- **不用人传话（2026-11-11 起，所有者批准）。** 所有者不再每轮说「拉」「看」。`docs/ops/next.md` 开头有一行状态：
+  - `状态：开跑`：照 next.md 做；
+  - `状态：等所有者裁定`：什么都不跑，发一条通知（内容用 next.md 里「裁定事项：」那一行），继续等；
+  - `状态：收工`：发一条通知（内容用「摘要：」那一行），结束，不再等。
+
+  你推送汇报之后等 next.md 变化，用一条阻塞的命令等，不要每分钟一轮对话：
+  `B=$(git log -n1 --format=%H -- docs/ops/next.md); for i in $(seq 1 30); do git pull -q --ff-only; [ "$(git log -n1 --format=%H -- docs/ops/next.md)" != "$B" ] && break; sleep 60; done; grep -m1 '^状态：' docs/ops/next.md`
+  你的工具对单条命令有时长上限就分段重复。等满 30 分钟还没有变化，发一条通知「R1 没有回应」，之后继续等；累计等满 12 小时就结束，在对话里说明。
+  所有者说「拉」仍然有效（= 立刻 pull、读 next.md、照做）。
+- **通知。** 所有者会把企业微信群机器人的地址放在 `~/.config/collie/notify-webhook`（不进仓库，不要打印它）。文件不存在就跳过，在汇报里记一句，不算失败：
+  `notify() { W=~/.config/collie/notify-webhook; test -s "$W" || { echo "no webhook, skipped"; return 0; }; node -e 'process.stdout.write(JSON.stringify({msgtype:"text",text:{content:process.argv[1]}}))' "$1" | curl -s -m 10 -o /dev/null -w '%{http_code}\n' -H 'Content-Type: application/json' -d @- "$(cat "$W")"; }`
+  只在四种时候发：next.md 是「等所有者裁定」；next.md 是「收工」；等 R1 超过 30 分钟；你自己因为开跑前检查没过而停下。批次 PASS、FIX、自动重跑都不发。
+  通知里只写批次号、结论和「到 With 的 Collie 对话里看」，不写 token、路径和日志原文。
+- **所有者只做裁定。** 下面这些 R1 必须先问所有者（next.md 会是「等所有者裁定」）：改规则本身（仲裁规则、放行条件、阈值、角色权限、铁律）；没有 R2 取到的证据却要采纳代码；
+  路线图或版本计划变化；凭据与环境问题；自所有者上次批准起累计花费超过 $150；同一批次第二次被拦；连续两次队列没有任何批次通过；R1 拿不准的事。
+  其余由 R1 直接定并推送，事后给所有者摘要。你不需要判断某件事该不该问所有者，照 next.md 的状态做。
 - `collie audit <run_id>` 的读法：退出码 0 = reviewer 工具清单等于白名单；1 = 越权，**停下、不进下一批**；
   2 = 本轮没有 reviewer 事件流（上报路径或 worker 崩溃），不是失败，照常写汇报。
 - **`--continue` 模式（v03-b04 起）**：`npx tsx src/cli.ts run --continue --max N`，不带批次名，Collie 自己按 backlog 选批。

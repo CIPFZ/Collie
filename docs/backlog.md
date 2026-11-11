@@ -5,9 +5,11 @@
 > R1 签发自查（v02-b04-fix 后）：条目里每一条「测试要注入 X / 用 Y 替代 Z」的要求，验收必须同时 grep 源文件和对应测试文件，
 > 只 grep `src/` 的验收抓不住「接口做了、测试没用上」（b04：只注入 now；b04-fix：指纹可注入但场景 G 没注入）。
 > 凡验收表含 grep 类结构检查的批次，条目正文必须写「同步加进 `test/invariants.test.ts`」，验收加一条 grep 该文件（SPEC 3.2 结构不变量）。
+> R1 签发自查（v04-b04 后，SPEC 13.12、13.13）：条目正文必须写明要读的 SPEC 小节号（worker 不再通读 SPEC，task 也不带小节开头的说明文字）；
+> 条目要求展示某个值时，写明它取自哪个事件的哪个字段，并核对 R2 确实写了它；只读命令的测试至少有一组夹具来自 fake runner 跑出的真实运行。
 
 更新时间：2026-11-11
-当前版本：v0.4（见 SPEC 第 13 章；v04-b01 已裁定采纳，队列从 v04-b02 起）
+当前版本：v0.4（见 SPEC 第 13 章；v04-b01 已裁定采纳，v04-b04 改签为 v04-b09，队列从 v04-b05 起）
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -52,6 +54,10 @@
 | 34 | v04-b05 | collie watch：实时跟随 | v04-b02 | pending |
 | 35 | v04-b06 | 环境故障不当成 worker 的 FIX：token 读不到就启动失败、证据取不到时队列不重跑 | v03-b04-fix | pending |
 | 36 | v04-b07 | 队列收尾：queue.batch_started 归位、fix_max 提交推送、FIX 重跑写明降级原因 | v04-b06 | pending |
+| 37 | v04-b08 | 投影取值修补：attempt 按 R2 口径推算、运行用时、花费缺数据、空数据的 --json | v04-b03 | pending |
+| 38 | v04-b09 | collie why：按 attempt 摊开证据链（重签 v04-b04） | v04-b08 | pending |
+| 39 | v04-b10 | 队列里的中断自动续跑一次、验收失败全记、放行留痕 | v04-b07 | pending |
+| 40 | v04-b11 | R2 的后台 git 读取不抢索引锁 | v04-b10 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -1392,6 +1398,10 @@ v04-b01 标 blocked、代码已采纳（SPEC 13.11），所以依赖指向 v03-b
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 改动 `run.ts`、`gate.ts`、`arbiter.ts`、规则 1~10；改动 `show` 的输出；让 `why` 写任何文件；新增依赖
 
+记录：队列 q-20261111051219 里跑了 1 次（r-20261111055746）：worker 在 900 秒内没有改出任何文件，被判空转、soft 停止，没有 report，上报 BLOCK。没有代码提交。
+这不是 worker 越界，是开局要读的文档太大加上空转线没有给开局留余量。裁定（2026-11-11，SPEC 13.12）：标 blocked，不重跑，`why` 改签为 v04-b09；
+必读清单瘦身、`progress_secs` 900→1500。条目本身也有规格漏洞（attempt 的取值来源没写），见 SPEC 13.13。
+
 ## v04-b05 collie watch：实时跟随
 
 优先级：34　依赖：v04-b02
@@ -1399,7 +1409,7 @@ v04-b01 标 blocked、代码已采纳（SPEC 13.11），所以依赖指向 v03-b
 规格见 SPEC 13.5。
 
 条目：
-1. `src/watch.ts`：轮询循环，时钟、sleep 与取数函数都由参数注入；每条新事件打印一行，阶段变化时打印 `status` 的「当前」段，
+1. `src/watch.ts`（SPEC 13.5；`status` 的「当前」段见 13.2，事件字段表在 3.6）：轮询循环，时钟、sleep 与取数函数都由参数注入；每条新事件打印一行，阶段变化时打印 `status` 的「当前」段，
    静默超过 `stall_secs` 时标出秒数；`run.finished`（队列运行为 `queue.finished`）后结束
 2. `collie watch [--once] [--interval <秒>] [--timeout <秒>]`，`cli.ts` 只做接线；只读：不写 journal、不碰心跳、不发信号
 3. `test/watch.test.ts`：用注入的时钟与 sleep，覆盖 `--once`、跟到 `run.finished` 退出、跟到 `queue.finished` 退出、等待新运行、超时退出、静默标注；
@@ -1471,11 +1481,13 @@ v04-b01 标 blocked、代码已采纳（SPEC 13.11），所以依赖指向 v03-b
 
 条目：
 1. journal 归位（SPEC 13.10）：`queue.batch_started` 的批次运行号字段改名 `batch_run_id`，事件落在队列的 `q-` journal；`Recorder.record` 遇到名为 `ts` / `run_id` / `event` 的扩展字段抛错；
-   `show --queue` 与现有夹具同步。`reviewer.verdict` 的 `gaps` 在 verdict 可解析时总是写，没有缺口写空数组
+   `show --queue` 与现有夹具同步。`reviewer.verdict` 的 `gaps` 在 verdict 可解析时总是写，没有缺口写空数组。
+   批次历史（`batchHistory` / `allBatchEvents`）只把含 `run.started` 的 journal 当成一次批次运行：否则事件归位后，队列里每个批次的第一次运行都会变成 attempt 2、task 带「上一轮中断」（SPEC 13.10 末段）
 2. `fix_max` 升级时的 backlog 提交按 SPEC 12.1 推送，在队列 journal 记 `verdict.pushed` 或 `verdict.push_failed`
 3. FIX 重跑的 task（SPEC 13.10、11.7）：「上一轮判 FIX」一节加小节「降级原因」，写上一轮 `verdict.downgraded` 的规则号与 `reason`，有 `cause` / `detail` 时一并写；
    提交清单只列 worker 的代码提交（按 R2 提交前缀排除）。新建 `test/queue-journal.test.ts`：`queue.batch_started` 在 `q-` journal 里、不在 `r-` journal 里；
-   `Recorder` 拒绝信封键；`fix_max` 之后远端含 HEAD 且有 `verdict.pushed`；规则 9 的 FIX 重跑 task 含降级原因；清单不含 `docs: issue` 提交；没有缺口时 `gaps` 是空数组。
+   `Recorder` 拒绝信封键；`fix_max` 之后远端含 HEAD 且有 `verdict.pushed`；规则 9 的 FIX 重跑 task 含降级原因；清单不含 `docs: issue` 提交；没有缺口时 `gaps` 是空数组；
+   `--continue` 下批次第一次运行的 task 里 `attempt` 是 1、`interrupted_at` 为 null，FIX 重跑是 2。
    `test/invariants.test.ts` 加「`src/run.ts` 含 `batch_run_id`」
 
 验收标准：
@@ -1486,7 +1498,8 @@ v04-b01 标 blocked、代码已采纳（SPEC 13.11），所以依赖指向 v03-b
 | 类型检查零错误 | `npm run typecheck` | exit 0 |
 | 全部测试通过 | `npm test` | exit 0 |
 | 队列 journal 专项测试通过 | `npm test -- test/queue-journal.test.ts` | exit 0 |
-| 专项测试不少于 6 个 | `grep -cE "^\s+it\(" test/queue-journal.test.ts \| grep -qE "^([6-9]\|[1-9][0-9])$"` | exit 0 |
+| 专项测试不少于 7 个 | `grep -cE "^\s+it\(" test/queue-journal.test.ts \| grep -qE "^([7-9]\|[1-9][0-9])$"` | exit 0 |
+| 队列 journal 不算批次运行（有测试） | `grep -qE "interrupted_at" test/queue-journal.test.ts` | exit 0 |
 | 字段改名进代码与测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "batch_run_id" && grep -qE "batch_run_id" test/queue-journal.test.ts` | exit 0 |
 | 降级原因进 task 生成与测试 | `grep -rqE "降级原因" src && grep -qE "降级原因" test/queue-journal.test.ts` | exit 0 |
 | 不变量同步 | `grep -qE "batch_run_id" test/invariants.test.ts` | exit 0 |
@@ -1496,4 +1509,142 @@ v04-b01 标 blocked、代码已采纳（SPEC 13.11），所以依赖指向 v03-b
 - 为了让测试过而删除或跳过任何测试
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 改动规则 1~10、放行判定、`fix_max` 的默认值与计数方式；新增依赖
+
+## v04-b08 投影取值修补：attempt 按 R2 口径推算、运行用时、花费缺数据、空数据的 --json
+
+优先级：37　依赖：v04-b03
+
+v04-b03 的 `timeline` 与 v04-b02 的 `status` 在真实 journal 上跑出来的四处问题：操作员在队列 q-20261111051219 结束后实跑发现，验收与测试都没测到。规格见 SPEC 13.13。
+
+条目：
+1. 取值（SPEC 13.13，读这一节即可；事件字段表在 3.6）：`src/view.ts` 加一个推算 attempt 的函数，`status` 的「当前」段与 `timeline` 的 `run_end` 都用它，
+   删掉对 `batch.selected.attempt`、`run.finished.attempt` 的读取（R2 不写这两个字段）；运行用时改为 `run.finished.ts` − `run.started.ts`；
+   按版本汇总在范围内没有任何花费数据时显示 `—`
+2. 空数据的 `--json`（SPEC 13.13）：没有 journal 时 `status --json` 输出与有数据时同一结构、`timeline --json` 输出 `[]`，不再输出 `{"message": …}`。
+   R2 的验收在 `head_sha` 的干净 worktree 里跑，那里没有 `.collie/runs/`；主仓库里有 journal，在主仓库自测看不到这条失败（v04-b02 第 1 次因此 FIX）
+3. 新建 `test/view-real.test.ts`：用 `test/support/sandbox.ts` 的 `Sandbox` 让 fake runner 跑真实的 `collie run`（单批次模式，同一批次先 FIX 再 PASS 两次运行），
+   断言投影出的 attempt 依次是 1、2 且等于当次 `task.md` frontmatter 的 `attempt`，运行用时不为 null，没有花费数据时汇总显示 `—`；
+   `test/timeline.test.ts` 与 `test/view.test.ts` 的手写夹具删掉 R2 不写的字段。
+   `test/invariants.test.ts` 加「`src/view.ts` 不含 `batchSelected.attempt`」「`test/view-real.test.ts` 含 `Sandbox.create`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 真实运行夹具的专项测试通过 | `npm test -- test/view-real.test.ts` | exit 0 |
+| 专项测试用 Sandbox 跑真实一轮 | `grep -qE "Sandbox\.create" test/view-real.test.ts` | exit 0 |
+| 专项测试不少于 4 个 | `grep -cE "^\s+it\(" test/view-real.test.ts \| grep -qE "^([4-9]\|[1-9][0-9])$"` | exit 0 |
+| 投影不再读 R2 不写的字段（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" src/view.ts \| grep -qE "batchSelected\.attempt"` | exit 0 |
+| 空数据时 status --json 结构不变 | `npx tsx src/cli.ts status --json \| node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8'));process.exit('current' in j&&'queue' in j&&'lastQueue' in j?0:1)"` | exit 0 |
+| 空数据时 timeline --json 是数组 | `npx tsx src/cli.ts timeline --json \| node -e "process.exit(Array.isArray(JSON.parse(require('fs').readFileSync(0,'utf8')))?0:1)"` | exit 0 |
+| 不变量同步 | `grep -qE "view-real" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试（从手写夹具里删掉 R2 不写的字段不算）
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动 `run.ts`、`gate.ts`、`arbiter.ts`、规则 1~10；让 `status` / `timeline` 写任何文件；绕过 `src/view.ts` 直接读 journal；新增依赖
+
+## v04-b09 collie why：按 attempt 摊开证据链（重签 v04-b04）
+
+优先级：38　依赖：v04-b08
+
+v04-b04 的重签（SPEC 13.12）。规格见 SPEC 13.4；attempt 的取值按 13.13，用 v04-b08 加的推算函数，不另写一套。
+
+条目：
+1. `src/view.ts` 加 `projectWhy`（SPEC 13.4；attempt 按 13.13，用 v04-b08 的推算函数；事件字段表在 3.6）：按 attempt 汇集一个批次每次运行的证据链，顺序按 13.4；
+   字段缺失时该行显示 `—`，不报错；放行依据按 13.4 末段（有 `queue.gate_passed` 就引用，没有就列事实、不下结论）
+2. `collie why <batch_id> [--attempt <n>] [--json]`（SPEC 13.4）：每个 attempt 末尾一行结论，由规则号对应的固定模板加 `reason` 生成，不调用模型、不读信封文件；
+   退出码 0 有数据 / 1 批次不在 backlog / 2 批次在 backlog 但本机没有 journal。`cli.ts` 只做接线
+3. `test/why.test.ts`：PASS、reviewer 判 FIX 后重跑 PASS 这两种，用 `test/support/sandbox.ts` 的 `Sandbox` 让 fake runner 跑真实的 `collie run` 得到 journal；
+   规则 8 的 FIX、规则 2 的 BLOCK、规则 1 的格式错、无 report 的上报、被中断后恢复可以手写夹具，事件字段只能用 SPEC 3.6 与第 11~13 章写明的；另测三个退出码。
+   `test/invariants.test.ts` 加「`src/cli.ts` 含 `why` 命令」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| why 专项测试通过 | `npm test -- test/why.test.ts` | exit 0 |
+| 专项测试不少于 8 个 | `grep -cE "^\s+it\(" test/why.test.ts \| grep -qE "^([8-9]\|[1-9][0-9])$"` | exit 0 |
+| 专项测试含真实运行的夹具 | `grep -qE "Sandbox\.create" test/why.test.ts` | exit 0 |
+| why 已接线，已知批次不报错、未知批次报错 | `npx tsx src/cli.ts why v03-b04-fix; test $? -ne 1 && ! npx tsx src/cli.ts why no-such-batch` | exit 0 |
+| 不变量同步 | `grep -qE "why" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动 `run.ts`、`gate.ts`、`arbiter.ts`、规则 1~10；改动 `show`、`status`、`timeline` 的输出；让 `why` 写任何文件；绕过 `src/view.ts` 直接读 journal；新增依赖
+
+## v04-b10 队列里的中断自动续跑一次、验收失败全记、放行留痕
+
+优先级：39　依赖：v04-b07
+
+队列 q-20261111051219 暴露：被判空转的批次本来可以续接，队列却直接停下等人。规格见 SPEC 13.14、12.2、12.3、3.6。改的是 R2，要等固定版本前移才生效。
+
+条目：
+1. 中断续跑（SPEC 13.14；先例是 12.3 的规则 1 重跑；中断语义见 11.7）：`--continue` 下，走上报路径且 `worker_stop_reason` 是 `idling` / `stalled` / `wallclock` 的批次运行，
+   本次队列内第一次自动重跑：记 `batch.retried`（cause `interrupted`、带 stop_reason），不计 `fix_max` 与 `--max`，backlog 状态改回 `pending`，`queue.batch_started.why` 为 `interrupt_retry`；
+   第二次仍中断则停，退出码 20。worker 崩溃、`turns_exhausted`、reviewer 失败不重跑。规则 1 的重跑判断只认带 `rule: 1` 的 `batch.retried`
+2. 留痕（SPEC 13.14、3.6）：R2 实测未满足的每条验收不论裁决都记 `acceptance.failed`（规则 8 的判定不变）；
+   PASS 后放行判定通过时在队列 journal 记 `queue.gate_passed`（字段 batch_id / batch_run_id，不得用 `run_id` 作扩展字段名）
+3. 新建 `test/scenario-n.test.ts`，时钟与产出指纹按场景 G 的做法注入，不用真实定时器：空转一次后续跑 PASS、队列继续；连续两次空转退出码 20；worker 崩溃不续跑；
+   续跑不占 `fix_max`；reviewer 判 FIX 时 journal 有 `acceptance.failed`；PASS 后队列 journal 有 `queue.gate_passed`。
+   `test/invariants.test.ts` 加「`src/schema/index.ts` 含 `queue.gate_passed`」「`src/run.ts` 含 `interrupt_retry`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 场景 N 通过 | `npm test -- test/scenario-n.test.ts` | exit 0 |
+| 场景 N 不少于 6 个用例 | `grep -cE "^\s+it\(" test/scenario-n.test.ts \| grep -qE "^([6-9]\|[1-9][0-9])$"` | exit 0 |
+| 场景 N 不用真实定时器 | `test -f test/scenario-n.test.ts && ! grep -qE "setInterval\|setTimeout\(" test/scenario-n.test.ts` | exit 0 |
+| 续跑原因进代码与测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "interrupt_retry" && grep -qE "interrupt_retry" test/scenario-n.test.ts` | exit 0 |
+| 放行事件进 schema 与测试 | `grep -qE "queue\.gate_passed" src/schema/index.ts && grep -qE "queue\.gate_passed" test/scenario-n.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "queue\.gate_passed" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动规则 1~10 的判定、放行判定的六项、`fix_max` 与各项阈值的默认值；新增依赖
+
+## v04-b11 R2 的后台 git 读取不抢索引锁
+
+优先级：40　依赖：v04-b10
+
+全量测试零散失败的根因：活性检测取产出指纹时的 `git diff` / `git status` 会短暂占用 `index.lock`，worker 的 `git add` / `git commit` 撞上就失败。规格见 SPEC 13.15。
+依赖写 v04-b10 只是为了排在它之后（两批都动 R2），没有功能上的依赖。
+
+条目：
+1. `src/git.ts` 的 `git()`（SPEC 13.15，读这一节即可）：拉起 git 子进程时环境带 `GIT_OPTIONAL_LOCKS=0`，其余环境变量照常继承；不改任何调用方，不改取指纹的算法
+2. `test/git.test.ts` 加用例：通过 `git()` 执行一个打印该环境变量的别名（`-c alias.optlocks='!printenv GIT_OPTIONAL_LOCKS' optlocks`），断言输出是 `0`；
+   再断言进程环境里已有的变量（例如测试夹具设的 `GIT_CONFIG_GLOBAL`）在子进程里仍然可见
+3. `test/invariants.test.ts` 加「`src/git.ts` 含 `GIT_OPTIONAL_LOCKS`」「`src/` 下除 `src/git.ts` 外没有第二处直接 `spawn('git'`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 环境变量进代码（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/git.ts \| grep -qE "GIT_OPTIONAL_LOCKS"` | exit 0 |
+| 有测试断言子进程拿到它 | `grep -qE "GIT_OPTIONAL_LOCKS" test/git.test.ts && npm test -- test/git.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "GIT_OPTIONAL_LOCKS" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动活性检测的判定、阈值与取指纹的算法；改动规则 1~10；新增依赖
 

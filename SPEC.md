@@ -129,7 +129,7 @@ bash_deny = ["^\\s*git\\s+(push|commit|add|reset|checkout|rebase|merge|cherry-pi
 
 [limits]
 stall_secs = 300         # 事件流静默判定卡死；v02-b04 第 1 次运行 90 秒把「正在写 report」误判为卡死，上调
-progress_secs = 900      # 有事件但无产出判定空转（b04-fix 期间临时 3600，fix3 通过后恢复）
+progress_secs = 1500     # 有事件但无产出判定空转（b04-fix 期间临时 3600，fix3 通过后恢复 900；v04-b04 第 1 次：开局的读与想占满 900 秒被掐，上调，见 13.12）
 wallclock_secs = 3600    # 单批次墙钟硬顶。v03-b03 第 1 次：核心批次 +815 行、两次上下文压缩吃掉 4 分钟，2700 秒差 62 秒没写完 report，上调
 resume_max = 2           # resume 上限（v0.2 生效）
 fix_max = 2              # 同批次 FIX 上限（v0.3 生效）
@@ -374,8 +374,9 @@ type EventType =
   | 'batch.status'       // v0.3：R2 改写 backlog 状态列；字段 batch_id / from / to
   | 'queue.finished'     // v0.3：--continue 结束；字段 reason（exhausted / blocked / escalated / fix_max / limit / paused / evidence_unavailable）/ batches（本次跑过的）/ paused_count
   | 'queue.paused'       // v0.3（12.3）：PASS 但触发停表清单；字段 batch_id / reasons（数组）
-  | 'batch.retried'      // v0.3（12.3）：规则 1 BLOCK 后自动重跑一次；字段 batch_id / rule（固定 1）
-  | 'queue.batch_started' // v0.3（12.2）：队列拉起一次批次运行；字段 batch_run_id（v04-b07 前叫 run_id，见 13.10）/ batch_id / attempt / why（new / fix_retry / rule1_retry）
+  | 'batch.retried'      // v0.3（12.3）：BLOCK 后自动重跑一次；字段 batch_id，规则 1 时带 rule（固定 1），中断续跑（13.14）时带 cause（固定 interrupted）/ stop_reason
+  | 'queue.batch_started' // v0.3（12.2）：队列拉起一次批次运行；字段 batch_run_id（v04-b07 前叫 run_id，见 13.10）/ batch_id / attempt / why（new / fix_retry / rule1_retry / interrupt_retry）
+  | 'queue.gate_passed'  // v0.4（13.14）：PASS 后放行判定通过；字段 batch_id / batch_run_id
   | 'worker.started' | 'worker.finished' | 'worker.crashed'
   | 'reviewer.started' | 'reviewer.verdict'
   | 'reviewer.finished'   // v0.4（13.1）：reviewer 运行返回后、解析 verdict 之前记；字段 exit_code 与运行级字段
@@ -391,7 +392,7 @@ type EventType =
   | 'tool.denied'         // v0.3：PreToolUse 钩子拒绝了一次工具调用；字段 role / tool / command / pattern。
                           //   runner 通过 onEvent 交给 R2，R2 **同时**写进 journal（带 ts / run_id）；只落在角色事件流里不算（v03-b03-fix 第 1 次）
   | 'ci.verdict_commit'  // v0.3：启动时核查上一条裁定提交的 CI；字段 sha / conclusion / run_url
-  | 'acceptance.failed'   // 规则 8：实测验收未满足；字段 cmd / exit_code / expect
+  | 'acceptance.failed'   // R2 实测验收未满足；字段 cmd / exit_code / expect。v04-b10 起不论裁决都记（13.14），之前只在规则 8 降级时记
   | 'run.orphaned' | 'worker.stalled' | 'worker.idling'
   | 'worker.signaled' | 'worker.rescued' | 'worker.resumed';  // v0.2，见第 11 章
 // worker.finished 携带 exit_code 与 final_text（worker 最终回复，截断至 2000 字），
@@ -655,7 +656,7 @@ v0.1 不做下列内容，防止范围蔓延：
 
 ```toml
 stall_secs = 300         # 事件流静默判定卡死（v0.1 占位 90，v02-b04 后 300）
-progress_secs = 900      # 有事件但无产出判定空转（v0.1 已占位）
+progress_secs = 1500     # 有事件但无产出判定空转（v0.1 已占位；v0.4 起 1500，见 13.12）
 grace_secs = 20          # 信号阶梯每级之间的宽限
 resume_max = 2           # 同一批次 resume 上限（v0.1 已占位）
 ```
@@ -769,6 +770,7 @@ R2 在 worker 运行期间按两条独立计时判定：
   （v02-b04-fix 第 1 次运行：最后一个新变脏文件在 03:05:09，900 秒后 03:20:09 判空转，其间 worker 一直在编辑）。
 
 两者都以事件为驱动，没有事件时只有 stall 计时在走。
+空转计时从 worker 启动算起，开局的读与想也算在里面；阈值的取舍见 13.12。
 卡死只认「完全没有事件」。SDK 在模型生成一段长输出（正文或工具参数）期间不发任何事件，
 所以 `stall_secs` 必须大于单次最长输出的时长；report.md 的 Write 调用就是最长的一次
 （v02-b04 第 1 次运行：推送后 90.5 秒无事件被判卡死，实为正在写 report）。
@@ -894,7 +896,7 @@ v0.2 期间每轮有两个人工动作：操作员推送 R2 的裁定提交、�
   同一批次以前单批次模式跑过的 FIX 会把队列一上来就顶到 `fix_max`）；计数 ≤ `fix_max` 则立即重跑同批次
   （attempt 递增、沿用首次 `base_sha`，11.7）；超过则按 BLOCK 处理并记 `escalated`（reason `fix_max`），
   这条路径上的 backlog 提交同样按 12.1 推送（13.10；v04-b07 前没有推）；
-- BLOCK / 上报 → 停下，退出码 20；backlog 状态改为 `blocked`。
+- BLOCK / 上报 → 停下，退出码 20；backlog 状态改为 `blocked`。两种情况各自动重跑一次、不停：规则 1（12.3）；被信号阶梯掐掉且没有 report 的中断（13.14，v04-b10）。
 依赖未满足的批次跳过并记 `batch.skipped`；队列里没有可执行批次则记 `queue.finished`（reason `exhausted` 或 `escalated`）退出码 0 / 20。
 `--max N` 限制本次最多跑 N 个批次（缺省不限；数的是 PASS 的批次，FIX 重跑不计），到数记 `queue.finished`（reason `limit`）退出码 0。
 队列 journal（`q-` 运行目录）要能独立还原队列做了什么：每次拉起批次运行前记 `queue.batch_started`
@@ -943,6 +945,7 @@ b04 与后续批次的汇报改成每批一个 `docs/ops/` 文件（见 AGENT_KI
 目标（ROADMAP 第 6 节）：一眼看懂「项目进展到哪了、现在在干什么、那批为什么挂了」。通过标准：不看源码、不翻原始日志，仅凭四个命令能说清每个批次的来龙去脉。
 本章只做追加：规则 1~10、放行判定、队列逻辑都不变，四个命令全部只读。原定五个批次：13.1 数据补齐，13.2 投影与 `status`，13.3 `timeline`，13.4 `why`，13.5 `watch`。
 第一次队列运行（2026-11-10）之后追加两个修补批次：13.9 环境故障（v04-b06），13.10 队列收尾（v04-b07）；这两个批次改的是 R2，不在「队列逻辑不变」之内。v04-b01 的裁定见 13.11。
+第二次队列运行（2026-11-11）之后：`why` 改签为 v04-b09（13.4），追加 13.13 投影取值修补（v04-b08）、13.14 队列里的中断续跑（v04-b10，改 R2）与 13.15 后台 git 读取不抢索引锁（v04-b11，改 R2）；裁定与开局预算见 13.12。
 
 ### 13.1 观测数据补齐（v04-b01）
 
@@ -992,7 +995,7 @@ runner 没给的值不写，不写 0。
 
 ADR 批准与发布不进时间轨迹：它们是 R1 与人的动作，不经过 R2，journal 里没有对应事件，v0.4 不为此造事件。输出末尾固定一行说明去 `git log` 看。
 
-### 13.4 `collie why <batch_id>`（v04-b04）
+### 13.4 `collie why <batch_id>`（v04-b09；原 v04-b04 没有产出代码，见 13.12）
 
 按 attempt 摊开一个批次每次运行的证据链，顺序固定：worker 怎么结束的（退出码、`stop_reason`、轮数、花费）→ 取证摘要（`evidence.collected`）→
 每条 `acceptance.failed`（命令、退出码、期望）→ `claim.mismatch` → reviewer 结论与 `gaps` → CI（`ci.resolved` / `ci.wait_timeout`）→
@@ -1002,6 +1005,8 @@ PASS 的批次同样可以问：列出放行依据，以及有没有 `queue.paus
 
 退出码：0 有数据；1 批次不在 backlog；2 批次在 backlog 但本机没有它的 journal（沿用 `audit` 的「无数据」语义）。
 与 `show` 的分工：`show` 打印信封原文与事件原样；`why` 只读 journal，给出因果。
+attempt 的取值按 13.13，与 `status` / `timeline` 用同一个推算函数。放行依据：有 `queue.gate_passed`（13.14）时引用它；
+没有时（旧 journal、单批次模式）列出放行判定六项各自对应的事件事实，取不到的写 `—`，不下「已放行」的结论。
 
 ### 13.5 `collie watch`（v04-b05）
 
@@ -1021,7 +1026,8 @@ PASS 的批次同样可以问：列出放行依据，以及有没有 `queue.paus
 ### 13.7 验证
 
 v04 的批次用一次 `--continue` 连跑，同时是 ROADMAP 第 5 节 v0.3 的收口实验：数 `queue.paused` 与 BLOCK 的次数，逐个判断该不该打扰；零误放行才算过。
-第一次（2026-11-10，`--max 5`）只跑了 v04-b01 就因环境故障停下（13.11），收口实验没有做成；第二次从 v04-b02 起，`--max 6`。
+第一次（2026-11-10，`--max 5`）只跑了 v04-b01 就因环境故障停下（13.11）。第二次（2026-11-11，`--max 6`）跑了三批：v04-b02、v04-b03 通过，
+批次之间放行两次、零误放行，v04-b04 被判空转后停下（13.12）。两次合计打扰 2 次，其中应打扰 1 次；还没有一次连跑满 5 批，收口实验仍未完成。第三次从 v04-b05 起，`--max 7`。
 v0.4 自己的验证放在下一次队列运行：操作员不看源码、不翻原始日志，只用四个命令写出队列汇报；写不出来的每一处记为缺口，进下一个修补批次。
 
 ### 13.8 明确不做
@@ -1070,6 +1076,12 @@ Web dashboard、指标聚合与告警、任何可观测框架（ROADMAP 第 6 �
   worker 靠自己读 progress 才知道原因。修订：这一节加一个小节「降级原因」，写上一轮 `verdict.downgraded` 的规则号与 `reason`，有 `cause` / `detail` 时一并写；
   提交清单只列 worker 的代码提交，按 11.7 的 R2 提交前缀排除，不原样采用 reviewer 自报的 `commits_actual`（v04-b01 的清单里混进了 `docs: issue` 的信封提交）。
 
+**批次历史不得把队列 journal 当成一次运行**（2026-11-11 补，v04-b07 开跑前发现）。11.7 的批次历史把 `.collie/runs/` 下每个含该 `batch_id` 事件的 journal 都当成一次批次运行，
+没有 `run.finished` 的算中断。`queue.batch_started` 挪回队列 journal 之后，它会出现在每个批次第一次运行**之前**，于是队列里每个批次的第一次运行都会被标成 attempt 2、task 里写「上一轮中断」。
+R1 用一份只含这一条事件的队列 journal 实测过当前代码：`batchHistory` 返回 attempt 2，`interrupted_at` 是 `q-… orphaned queue.batch_started@…`。
+队列 journal 里现在就有带 `batch_id` 的事件（`batch.retried`、`batch.status`、`escalated`、`queue.paused`），按同一段代码，规则 1 重跑后的 attempt 会多 1（读代码得出，真实运行里还没出现过规则 1 重跑）。
+修订：只有含 `run.started` 的 journal 才算一次批次运行。`hasBatchRetried` 这类本来就要读队列 journal 的扫描不变。
+
 另：`reviewer.verdict` 的 `gaps` 在 verdict 可解析时总是写，没有缺口写空数组（13.1 已同步）。读 journal 的一方靠它区分「没有缺口」与「旧 journal 没有这个字段」。
 
 ### 13.11 v04-b01 的裁定（2026-11-11）
@@ -1088,4 +1100,88 @@ R1 复核发现的出入与处置：
   v04-b02 把 `hookTimeout` 设成与 `testTimeout` 相同。
 - 同一时段 R1 的机器上另有 4 次零散失败（`scenario-a`、`scenario-l` 各 1 次，`cli.test` 2 次，都是期望的退出码变成了 20），与钩子超时无关，
   单独跑这些文件不复现，原因没有查清。操作员机器与 GitHub 的 CI 上至今没有出现过。先观察，不签批次。
+
+### 13.12 第二次队列的裁定与开局预算（2026-11-11）
+
+队列 q-20261111051219（`--max 6`，固定版本 `e042215`）：
+- v04-b02 第 1 次 FIX：R2 在没有 journal 的 worktree 里实测到 `status --json` 输出的不是 JSON，worker 在有 journal 的主仓库里自测看不到。队列自动重跑，PASS。
+- v04-b03 一次 PASS。放行判定第一次在批次之间做决定，两次都放行，零误放行。
+- v04-b04：worker 在 `progress_secs`（900 秒）内没有改出任何文件，被判空转、soft 停止，没有 report，上报 BLOCK，队列停下。
+
+所有者裁定：
+- v04-b02、v04-b03 维持 PASS。
+- v04-b04 保持 `blocked`，没有代码可采纳，`why` 改签为 v04-b09。不原样重跑：它的条目要求按 attempt 展示，而 attempt 取自哪里规格没有写（13.13），R1 又不能在同一批次两次运行之间改 backlog。
+- 开局预算两条（见下）。
+- 追加三个批次，排在 v04-b07 之后：v04-b08（13.13）、v04-b09（13.4）、v04-b10（13.14）。R1 起草期间又查出 13.15，另签 v04-b11（修 R2 的缺陷，不改规则，R1 自行决定）。
+- 第三次队列仍用固定版本 `e042215`，没有按 13.6 前移到最近一次 PASS 的裁定提交：那之后的 R2 改动（v04-b01 的 journal 字段）是所有者裁定采纳的，还没有被 R2 自己判过 PASS。本次队列结束后再前移。
+
+**worker 的必读清单瘦身**（`AGENT-worker.md` 第 1 节）。v04-b04 的 worker 在写第一个文件之前读了 `SPEC.md`、`docs/progress.md`、`docs/backlog.md`（三份合计约 239KB）和几份代码，上下文到 11.5 万 token；
+接着两段长思考共约 10 分钟，第一次写入因匹配不唯一失败，随即在 16.8 万 token 处触发上下文压缩（83 秒），900 秒到点。
+`progress.md` 与 `backlog.md` 每跑一批都在变长，以后每个 worker 都要付这笔开销，而本批次的条目与验收已经全在 task 里。
+修订：不读 `docs/progress.md` 与 `docs/backlog.md`；`SPEC.md` 只读 task 点名的小节，不通读。
+相应地，R1 签批次时**条目正文**必须写明要读的 SPEC 小节号：task 只带条目、验收与额外禁止，不带 backlog 小节开头的说明文字。
+
+**`progress_secs` 900 → 1500。** 空转计时从 worker 启动算起，开局的读与想没有任何宽限，而开局规划的时间随批次大小增长（v04-b04 是那次队列里最大的一批）。
+没有采纳「计时从第一次写文件之后才开始」：那样开局阶段只剩 `wallclock_secs` 兜底，一个真空转的 worker 要到 3600 秒才被掐，按 v04-b04 的速度（900 秒 $4.00）约 $16。
+同步改三处：`.collie/collie.toml`、`templates/collie.toml`、测试里的镜像。
+
+失败矩阵（ROLES 第 5 节）写的是空转「掐掉，按 FIX 处理」，也就是重跑；队列的实现是上报后直接停。13.14 让队列对这类中断自动续跑一次，补上这个差距。
+
+测试稳定性（接 13.11）：v04-b02 加上 `hookTimeout` 之后，钩子超时没有再出现；本次队列里操作员机器上的全量运行都通过。
+13.11 记的另一类零散失败（用例期望的退出码变成 20）在 R1 的机器上仍然出现，原因已经查到，见 13.15。
+
+### 13.13 投影的取值来源（v04-b08）
+
+v04-b03 的 `timeline` 在真实 journal 上退出码 0、不报错，但有三处输出不对，验收与测试都没有测到（操作员在队列结束后实跑发现）：
+- `attempt` 永远是 `—`。13.3 与 13.4 要求显示 attempt，却没有写它取自哪里；实现读了 `batch.selected.attempt` 与 `run.finished.attempt`，R2 从来不写这两个字段，
+  测试夹具里手写了它们，所以测试全过。这是规格的错。
+- 用时只读 13.1 的 `duration_ms`，没有这个字段的 journal 一律 `—`；而每个 journal 都有 `run.started` 与 `run.finished` 的时间戳。
+- 按版本汇总时，所有运行都没有花费数据，显示 `$0.00`。
+
+修订：
+- **批次运行与 attempt。** 一次批次运行 = 一个含 `run.started` 的 journal（队列的 `q-` journal 不是批次运行，13.10）。
+  某次运行的 attempt = 1 + 同一批次里在它之前开始、且结论不是 PASS 的批次运行数（没有 `run.finished` 的也算）。
+  这是 R2 自己的口径（11.7 的批次历史：PASS 不递增，FIX 与中断都递增）。投影不得读取 R2 不写的字段。
+- **用时。** 运行用时 = `run.finished.ts` − `run.started.ts`，没有 `run.finished` 为 `null`。13.1 的 `duration_ms` 是 worker 那一段的用时，要展示就另列，不得顶替运行用时。
+- **花费。** 汇总范围内没有任何一次运行带花费数据时显示 `—`；部分有数据时显示已知之和并注明缺数据的运行数（13.3）。
+- **空数据时的 `--json`。** 没有任何 journal 时，`status --json` 输出与有数据时同一结构（`current` / `queue` / `lastQueue`，取不到的为 `null`，`queue` 照常来自 backlog），
+  `timeline --json` 输出 `[]`；不输出 `{"message": …}`（v04-b02 第 2 次的做法，当时的验收只查了是不是合法 JSON）。13.2 写的就是「`--json` 输出同一结构」。
+- **夹具。** 投影的测试至少有一组数据来自 fake runner 跑出来的真实运行（`test/support/sandbox.ts` 的 `Sandbox`），并断言投影出的 attempt 等于当次 `task.md` frontmatter 里的 `attempt`。
+  手写夹具里的事件字段只能用 3.6 与第 11~13 章写明的；现有夹具里 R2 不写的字段要删掉。
+
+不在本批次：timeline 里队列的开始节点。它依赖 `queue.batch_started` 落在队列 journal（v04-b07），而且要等固定版本前移之后产生的 journal 才有。
+
+### 13.14 队列里的中断续跑、验收失败全记、放行留痕（v04-b10）
+
+来源同 13.12。三处都改 R2，要等固定版本前移才生效。
+
+**中断自动续跑一次。** `--continue` 下，一次批次运行同时满足下面三条时，队列不停下，自动重跑同一批次一次：
+- 走的是上报路径（没有可解析的 report）；
+- worker 是被信号阶梯掐掉的：`run.finished.worker_stop_reason` 是 `idling` / `stalled` / `wallclock` 之一；
+- 本次队列里这个批次还没有因中断续跑过。
+
+做法照规则 1 的先例（12.3）：记 `batch.retried`（字段 batch_id / cause: `interrupted` / stop_reason），不计入 `fix_max`，不计入 `--max`，backlog 状态改回 `pending`，
+`queue.batch_started.why` 为 `interrupt_retry`。重跑按 11.7 的中断语义走：attempt 递增，task 写「上一轮中断」，是否续接会话照 11.7 判定。第二次仍是这种中断 → 停，退出码 20。
+不在此列、照旧直接停：worker 崩溃（`error`）、轮数用完（`turns_exhausted`）、reviewer 失败、R2 自己被杀。
+中断续跑的计数只数本次队列（与 `fix_max` 相同）；规则 1 的重跑与它各自独立计一次，判断「规则 1 是否重跑过」时只认带 `rule: 1` 的 `batch.retried`。
+理由：v04-b04 的会话是 soft 停的、可以续接，需要人做的决定只是「再跑一次」。上限一次，最坏多花一次运行的钱。
+
+**验收失败不论裁决都记。** R2 实测未满足的每一条验收都记 `acceptance.failed`（字段不变）。此前只在规则 8 把 PASS 降为 FIX 时才记：
+reviewer 自己判 FIX 时（v04-b02 第 1 次）journal 里没有任何一条说明是哪条验收失败，`why` 也就说不出来。规则 8 的判定不变。
+
+**放行留痕。** PASS 之后放行判定通过时，在队列 journal 记 `queue.gate_passed`（字段 batch_id / batch_run_id）。此前放行成立时不留任何事件，只能从下一条 `queue.batch_started` 间接推断。
+
+### 13.15 R2 的后台 git 读取不得抢索引锁（v04-b11）
+
+13.11 记的零散失败（用例期望的退出码变成 20）查到了原因（2026-11-11，R1 的机器，当时负载较高）：
+- 现象：全量 `npm test` 11 次里 6 次有 1~3 个用例失败，每次失败的用例不同，单独跑这些文件不复现。
+- 给测试辅助类临时加诊断输出后抓到其中 4 次，全部是 fake worker 的 `git add` / `git commit` 报 `Unable to create '.git/index.lock': File exists`，worker 崩溃，运行走上报路径 BLOCK。
+- 活性检测每 500 毫秒在 worker 的工作区里取一次产出指纹（11.5），执行 `git diff HEAD` 与 `git status`。这两条只读命令会顺手刷新索引，为此短暂占用 `index.lock`；worker 的提交撞上就失败。
+- 设环境变量 `GIT_OPTIONAL_LOCKS=0`（让只读命令不占这把锁）后再跑 8 次，这类失败 0 次。「另一个 git 进程就是取指纹的那个」是由这组对照推断的，没有逐进程追踪。
+
+这不只是测试的问题：真实运行里 R2 同样在 worker 的工作区里取指纹，worker 的 git 命令也可能撞上。真实 worker 遇到报错会重试，所以应表现为偶发的命令失败而不是崩溃；
+真实运行的事件流里有没有出现过，R1 没有查过，已请操作员在第三次队列里查。
+修订：R2 拉起的 git 子进程一律带 `GIT_OPTIONAL_LOCKS=0`，在 `src/git.ts` 的统一入口加。它只影响只读命令的可选索引刷新，`add` / `commit` 这些该占的锁照常占。
+
+另记：场景 G 的两个用例在高负载下各失败过 1 次（断言 `worker.idling` 没有出现），设了上面的环境变量也出现过，与索引锁无关，原因没有查。先观察，不签批次。
 

@@ -43,7 +43,7 @@ const validConfig: CollieConfig = {
   },
   limits: {
     stall_secs: 90,
-    progress_secs: 900,
+    progress_secs: 1500,
     wallclock_secs: 3600,
     resume_max: 2,
     fix_max: 2,

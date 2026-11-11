@@ -29,7 +29,7 @@ bash_deny = ["^\\\\s*git\\\\s+(push|commit|add|reset|checkout|rebase|merge|cherr
 
 [limits]
 stall_secs = 300
-progress_secs = 900
+progress_secs = 1500
 wallclock_secs = 3600
 resume_max = 2
 fix_max = 2
@@ -95,7 +95,7 @@ describe('config: the repository .collie/collie.toml', () => {
   it('has the limits of SPEC 3.1', () => {
     expect(config.limits).toEqual({
       stall_secs: 300,
-      progress_secs: 900,
+      progress_secs: 1500,
       wallclock_secs: 3600,
       resume_max: 2,
       fix_max: 2,
