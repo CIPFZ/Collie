@@ -262,6 +262,24 @@ describe('git: pushed means contained in the remote branch (SPEC 3.4)', () => {
   });
 });
 
+describe('git: GIT_OPTIONAL_LOCKS env (SPEC 13.15)', () => {
+  it('passes GIT_OPTIONAL_LOCKS=0 to git subprocesses', async () => {
+    write('a.txt', 'a\n');
+    await commitAll('init');
+    // Use a git alias that prints the env var value.
+    const out = await git(repo, ['-c', 'alias.optlocks=!printenv GIT_OPTIONAL_LOCKS', 'optlocks']);
+    expect(out.trim()).toBe('0');
+  });
+
+  it('preserves existing env vars in the subprocess (e.g. GIT_CONFIG_GLOBAL)', async () => {
+    write('a.txt', 'a\n');
+    await commitAll('init');
+    // GIT_CONFIG_GLOBAL is set in beforeAll; verify it reaches the subprocess.
+    const out = await git(repo, ['-c', 'alias.cfgglob=!printenv GIT_CONFIG_GLOBAL', 'cfgglob']);
+    expect(out.trim()).toBe(process.env.GIT_CONFIG_GLOBAL);
+  });
+});
+
 describe('git: worktrees', () => {
   it('checks out head_sha without later commits, and removes cleanly', async () => {
     write('a.txt', 'code\n');

@@ -348,4 +348,25 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
     expect(content).toContain('interrupt_retry');
   });
+
+  it('src/git.ts contains GIT_OPTIONAL_LOCKS (v04-b11)', () => {
+    const content = readFileSync(join(ROOT, 'src/git.ts'), 'utf8');
+    expect(content).toContain('GIT_OPTIONAL_LOCKS');
+  });
+
+  it('src/ files outside src/git.ts do not directly spawn git (v04-b11)', () => {
+    let output: string;
+    try {
+      output = execSync('grep -rlE "spawn\\(\'git\'" src --include="*.ts"', {
+        cwd: ROOT,
+        encoding: 'utf8',
+      }).trim();
+    } catch {
+      // grep exit 1 = no matches at all: pass.
+      return;
+    }
+    const files = output.split('\n').filter(Boolean);
+    const leaked = files.filter((f) => f !== 'src/git.ts');
+    expect(leaked, `spawn('git' found outside src/git.ts: ${leaked.join(', ')}`).toHaveLength(0);
+  });
 });

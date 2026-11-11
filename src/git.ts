@@ -25,7 +25,11 @@ const STATUS_RECORD = /^(?<code>[ A-Z?!]{2}) (?<path>.*)$/s;
 /** Runs git in `cwd` and resolves with stdout; rejects with GitError on a non-zero exit. */
 export function git(cwd: string, args: readonly string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('git', args, {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+    });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
