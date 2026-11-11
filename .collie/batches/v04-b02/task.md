@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-run_id: r-20261111051219
+run_id: r-20261111053335
 batch_id: v04-b02
 base_sha: 7f9158beee07d5b31236a55a48c46bdc4260767c
-created_at: 2026-11-11T05:12:20.400Z
-attempt: 1
+created_at: 2026-11-11T05:33:36.346Z
+attempt: 2
 interrupted_at: null
 issued_by: collie
 ---
@@ -54,3 +54,16 @@ issued_by: collie
 完成后写 `.collie/batches/v04-b02/report.md`：固定四段（做了什么 / 测试结果 / 偏离或疑问 / 下一步建议）
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v04-b02` 为提交信息单独提交并推送该文件。
+
+## 上一轮判 FIX
+
+### Gaps
+
+- 验收命令 #9 失败：src/cli.ts:478-481 的 early-return 路径在 runDataList 为空时不区分 --json 标志，输出纯文本 'no runs recorded' 而非合法 JSON。修复：在 empty 分支中检查 json 参数，json 模式下输出有效 JSON（如空 StatusView 或 {message:'no runs recorded'}）
+
+### 上一轮代码提交
+
+- `673b28cd830d7f17e911e98f0ba9f03a5c9a8c67`
+- `23da11e85b1d10445c48e81ee3b8afc1d3f06bfc`
+
+这些提交已在审核范围内，只补缺口，不要重做。
