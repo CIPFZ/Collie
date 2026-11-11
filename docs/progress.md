@@ -824,4 +824,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b06 · r-20261111095852 · PASS
+
+- 时间：2026-11-11T10:21:17.502Z
+- 裁定：规则 10，All 9 acceptance commands pass. Token file reading consolidated into readCiTokenChecked in run.ts. Startup checks in cli.ts run/runContinue/smoke all precede task issuance. evidence_unavailable cause correctly added to verdict.downgraded when rule 9 fires for environment faults. Queue stops without rerun/fix_max/backlog change, exits 20. Smoke checks token then runner then CI. Token content never leaks. 6 scenario-m tests cover all required cases and pass with fake HOME. No protected files, no dependency changes, no rule modifications. CI 以 R2 取证为准。
+- 提交：`01f4fc6` `e54af6e`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，882 passed, 0 failed
+  - `npm test -- test/scenario-m.test.ts` → exit 0，6 passed, 0 failed
+  - `HOME=$(mktemp -d) npm test -- test/scenario-m.test.ts` → exit 0，6 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/scenario-m.test.ts | grep -qE "^([6-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "evidence_unavailable" && grep -qE "evidence_unavailable" test/scenario-m.test.ts` → exit 0，exit 0
+  - `HOME=$(mktemp -d) npx tsx src/cli.ts smoke --runner fake 2>&1 | grep -qE "token_file"` → exit 0，exit 0
+  - `grep -qE "evidence_unavailable" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43002001521
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
