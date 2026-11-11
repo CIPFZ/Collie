@@ -866,4 +866,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b08 · r-20261111104513 · PASS
+
+- 时间：2026-11-11T11:07:59.383Z
+- 裁定：规则 10，All 10 acceptance commands pass. Three conditions fully implemented: attempt computed from R2 formula (computeAttempt function), run duration from timestamps, cost dash for no-data versions, empty-data --json outputs correct structure. test/view-real.test.ts has 5 tests using Sandbox with real collie run. Protected paths zero diff, no dependency changes, no prohibited files modified. CI以R2取证为准。
+- 提交：`c94222e`
+- 验收命令：10/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，898 passed, 0 failed
+  - `npm test -- test/view-real.test.ts` → exit 0，5 passed, 0 failed
+  - `grep -qE "Sandbox\.create" test/view-real.test.ts` → exit 0，exit 0
+  - `grep -cE "^\s+it\(" test/view-real.test.ts | grep -qE "^([4-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/view.ts | grep -qE "batchSelected\.attempt"` → exit 0，exit 0
+  - `npx tsx src/cli.ts status --json | node -e "const j=JSON.parse(require('fs').readFileSync(0,'utf8'));process.exit('current' in j&&'queue' in j&&'lastQueue' in j?0:1)"` → exit 0，exit 0
+  - `npx tsx src/cli.ts timeline --json | node -e "process.exit(Array.isArray(JSON.parse(require('fs').readFileSync(0,'utf8')))?0:1)"` → exit 0，exit 0
+  - `grep -qE "view-real" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43008333646
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->

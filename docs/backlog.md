@@ -54,7 +54,7 @@
 | 34 | v04-b05 | collie watch：实时跟随 | v04-b02 | passed |
 | 35 | v04-b06 | 环境故障不当成 worker 的 FIX：token 读不到就启动失败、证据取不到时队列不重跑 | v03-b04-fix | passed |
 | 36 | v04-b07 | 队列收尾：queue.batch_started 归位、fix_max 提交推送、FIX 重跑写明降级原因 | v04-b06 | passed |
-| 37 | v04-b08 | 投影取值修补：attempt 按 R2 口径推算、运行用时、花费缺数据、空数据的 --json | v04-b03 | pending |
+| 37 | v04-b08 | 投影取值修补：attempt 按 R2 口径推算、运行用时、花费缺数据、空数据的 --json | v04-b03 | passed |
 | 38 | v04-b09 | collie why：按 attempt 摊开证据链（重签 v04-b04） | v04-b08 | pending |
 | 39 | v04-b10 | 队列里的中断自动续跑一次、验收失败全记、放行留痕 | v04-b07 | pending |
 | 40 | v04-b11 | R2 的后台 git 读取不抢索引锁 | v04-b10 | pending |
