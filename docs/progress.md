@@ -888,4 +888,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b09 · r-20261111110803 · PASS
+
+- 时间：2026-11-11T11:35:24.120Z
+- 裁定：规则 10，全部 8 条验收命令通过，三个条目的要求与额外禁止逐条核对满足，受保护文件未改，无新增依赖，提交已推送。CI 以 R2 取证为准。
+- 提交：`2299370` `ab8bdf0`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，913 passed, 0 failed
+  - `npm test -- test/why.test.ts` → exit 0，14 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/why.test.ts | grep -qE "^([8-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `grep -qE "Sandbox\.create" test/why.test.ts` → exit 0，exit 0
+  - `npx tsx src/cli.ts why v03-b04-fix; test $? -ne 1 && ! npx tsx src/cli.ts why no-such-batch` → exit 0，batch no-such-batch is not in docs/backlog.md
+  - `grep -qE "why" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43012124609
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
