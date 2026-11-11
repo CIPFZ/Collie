@@ -149,6 +149,8 @@ export interface RunOutcome {
   gaps?: readonly string[];
   /** SPEC 13.9: set when rule 9 fired due to an environment failure, not worker fault. */
   evidenceUnavailableCause?: string;
+  /** SPEC 13.14: worker_stop_reason from run.finished, used by queue interrupt retry. */
+  workerStopReason?: string;
 }
 
 class Recorder {
@@ -1085,7 +1087,13 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     });
     // SPEC 11.3: heartbeat removed only after run.finished is written.
     removeHeartbeat(root);
-    return { final, exitCode: EXIT_CODES[final], ...extra };
+    return {
+      final,
+      exitCode: EXIT_CODES[final],
+      // SPEC 13.14: propagate worker_stop_reason to the queue for interrupt retry.
+      ...(workerStopReason !== undefined ? { workerStopReason } : {}),
+      ...extra,
+    };
   };
   const escalate = async (reason: string, evidenceBaseSha?: string): Promise<RunOutcome> => {
     rec.record('escalated', { reason });
@@ -1658,6 +1666,15 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
 
     // The arbiter judges claims against R2's measurements; the reviewer contributes its verdict
     // value and its own mismatches, and its evidence stays on record in verdict.md.
+    // SPEC 13.14: R2-measured failed acceptance extracted before arbitrate so we can
+    // record acceptance.failed regardless of the arbiter's rule.
+    const r2FailedAcceptance = collected.verify
+      .filter((r) => !r.passed)
+      .map((r) => ({
+        cmd: r.cmd,
+        exit_code: r.exit_code,
+        expect: expectOf(r.cmd, verifyCommands(config.verify.commands, batch)),
+      }));
     const decision = arbitrate({
       claims: report.claims,
       verdict: verdict.ok
@@ -1666,13 +1683,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       approvedDeps: APPROVED_DEPENDENCIES,
       testCommand: collected.testCommand ?? 'npm test',
       // R2's own judgement of every command against its expect (verify.ts), full stdout included.
-      failedAcceptance: collected.verify
-        .filter((r) => !r.passed)
-        .map((r) => ({
-          cmd: r.cmd,
-          exit_code: r.exit_code,
-          expect: expectOf(r.cmd, verifyCommands(config.verify.commands, batch)),
-        })),
+      failedAcceptance: r2FailedAcceptance,
     });
     for (const m of decision.mismatches) {
       rec.record('claim.mismatch', {
@@ -1682,7 +1693,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         actual: toJson(m.actual),
       });
     }
-    for (const f of decision.failedAcceptance) {
+    // SPEC 13.14: record acceptance.failed for every R2-measured failure, not just rule 8.
+    for (const f of r2FailedAcceptance) {
       rec.record('acceptance.failed', {
         cmd: f.cmd,
         exit_code: f.exit_code,
@@ -1991,9 +2003,11 @@ function hasBatchRule9Downgrade(root: string, batchId: string): boolean {
 }
 
 /**
- * SPEC 12.3: checks whether `batch.retried` (rule 1) has already been
+ * SPEC 12.3 / 13.14: checks whether `batch.retried` (rule 1) has already been
  * recorded for a given batch across all journal runs. Returns true if the
- * batch has been retried at least once.
+ * batch has been retried at least once for rule 1 specifically.
+ * SPEC 13.14: only events with `rule: 1` count; interrupt retries (cause: interrupted)
+ * are independent.
  */
 function hasBatchRetried(root: string, batchId: string): boolean {
   const runsDir = join(root, RUNS_RELATIVE_DIR);
@@ -2003,7 +2017,11 @@ function hasBatchRetried(root: string, batchId: string): boolean {
     if (!RunIdSchema.safeParse(dir).success || !existsSync(join(runsDir, dir, EVENTS_FILE_NAME)))
       continue;
     for (const event of journal.replay(dir)) {
-      if (event.event === 'batch.retried' && event.batch_id === batchId) {
+      if (
+        event.event === 'batch.retried' &&
+        event.batch_id === batchId &&
+        event.rule === RULE_UNPARSEABLE
+      ) {
         return true;
       }
     }
@@ -2038,6 +2056,10 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
   // SPEC 12.2 (v03-b04-fix): in-memory FIX counter per batch, scoped to this
   // --continue session. Does NOT scan historical runs (countBatchFinished removed).
   const fixCounts = new Map<string, number>();
+
+  // SPEC 13.14: in-memory set of batches that have already had an interrupt retry
+  // in this --continue session. At most one interrupt retry per batch per session.
+  const interruptRetried = new Set<string>();
 
   // SPEC 12.2 (v03-b04-fix): tracks what the next batch run's "why" should be
   // for the queue.batch_started event.
@@ -2127,6 +2149,12 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
         };
       }
 
+      // SPEC 13.14: record queue.gate_passed when all six gate conditions are met.
+      queueRec.record('queue.gate_passed', {
+        batch_id: currentBatchId,
+        batch_run_id: runId,
+      });
+
       // SPEC 12.3: rule 9 consecutive check. Scan the journal for verdict.downgraded
       // rule=9 events for this batch (may have occurred in a prior FIX attempt, not
       // necessarily the current PASS run). If both this batch and the previous batch
@@ -2187,6 +2215,40 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
           continue;
         }
         // Second rule 1 BLOCK: fall through to normal BLOCK handling.
+      }
+
+      // SPEC 13.14: interrupt auto-retry — escalation path with worker_stop_reason
+      // in { idling, stalled, wallclock } gets one automatic retry per batch per session.
+      const INTERRUPT_STOP_REASONS: ReadonlySet<string> = new Set([
+        'idling',
+        'stalled',
+        'wallclock',
+      ]);
+      if (
+        outcome.escalation !== undefined &&
+        outcome.workerStopReason !== undefined &&
+        INTERRUPT_STOP_REASONS.has(outcome.workerStopReason) &&
+        !interruptRetried.has(currentBatchId)
+      ) {
+        interruptRetried.add(currentBatchId);
+        queueRec.record('batch.retried', {
+          batch_id: currentBatchId,
+          cause: 'interrupted',
+          stop_reason: outcome.workerStopReason,
+        });
+        // Don't count against batchesRun for --max (it's the same batch).
+        batchesRun.pop();
+        // Reset backlog to 'pending' so selectNextBatch picks it up again.
+        updateBacklogToDisk(root, currentBatchId, 'pending', queueRec);
+        try {
+          await commit(root, `progress: ${currentBatchId} interrupt_retry`, [
+            BACKLOG_RELATIVE_PATH,
+          ]);
+        } catch {
+          // Best effort: the status was written to disk even if commit fails.
+        }
+        nextWhy = 'interrupt_retry';
+        continue;
       }
 
       // BLOCK or escalation: stop.

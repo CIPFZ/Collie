@@ -338,4 +338,14 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/cli.ts'), 'utf8');
     expect(content).toContain('why');
   });
+
+  it('src/schema/index.ts contains queue.gate_passed (v04-b10)', () => {
+    const content = readFileSync(join(ROOT, 'src/schema/index.ts'), 'utf8');
+    expect(content).toContain('queue.gate_passed');
+  });
+
+  it('src/run.ts contains interrupt_retry (v04-b10)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    expect(content).toContain('interrupt_retry');
+  });
 });

@@ -208,10 +208,13 @@ export const EVENT_TYPES = [
   // v0.3 (SPEC 12.3): PASS but gate conditions not met; fields batch_id / reasons (array).
   'queue.paused',
   // v0.3 (SPEC 12.3): rule 1 BLOCK auto-retried once; fields batch_id / rule (fixed 1).
+  // v0.4 (SPEC 13.14): interrupt auto-retry; fields batch_id / cause (fixed 'interrupted') / stop_reason.
   'batch.retried',
   // v0.3 (SPEC 12.2 v03-b04-fix): emitted before each batch run in --continue;
-  // fields run_id / batch_id / attempt / why (new / fix_retry / rule1_retry).
+  // fields batch_run_id / batch_id / attempt / why (new / fix_retry / rule1_retry / interrupt_retry).
   'queue.batch_started',
+  // v0.4 (SPEC 13.14): PASS and gate conditions met; fields batch_id / batch_run_id.
+  'queue.gate_passed',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);
