@@ -1,9 +1,6 @@
 // R2's own evidence (SPEC 8, CONSTRAINTS 铁律 4): what verify.ts, git.ts and
 // ci.ts measure, in the SPEC 3.5 evidence shape. The arbiter judges claims
 // against this, not against the reviewer's account of the same facts.
-import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, isAbsolute } from 'node:path';
 import {
   isEnvelopeOnlyDiff,
   queryCi,
@@ -90,6 +87,8 @@ export interface EvidenceInput {
   signal?: AbortSignal;
   /** Time source for the CI wait; tests pass a fake one. */
   clock?: Clock;
+  /** SPEC 13.9: pre-resolved CI token; run.ts reads it from token_file and passes it here. */
+  ciToken?: string;
 }
 
 export interface CollectedEvidence {
@@ -216,22 +215,8 @@ export async function collectEvidence(input: EvidenceInput): Promise<CollectedEv
   // Wait for head_sha's CI to settle before measuring it (v01-b05 2c). A commit
   // that is not on the remote will never get CI, so it is queried once, not awaited.
 
-  // SPEC 3.1 (token_file): read CI token from file when configured.
-  let ciToken: string | undefined;
-  if (config.ci.token_file !== undefined) {
-    const raw = config.ci.token_file;
-    const tokenPath = raw.startsWith('~')
-      ? join(homedir(), raw.slice(1))
-      : isAbsolute(raw)
-        ? raw
-        : join(root, raw);
-    try {
-      const content = readFileSync(tokenPath, 'utf8').trim();
-      if (content !== '') ciToken = content;
-    } catch {
-      // File not found or unreadable: treat as unconfigured (SPEC 3.1).
-    }
-  }
+  // SPEC 13.9: CI token is now passed in by the caller (run.ts) after being read in one place.
+  const ciToken = input.ciToken;
 
   const ciQuery = {
     repo: config.project.repo,

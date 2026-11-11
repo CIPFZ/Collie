@@ -340,6 +340,7 @@ token_file = ${JSON.stringify(tokenPath)}
       commands: [{ desc: 'true', cmd: 'true', expect: 'exit_zero' }],
       config: cfg,
       fetch: capturingFetch,
+      ciToken: 'fake-token',
     });
 
     // The Authorization header carries the trimmed token from the file.
@@ -359,6 +360,7 @@ token_file = ${JSON.stringify(tokenPath)}
       return ciFetch('main')(url, init);
     };
 
+    // ciToken not passed → no Authorization header (token_file was not readable).
     await collectEvidence({
       root: repo,
       remote: 'origin',
@@ -404,6 +406,7 @@ token_file = ${JSON.stringify(tokenPath)}
       commands: [{ desc: 'true', cmd: 'true', expect: 'exit_zero' }],
       config: cfg,
       fetch: capturingFetch,
+      ciToken: 'relative-token',
     });
 
     // The token was read from the relative path resolved against root (repo).

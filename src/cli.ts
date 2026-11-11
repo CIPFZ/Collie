@@ -10,11 +10,18 @@ import { FakeRunner } from './runner/fake.js';
 import { Command, CommanderError } from 'commander';
 import { loadBacklog } from './backlog.js';
 import { loadConfig } from './config.js';
-import type { Clock, FetchLike } from './ci.js';
+import { queryCi, type Clock, type FetchLike } from './ci.js';
 import { CONFIG_RELATIVE_PATH, parseConfig } from './config.js';
 import { git } from './git.js';
 import { createJournal, EVENTS_FILE_NAME, RUNS_RELATIVE_DIR } from './journal.js';
-import { EXIT_CODES, readEnvelope, REVIEWER_STREAM_FILE_NAME, runBatch, runQueue } from './run.js';
+import {
+  EXIT_CODES,
+  readEnvelope,
+  readCiTokenChecked,
+  REVIEWER_STREAM_FILE_NAME,
+  runBatch,
+  runQueue,
+} from './run.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { AgentRunner } from './runner/index.js';
 import { RunIdSchema, type Event } from './schema/index.js';
@@ -152,6 +159,13 @@ async function run(
     deps.err('no agent runner is available\n');
     return EXIT_CODES.ERROR;
   }
+  // SPEC 13.9: fail before issuing task when token_file is configured but unreadable.
+  try {
+    readCiTokenChecked(loadConfig(deps.cwd), deps.cwd);
+  } catch (error) {
+    deps.err(`${error instanceof Error ? error.message : String(error)}\n`);
+    return EXIT_CODES.ERROR;
+  }
   const runId = runIdAt(deps.now());
   const outcome = await runBatch({
     root: deps.cwd,
@@ -182,7 +196,12 @@ async function run(
       : outcome.decision.rule === 0
         ? outcome.decision.reason
         : `rule ${String(outcome.decision.rule)}: ${outcome.decision.reason}`;
-  deps.out(`${batchId} ${runId}: ${outcome.final} (${how})\n`);
+  // SPEC 13.9: single-batch mode adds the evidence_unavailable cause to the summary.
+  const causeSuffix =
+    outcome.evidenceUnavailableCause !== undefined
+      ? ` [evidence_unavailable: ${outcome.evidenceUnavailableCause}]`
+      : '';
+  deps.out(`${batchId} ${runId}: ${outcome.final} (${how})${causeSuffix}\n`);
   return outcome.exitCode;
 }
 
@@ -198,6 +217,13 @@ async function runContinue(
   const runner = resolveRunner(runnerChoice ?? deps.runner, deps.cwd);
   if (runner === undefined) {
     deps.err('no agent runner is available\n');
+    return EXIT_CODES.ERROR;
+  }
+  // SPEC 13.9: fail before issuing any task when token_file is configured but unreadable.
+  try {
+    readCiTokenChecked(loadConfig(deps.cwd), deps.cwd);
+  } catch (error) {
+    deps.err(`${error instanceof Error ? error.message : String(error)}\n`);
     return EXIT_CODES.ERROR;
   }
   const outcome = await runQueue({
@@ -379,13 +405,30 @@ const SMOKE_PROMPT = 'Reply with the single word ok.';
 const SMOKE_MAX_TURNS = 1;
 
 /**
- * Smoke-test the configured runner (SPEC v02-b04-fix4). Fires a single turn
- * with no tools and a trivial prompt. Does NOT write journal or touch batches.
+ * Smoke-test the configured runner (SPEC v02-b04-fix4, SPEC 13.9). Fires a
+ * single turn with no tools and a trivial prompt. Does NOT write journal or
+ * touch batches. After the runner passes, queries CI with the token to verify
+ * connectivity (SPEC 13.9).
  */
 async function smoke(deps: CliDeps, runnerChoice?: RunnerChoice): Promise<number> {
   const runner = resolveRunner(runnerChoice ?? deps.runner, deps.cwd);
   if (runner === undefined) {
     deps.err('no agent runner is available\n');
+    return EXIT_CODES.ERROR;
+  }
+  // SPEC 13.9: check token_file before calling runner (avoid spending model credits).
+  let config: ReturnType<typeof loadConfig>;
+  try {
+    config = loadConfig(deps.cwd);
+  } catch (error) {
+    deps.err(`collie: ${error instanceof Error ? error.message : String(error)}\n`);
+    return EXIT_CODES.ERROR;
+  }
+  let ciToken: string | undefined;
+  try {
+    ciToken = readCiTokenChecked(config, deps.cwd);
+  } catch (error) {
+    deps.err(`${error instanceof Error ? error.message : String(error)}\n`);
     return EXIT_CODES.ERROR;
   }
   try {
@@ -401,11 +444,33 @@ async function smoke(deps: CliDeps, runnerChoice?: RunnerChoice): Promise<number
     if (result.sessionId !== undefined) parts.push(`sessionId=${result.sessionId}`);
     if (result.usage !== undefined) parts.push(`usage=${JSON.stringify(result.usage)}`);
     deps.out(`${parts.join(' ')}\n`);
-    return EXIT_CODES.PASS;
   } catch (error) {
     deps.err(`smoke failed: ${error instanceof Error ? error.message : String(error)}\n`);
     return EXIT_CODES.ERROR;
   }
+  // SPEC 13.9: after runner passes, use token to query CI for current HEAD.
+  if (ciToken !== undefined) {
+    try {
+      const headSha = (await git(deps.cwd, ['rev-parse', 'HEAD'])).trim();
+      await queryCi(
+        {
+          repo: config.project.repo,
+          sha: headSha,
+          expectedBranch: config.ci.expected_branch,
+          token: ciToken,
+        },
+        deps.fetch,
+      );
+      deps.out('ci ok\n');
+    } catch (error) {
+      // SPEC 13.9: request failure → exit 1, print reason (not the token).
+      deps.err(
+        `smoke ci check failed: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      return EXIT_CODES.ERROR;
+    }
+  }
+  return EXIT_CODES.PASS;
 }
 
 /* eslint-disable no-restricted-syntax, @typescript-eslint/no-magic-numbers -- audit-specific exit codes (SPEC 11.2 v03-b02) */

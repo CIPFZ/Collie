@@ -147,6 +147,8 @@ export interface RunOutcome {
   evidence?: Evidence;
   /** Reviewer gaps from the verdict, available when the verdict parsed. */
   gaps?: readonly string[];
+  /** SPEC 13.9: set when rule 9 fired due to an environment failure, not worker fault. */
+  evidenceUnavailableCause?: string;
 }
 
 class Recorder {
@@ -782,20 +784,47 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
 }
 
 /**
+ * Expands `ci.token_file` from config into an absolute path.
+ * `~` expands to the user's home; relative paths are resolved from `root`.
+ */
+export function expandTokenPath(raw: string, root: string): string {
+  if (raw.startsWith('~')) return join(homedir(), raw.slice(1));
+  return isAbsolute(raw) ? raw : join(root, raw);
+}
+
+/**
+ * SPEC 13.9: reads ci.token_file with strict validation. When configured but
+ * unreadable/empty, throws an Error whose message contains `ci.token_file`,
+ * the expanded path and the reason. Used by startup checks (`collie run`,
+ * `collie smoke`) to fail before issuing a task or spending model credits.
+ */
+export function readCiTokenChecked(
+  config: { ci: { token_file?: string } },
+  root: string,
+): string | undefined {
+  if (config.ci.token_file === undefined) return undefined;
+  const raw = config.ci.token_file;
+  const tokenPath = expandTokenPath(raw, root);
+  let content: string;
+  try {
+    content = readFileSync(tokenPath, 'utf8');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`ci.token_file ${tokenPath}: ${reason}`, { cause: error });
+  }
+  if (content.trim() === '') {
+    throw new Error(`ci.token_file ${tokenPath}: file is empty`);
+  }
+  return content.trim();
+}
+
+/**
  * Reads the CI token from `config.ci.token_file` (SPEC 3.1).
  * Returns undefined when the file is not configured, missing, or empty.
  */
 function readCiToken(config: { ci: { token_file?: string } }, root: string): string | undefined {
-  if (config.ci.token_file === undefined) return undefined;
-  const raw = config.ci.token_file;
-  const tokenPath = raw.startsWith('~')
-    ? join(homedir(), raw.slice(1))
-    : isAbsolute(raw)
-      ? raw
-      : join(root, raw);
   try {
-    const content = readFileSync(tokenPath, 'utf8').trim();
-    return content === '' ? undefined : content;
+    return readCiTokenChecked(config, root);
   } catch {
     return undefined;
   }
@@ -1510,6 +1539,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         config,
         fetch: ctx.fetch,
         ...(ctx.clock === undefined ? {} : { clock: ctx.clock }),
+        // SPEC 13.9: token is read once in run.ts and passed through.
+        ...(ciTokenValue === undefined ? {} : { ciToken: ciTokenValue }),
       });
       if (collected.ciWait?.timedOut === true) {
         rec.record('ci.wait_timeout', {
@@ -1602,7 +1633,45 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         expect: toJson(f.expect),
       });
     }
-    if (decision.downgraded) {
+    // SPEC 13.9: detect evidence_unavailable when rule 9 fired due to environment failures.
+    // eslint-disable-next-line no-restricted-syntax -- SPEC 13.9: detail truncation bound
+    const DETAIL_MAX = 300;
+    let evidenceUnavailableCause: string | undefined;
+    if (decision.downgraded && decision.rule === RULE_EVIDENCE_MISSING) {
+      // Three environment failure conditions (SPEC 13.9):
+      // 1. git fetch failed while checking remote_has_head
+      // 2. CI query itself failed (HTTP error, network error, rate limit, malformed JSON)
+      // 3. Last CI poll was rate_limited (waited but couldn't get a result)
+      const details: string[] = [];
+      if (collected.remoteError !== undefined) {
+        details.push(`git fetch failed: ${collected.remoteError}`);
+      }
+      if ('error' in collected.ci) {
+        details.push(`CI query failed: ${collected.ci.error}`);
+      }
+      if (collected.ciWait?.lastState === 'rate_limited') {
+        details.push('CI wait ended with rate_limited');
+      }
+      if (details.length > 0) {
+        const detail = truncate(details.join('; '), DETAIL_MAX);
+        evidenceUnavailableCause = detail;
+        rec.record('verdict.downgraded', {
+          from: decision.original,
+          to: decision.final,
+          rule: decision.rule,
+          reason: decision.reason,
+          cause: 'evidence_unavailable',
+          detail,
+        });
+      } else {
+        rec.record('verdict.downgraded', {
+          from: decision.original,
+          to: decision.final,
+          rule: decision.rule,
+          reason: decision.reason,
+        });
+      }
+    } else if (decision.downgraded) {
       rec.record('verdict.downgraded', {
         from: decision.original,
         to: decision.final,
@@ -1666,6 +1735,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       decision,
       evidence: collected.evidence,
       gaps: verdict.ok ? verdict.value.gaps : [],
+      ...(evidenceUnavailableCause !== undefined ? { evidenceUnavailableCause } : {}),
     });
   } catch (outerError) {
     // SPEC 11.3: exception fallback. Any unexpected error after heartbeat write
@@ -2071,6 +2141,28 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
         paused_count: pausedCount,
       });
       return { exitCode: EXIT_CODES.BLOCK, reason: 'blocked', batches: batchesRun, pausedCount };
+    }
+
+    // SPEC 13.9: FIX with evidence_unavailable cause → don't rerun, don't count fix_max,
+    // don't change backlog status. Record escalated + queue.finished, exit 20.
+    if (outcome.evidenceUnavailableCause !== undefined) {
+      queueRec.record('escalated', {
+        reason: 'evidence_unavailable',
+        batch_id: currentBatchId,
+        detail: outcome.evidenceUnavailableCause,
+      });
+      queueRec.record('queue.finished', {
+        reason: 'evidence_unavailable',
+        batches: batchesRun,
+        paused_count: pausedCount,
+      });
+      ctx.err?.(outcome.evidenceUnavailableCause + '\n');
+      return {
+        exitCode: EXIT_CODES.BLOCK,
+        reason: 'evidence_unavailable',
+        batches: batchesRun,
+        pausedCount,
+      };
     }
 
     // SPEC 12.2 (v03-b04-fix): FIX → check fix_max using in-memory counter.

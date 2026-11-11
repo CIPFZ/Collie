@@ -115,7 +115,10 @@ export class Sandbox {
     const toml = readFileSync(join(repoRoot, 'templates', 'collie.toml'), 'utf8')
       .replace('"{{name}}"', '"sandbox"')
       .replace('"{{repo}}"', '"https://github.com/example/sandbox"')
-      .replace(/^commands = .*$/m, `commands = ["${TEST_CMD}"]`);
+      .replace(/^commands = .*$/m, `commands = ["${TEST_CMD}"]`)
+      // SPEC 13.9: sandbox must not depend on real home; remove token_file so
+      // readCiTokenChecked does not fail in CI or with HOME=$(mktemp -d).
+      .replace(/^token_file = .*$/m, '# token_file removed for sandbox');
     box.write('.collie/collie.toml', toml);
     box.write('.gitignore', '.collie/runs/\n.collie/heartbeat.json\n');
     box.write('SPEC.md', '# SPEC\n\nThe feature must exist.\n');
