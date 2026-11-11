@@ -288,4 +288,16 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/cli.ts'), 'utf8');
     expect(content).toContain('timeline');
   });
+
+  it('test/watch.test.ts has no real timers: setInterval or setTimeout( (v04-b05)', () => {
+    const content = readFileSync(join(ROOT, 'test/watch.test.ts'), 'utf8');
+    // SPEC 13.5: the polling loop uses injected clock and sleep in tests.
+    expect(content).not.toMatch(/setInterval|setTimeout\(/);
+  });
+
+  it('src/watch.ts writes no files and sends no signals (v04-b05)', () => {
+    const content = readFileSync(join(ROOT, 'src/watch.ts'), 'utf8');
+    // SPEC 13.5: watch is read-only: no journal writes, no heartbeat, no signals.
+    expect(content).not.toMatch(/writeFileSync|appendFileSync|process\.kill/);
+  });
 });
