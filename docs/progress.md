@@ -941,4 +941,22 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b11 · r-20261112-111806 · PASS
+
+- 时间：2026-11-12T11:24:24.033Z
+- 裁定：规则 10，All 6 acceptance commands pass. Implementation adds GIT_OPTIONAL_LOCKS=0 to git subprocess env in the single spawn point (src/git.ts:31), inheriting all other env vars via ...process.env. Two new test cases verify the env var reaches subprocesses and existing vars are preserved. Two new invariant tests enforce GIT_OPTIONAL_LOCKS presence and spawn('git' exclusivity. No protected files modified, no dependencies added, no scope creep. CI 以 R2 取证为准。
+- 提交：`049854d`
+- 验收命令：6/6 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，926 passed, 0 failed
+  - `grep -vE "^\s*(//|\*|/\*)" src/git.ts | grep -qE "GIT_OPTIONAL_LOCKS"` → exit 0，exit 0
+  - `grep -qE "GIT_OPTIONAL_LOCKS" test/git.test.ts && npm test -- test/git.test.ts` → exit 0，21 passed, 0 failed
+  - `grep -qE "GIT_OPTIONAL_LOCKS" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43016504766
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
