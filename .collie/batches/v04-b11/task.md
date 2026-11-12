@@ -1,11 +1,11 @@
 ---
 schema_version: 1
-run_id: r-20261111115621
+run_id: r-20261112-111806
 batch_id: v04-b11
 base_sha: 9f6d593eb3c65a9ad5e43192712e82647ca94070
-created_at: 2026-11-11T11:56:22.459Z
-attempt: 1
-interrupted_at: null
+created_at: 2026-11-12T11:18:11.197Z
+attempt: 2
+interrupted_at: r-20261111115621 unknown run.finished@2026-11-11T12:00:48.410Z
 issued_by: collie
 ---
 
@@ -46,3 +46,9 @@ issued_by: collie
 完成后写 `.collie/batches/v04-b11/report.md`：固定四段（做了什么 / 测试结果 / 偏离或疑问 / 下一步建议）
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v04-b11` 为提交信息单独提交并推送该文件。
+
+## 上一轮中断
+
+中断信息：`r-20261111115621 unknown run.finished@2026-11-11T12:00:48.410Z`
+
+上一轮未留下救援提交，请从 `git log` 核实已完成到哪一步。
