@@ -1000,4 +1000,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b14 · r-20261113071037 · PASS
+
+- 时间：2026-11-13T07:41:17.645Z
+- 裁定：规则 10，All 8 acceptance commands pass. Code changes correctly implement SPEC 13.18 recheck logic with when field. 8 behavioral tests all pass. No protected files modified, no dependency changes. CI以R2取证为准。
+- 提交：`0a0ef2a`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，955 passed, 0 failed
+  - `npm test -- test/verdict-ci-recheck.test.ts` → exit 0，8 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/verdict-ci-recheck.test.ts | grep -qE "^([5-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "after_evidence" && grep -qE "after_evidence" test/verdict-ci-recheck.test.ts` → exit 0，exit 0
+  - `grep -qE "previous verdict commit" test/verdict-ci-recheck.test.ts` → exit 0，exit 0
+  - `grep -qE "after_evidence" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43386741721
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
