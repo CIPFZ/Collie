@@ -1066,6 +1066,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   });
 
   // SPEC 12.1: check CI of the most recent verdict.pushed commit at startup.
+  // SPEC 13.18: when startup gets pending/no_runs, save sha for recheck after evidence.
+  let verdictCiRecheckSha: string | undefined;
   const lastVerdictSha = findLastVerdictPushedSha(root);
   if (lastVerdictSha !== undefined) {
     try {
@@ -1089,17 +1091,25 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
             sha: lastVerdictSha,
             conclusion: ciResult.conclusion,
             run_url: runUrl,
+            when: 'startup',
           });
         } else if (ciResult.conclusion === 'success') {
           rec.record('ci.verdict_commit', {
             sha: lastVerdictSha,
             conclusion: 'success',
             run_url: ciResult.runUrl ?? '',
+            when: 'startup',
           });
         }
         // Other completed conclusions: not specified, skip.
+      } else if (
+        ciResult.state === 'pending' ||
+        (ciResult.state === 'none' && ciResult.runs.length === 0)
+      ) {
+        // SPEC 13.18: pending or no_runs → remember for recheck after evidence.
+        verdictCiRecheckSha = lastVerdictSha;
       }
-      // no_runs, pending, rate_limited: don't record, don't warn (SPEC 12.1).
+      // rate_limited: don't record, don't warn, don't recheck (SPEC 12.1).
     } catch {
       // Best effort: CI check failure doesn't block startup.
     }
@@ -1749,6 +1759,39 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       return { verdict, collected };
     });
     const { verdict, collected } = outcome;
+
+    // SPEC 13.18: recheck verdict commit CI after evidence collection.
+    // Only on the normal path (not escalation) when startup got pending/no_runs.
+    if (verdictCiRecheckSha !== undefined) {
+      try {
+        const recheckResult = await queryCi(
+          {
+            repo: config.project.repo,
+            sha: verdictCiRecheckSha,
+            expectedBranch: config.ci.expected_branch,
+            ...(ciTokenValue === undefined ? {} : { token: ciTokenValue }),
+          },
+          ctx.fetch,
+        );
+        if (recheckResult.state === 'completed' && recheckResult.conclusion !== null) {
+          const runUrl = recheckResult.runUrl ?? '';
+          if (recheckResult.conclusion === 'failure' || recheckResult.conclusion === 'cancelled') {
+            ctx.err?.(
+              `warning: previous verdict commit ${verdictCiRecheckSha} CI ${recheckResult.conclusion} (${runUrl})\n`,
+            );
+          }
+          rec.record('ci.verdict_commit', {
+            sha: verdictCiRecheckSha,
+            conclusion: recheckResult.conclusion,
+            run_url: runUrl,
+            when: 'after_evidence',
+          });
+        }
+        // Still pending/no_runs after evidence: don't record (SPEC 13.18).
+      } catch {
+        // Best effort: recheck failure doesn't affect the run.
+      }
+    }
 
     // SPEC 11.3: heartbeat transitions to arbiter phase.
     updateHeartbeat(root, { phase: 'arbiter', updated_at: ctx.now().toISOString() });

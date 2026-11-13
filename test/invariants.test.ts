@@ -383,4 +383,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
     expect(content).toContain('does not resolve to a commit');
   });
+
+  it('src/run.ts contains after_evidence for verdict CI recheck (v04-b14)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    expect(content).toContain('after_evidence');
+  });
 });
