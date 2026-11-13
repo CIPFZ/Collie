@@ -180,6 +180,104 @@ describe('why — FIX then PASS (real Sandbox)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// A2. Real Sandbox runs: cost/model/tokens scripted via fake runner (SPEC 13.23)
+// ---------------------------------------------------------------------------
+
+describe('why — Sandbox with scripted cost/model/tokens (SPEC 13.23)', () => {
+  let box: Sandbox;
+
+  beforeAll(async () => {
+    box = await Sandbox.create();
+
+    // Worker scene with costUsd, numTurns, durationMs, usage scripted on result.
+    const workerWithCost: FakeScene = {
+      expectRole: 'worker',
+      effect: async ({ cwd }: FakeSceneContext) => {
+        box.write('feature.txt', 'feature\n', cwd);
+        for (let i = 0; i < 3; i++) {
+          box.write(`tests/t${String(i).padStart(3, '0')}.sh`, 'exit 0\n', cwd);
+        }
+        const head = await box.commitAll('feat: add feature with tests', cwd);
+        const report: Report = {
+          schema_version: 1,
+          batch_id: BATCH,
+          head_sha: head,
+          claims: { commits: [head], ...honestClaims(3) },
+          open_questions: [],
+        };
+        box.write(
+          `.collie/batches/${BATCH}/report.md`,
+          `# 批次 ${BATCH} 汇报\n\n## 做了什么\n完成。\n\n## 测试结果\n见 claims。\n\n## 偏离或疑问\n无\n\n## 下一步建议\n无\n\n${FENCE}json\n${JSON.stringify(report, null, 2)}\n${FENCE}\n`,
+          cwd,
+        );
+        await box.commitAll(`report(collie): ${BATCH}`, cwd);
+        await git(cwd, ['push', '-q', 'origin', 'main']);
+      },
+      result: {
+        exitCode: 0,
+        costUsd: 5.25,
+        numTurns: 15,
+        durationMs: 240000,
+        usage: { inputTokens: 8000, outputTokens: 3000, cacheCreationInputTokens: 2000 },
+      },
+    };
+
+    // Reviewer scene with costUsd, numTurns, durationMs scripted on result.
+    const reviewerWithCost = fooledReviewerScene(box, 'PASS');
+    // Override the result to include cost data.
+    const originalResult = reviewerWithCost.result;
+    reviewerWithCost.result = {
+      ...originalResult!, // eslint-disable-line @typescript-eslint/no-non-null-assertion -- test
+      costUsd: 1.5,
+      numTurns: 4,
+      durationMs: 45000,
+    };
+
+    const runner = new FakeRunner([workerWithCost, reviewerWithCost]);
+    await box.run(runner);
+  }, 60_000);
+
+  afterAll(() => {
+    box.dispose();
+  });
+
+  it('worker cost and reviewer cost are recorded in journal and projected (SPEC 13.23)', () => {
+    const runs = loadRuns(box.root);
+    const proj = projectWhy(runs, BATCH);
+    expect(proj).not.toBeNull();
+    const a = proj!.attempts[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+
+    // Worker.
+    expect(a.worker).not.toBeNull();
+    expect(a.worker?.costUsd).toBe(5.25);
+    expect(a.worker?.turns).toBe(15);
+    expect(a.worker?.durationMs).toBe(240000);
+    expect(a.worker?.tokensIn).toBe(10000); // 8000 + 2000
+    expect(a.worker?.tokensOut).toBe(3000);
+
+    // Reviewer.
+    expect(a.reviewer).not.toBeNull();
+    expect(a.reviewer?.costUsd).toBe(1.5);
+    expect(a.reviewer?.turns).toBe(4);
+    expect(a.reviewer?.durationMs).toBe(45000);
+
+    // Total cost.
+    expect(a.cost.worker).toBe(5.25);
+    expect(a.cost.reviewer).toBe(1.5);
+    expect(a.cost.total).toBeCloseTo(6.75);
+  });
+
+  it('text output includes model= and cost line (SPEC 13.23)', () => {
+    const runs = loadRuns(box.root);
+    const proj = projectWhy(runs, BATCH);
+    expect(proj).not.toBeNull();
+    const text = formatWhy(proj!); // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(text).toContain('model=');
+    expect(text).toContain('cost: worker=$5.25 reviewer=$1.50 total=$6.75');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // B. Hand-written fixtures
 // ---------------------------------------------------------------------------
 
@@ -728,6 +826,197 @@ describe('why — hand-written fixtures (SPEC 13.4)', () => {
     };
     expect(json.attempts[0]?.rule).toBeNull();
     expect(json.attempts[0]?.reason).toBeNull();
+  });
+
+  it('声称不符 reason → conclusion shows reason without 规则 (SPEC 13.23)', () => {
+    const RUN = 'r-20261110-231000';
+    const events: Event[] = [
+      makeEvent({ run_id: RUN, event: 'run.started', batch_id: 'v99-b01' }),
+      makeEvent({ run_id: RUN, event: 'worker.started', batch_id: 'v99-b01' }),
+      makeEvent({
+        run_id: RUN,
+        event: 'worker.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T23:15:00Z',
+        exit_code: 0,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'claim.mismatch',
+        batch_id: 'v99-b01',
+        field: 'head_sha',
+        claimed: 'dead000000',
+        actual: 'unresolvable',
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'run.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T23:16:00Z',
+        verdict: 'FIX',
+        exit_code: 10,
+        // No rule — SPEC 13.23: sha unresolvable FIX has no rule in run.finished.
+        reason: '声称不符：report head_sha dead000000 does not resolve to a commit',
+      }),
+    ];
+    writeJournal(root, RUN, events);
+    const runs = loadRuns(root);
+    const proj = projectWhy(runs, 'v99-b01');
+    expect(proj).not.toBeNull();
+    const a = proj!.attempts[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(a.rule).toBeNull();
+    expect(a.reason).toContain('声称不符');
+    const text = formatWhy(proj!); // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    // Should contain the reason directly, not "规则 0" or "规则 —".
+    expect(text).toContain('声称不符');
+    expect(text).not.toContain('规则 0');
+    expect(text).not.toContain('规则 —');
+    // Conclusion line format: 结论：FIX，声称不符：...
+    expect(text).toMatch(/结论：FIX，声称不符/);
+  });
+
+  it('why shows worker model, duration, tokens and reviewer model, turns, cost, duration (SPEC 13.23)', () => {
+    const RUN = 'r-20261110-232000';
+    const events: Event[] = [
+      makeEvent({ run_id: RUN, event: 'run.started', batch_id: 'v99-b01' }),
+      makeEvent({
+        run_id: RUN,
+        event: 'worker.started',
+        batch_id: 'v99-b01',
+        model: 'claude-sonnet-4-20250514',
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'worker.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T23:25:00Z',
+        exit_code: 0,
+        num_turns: 12,
+        cost_usd: 3.5,
+        duration_ms: 180000,
+        usage: {
+          input_tokens: 5000,
+          output_tokens: 2000,
+          cache_creation_input_tokens: 1000,
+          cache_read_input_tokens: 500,
+        },
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'reviewer.started',
+        batch_id: 'v99-b01',
+        head_sha: 'abc1234567890abc1234567890abc1234567890a',
+        model: 'claude-opus-4-20250514',
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'reviewer.finished',
+        batch_id: 'v99-b01',
+        exit_code: 0,
+        num_turns: 5,
+        cost_usd: 1.2,
+        duration_ms: 60000,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'reviewer.verdict',
+        batch_id: 'v99-b01',
+        verdict: 'PASS',
+        gaps: [],
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'evidence.collected',
+        batch_id: 'v99-b01',
+        tests_passed: 10,
+        tests_failed: 0,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'ci.verdict_commit',
+        batch_id: 'v99-b01',
+        sha: 'deadbeef1234',
+        conclusion: 'success',
+        when: 'startup',
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'run.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T23:30:00Z',
+        verdict: 'PASS',
+        exit_code: 0,
+        rule: 10,
+        reason: 'ok',
+      }),
+    ];
+    writeJournal(root, RUN, events);
+    const runs = loadRuns(root);
+    const proj = projectWhy(runs, 'v99-b01');
+    expect(proj).not.toBeNull();
+
+    const a = proj!.attempts[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+
+    // Worker fields (SPEC 13.23).
+    expect(a.worker).not.toBeNull();
+    expect(a.worker?.model).toBe('claude-sonnet-4-20250514');
+    expect(a.worker?.durationMs).toBe(180000);
+    expect(a.worker?.tokensIn).toBe(6500); // 5000+1000+500
+    expect(a.worker?.tokensOut).toBe(2000);
+
+    // Reviewer fields (SPEC 13.23).
+    expect(a.reviewer).not.toBeNull();
+    expect(a.reviewer?.model).toBe('claude-opus-4-20250514');
+    expect(a.reviewer?.turns).toBe(5);
+    expect(a.reviewer?.costUsd).toBe(1.2);
+    expect(a.reviewer?.durationMs).toBe(60000);
+
+    // head_sha (SPEC 13.23).
+    expect(a.headSha).toBe('abc1234567890abc1234567890abc1234567890a');
+
+    // ci.verdict_commit (SPEC 13.23).
+    expect(a.verdictCommitCi).toHaveLength(1);
+    expect(a.verdictCommitCi[0]?.sha).toBe('deadbeef1234');
+    expect(a.verdictCommitCi[0]?.conclusion).toBe('success');
+    expect(a.verdictCommitCi[0]?.when).toBe('startup');
+
+    // Cost breakdown (SPEC 13.23).
+    expect(a.cost.worker).toBe(3.5);
+    expect(a.cost.reviewer).toBe(1.2);
+    expect(a.cost.total).toBeCloseTo(4.7);
+
+    // Text output.
+    const text = formatWhy(proj!); // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(text).toContain('model=claude-sonnet-4-20250514');
+    expect(text).toContain('model=claude-opus-4-20250514');
+    expect(text).toContain('tokens=in6500/out2000');
+    expect(text).toContain('ci.verdict_commit');
+    expect(text).toContain('head_sha: abc1234567890abc1234567890abc1234567890a');
+    expect(text).toContain('cost: worker=$3.50 reviewer=$1.20 total=$4.70');
+
+    // --json fields.
+    const json = JSON.parse(JSON.stringify(proj)) as {
+      attempts: {
+        worker: { model: string; durationMs: number; tokensIn: number; tokensOut: number };
+        reviewer: { model: string; turns: number; costUsd: number; durationMs: number };
+        headSha: string;
+        verdictCommitCi: { sha: string; conclusion: string; when: string }[];
+        cost: { worker: number; reviewer: number; total: number };
+      }[];
+    };
+    expect(json.attempts[0]?.worker.model).toBe('claude-sonnet-4-20250514');
+    expect(json.attempts[0]?.worker.durationMs).toBe(180000);
+    expect(json.attempts[0]?.worker.tokensIn).toBe(6500);
+    expect(json.attempts[0]?.worker.tokensOut).toBe(2000);
+    expect(json.attempts[0]?.reviewer.model).toBe('claude-opus-4-20250514');
+    expect(json.attempts[0]?.reviewer.turns).toBe(5);
+    expect(json.attempts[0]?.reviewer.costUsd).toBe(1.2);
+    expect(json.attempts[0]?.reviewer.durationMs).toBe(60000);
+    expect(json.attempts[0]?.headSha).toBe('abc1234567890abc1234567890abc1234567890a');
+    expect(json.attempts[0]?.verdictCommitCi).toHaveLength(1);
+    expect(json.attempts[0]?.cost.worker).toBe(3.5);
+    expect(json.attempts[0]?.cost.reviewer).toBe(1.2);
+    expect(json.attempts[0]?.cost.total).toBeCloseTo(4.7);
   });
 });
 

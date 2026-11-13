@@ -421,4 +421,145 @@ describe('timeline (SPEC 13.3)', () => {
     expect(runEnd?.detail.durationMs).toBe(1800000);
     expect(runEnd?.detail.verdict).toBe('PASS');
   });
+
+  // SPEC 13.23: timeline cost = worker + reviewer (only add present ones).
+
+  it('run_end cost equals worker + reviewer when reviewer.finished has cost_usd (SPEC 13.23)', () => {
+    const runId = 'r-20261020-140000';
+    const events: Event[] = [
+      makeEvent({
+        run_id: runId,
+        event: 'run.started',
+        batch_id: BATCH_A,
+        ts: '2026-10-20T14:00:00Z',
+      }),
+      makeEvent({ run_id: runId, event: 'worker.started', batch_id: BATCH_A }),
+      makeEvent({
+        run_id: runId,
+        event: 'worker.finished',
+        batch_id: BATCH_A,
+        ts: '2026-10-20T14:20:00Z',
+        exit_code: 0,
+        cost_usd: 3.0,
+      }),
+      makeEvent({
+        run_id: runId,
+        event: 'reviewer.finished',
+        batch_id: BATCH_A,
+        exit_code: 0,
+        cost_usd: 1.5,
+      }),
+      makeEvent({
+        run_id: runId,
+        event: 'run.finished',
+        batch_id: BATCH_A,
+        ts: '2026-10-20T14:30:00Z',
+        verdict: 'PASS',
+        exit_code: 0,
+        rule: 10,
+      }),
+    ];
+    writeJournal(root, runId, events);
+
+    const runs = loadRuns(root);
+    const nodes = projectTimeline(runs);
+    const runEnd = nodes.find((n) => n.kind === 'run_end');
+    expect(runEnd).toBeDefined();
+    // SPEC 13.23: cost = worker(3.0) + reviewer(1.5) = 4.5.
+    expect(runEnd?.detail.costUsd).toBeCloseTo(4.5);
+  });
+
+  it('run_end cost equals only worker cost when reviewer has no cost (SPEC 13.23)', () => {
+    const runId = 'r-20261020-150000';
+    const events: Event[] = [
+      makeEvent({
+        run_id: runId,
+        event: 'run.started',
+        batch_id: BATCH_A,
+        ts: '2026-10-20T15:00:00Z',
+      }),
+      makeEvent({ run_id: runId, event: 'worker.started', batch_id: BATCH_A }),
+      makeEvent({
+        run_id: runId,
+        event: 'worker.finished',
+        batch_id: BATCH_A,
+        ts: '2026-10-20T15:20:00Z',
+        exit_code: 0,
+        cost_usd: 4.0,
+      }),
+      makeEvent({
+        run_id: runId,
+        event: 'reviewer.finished',
+        batch_id: BATCH_A,
+        exit_code: 0,
+        // No cost_usd on reviewer.
+      }),
+      makeEvent({
+        run_id: runId,
+        event: 'run.finished',
+        batch_id: BATCH_A,
+        ts: '2026-10-20T15:30:00Z',
+        verdict: 'PASS',
+        exit_code: 0,
+        rule: 10,
+      }),
+    ];
+    writeJournal(root, runId, events);
+
+    const runs = loadRuns(root);
+    const nodes = projectTimeline(runs);
+    const runEnd = nodes.find((n) => n.kind === 'run_end');
+    expect(runEnd).toBeDefined();
+    // SPEC 13.23: only worker has cost → total = worker's.
+    expect(runEnd?.detail.costUsd).toBe(4.0);
+  });
+
+  it('version summary totalCostUsd includes reviewer cost (SPEC 13.23)', () => {
+    // Run with both worker and reviewer cost.
+    const runId = 'r-20261020-160000';
+    const events: Event[] = [
+      makeEvent({
+        run_id: runId,
+        event: 'run.started',
+        batch_id: BATCH_A,
+        ts: '2026-10-20T16:00:00Z',
+      }),
+      makeEvent({ run_id: runId, event: 'worker.started', batch_id: BATCH_A }),
+      makeEvent({
+        run_id: runId,
+        event: 'worker.finished',
+        batch_id: BATCH_A,
+        ts: '2026-10-20T16:20:00Z',
+        exit_code: 0,
+        cost_usd: 2.5,
+      }),
+      makeEvent({
+        run_id: runId,
+        event: 'reviewer.finished',
+        batch_id: BATCH_A,
+        exit_code: 0,
+        cost_usd: 0.75,
+      }),
+      makeEvent({
+        run_id: runId,
+        event: 'run.finished',
+        batch_id: BATCH_A,
+        ts: '2026-10-20T16:30:00Z',
+        verdict: 'PASS',
+        exit_code: 0,
+        rule: 10,
+      }),
+    ];
+    writeJournal(root, runId, events);
+
+    const runs = loadRuns(root);
+    const nodes = projectTimeline(runs);
+    const summaries = projectVersionSummary(nodes);
+
+    const v01 = summaries.find((s) => s.version === 'v01');
+    expect(v01).toBeDefined();
+    // SPEC 13.23: 2.5 + 0.75 = 3.25.
+    expect(v01?.totalCostUsd).toBeCloseTo(3.25);
+    expect(v01?.runsWithoutCost).toBe(0);
+  });
 });

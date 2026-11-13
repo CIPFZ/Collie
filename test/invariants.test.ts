@@ -398,4 +398,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
     expect(content).toContain('unresolvable');
   });
+
+  it('src/view.ts contains ci.verdict_commit (v04-b17)', () => {
+    const content = readFileSync(join(ROOT, 'src/view.ts'), 'utf8');
+    expect(content).toContain('ci.verdict_commit');
+  });
 });

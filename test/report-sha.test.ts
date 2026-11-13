@@ -88,6 +88,8 @@ describe('report sha validation (SPEC 13.17 / 13.21)', () => {
     // run.finished should record FIX verdict.
     const finished = events.findLast((e) => e.event === 'run.finished');
     expect(finished?.verdict).toBe('FIX');
+    // SPEC 13.23: sha unresolvable FIX has no rule field in run.finished.
+    expect(finished).not.toHaveProperty('rule');
   });
 
   it('non-existent commits[i] sha → exit 10 FIX, claim.mismatch for commits[0]', async () => {
