@@ -1060,4 +1060,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b17 · r-20261113145215 · PASS
+
+- 时间：2026-11-13T15:12:24.364Z
+- 裁定：规则 10，All 10 acceptance commands pass (exit 0). 975 tests pass. view.ts correctly adds worker+reviewer cost to timeline and why projections. run.ts finish only writes rule for 1-10. Tests cover Sandbox scripted cost, timeline reviewer cost, 声称不符 conclusion, sha-no-rule assertion, and invariant sync. No protected files changed, no new deps. CI 以 R2 取证为准。
+- 提交：`2fe4abb` `e701903`
+- 验收命令：10/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，975 passed, 0 failed
+  - `npm test -- test/why.test.ts test/timeline.test.ts test/report-sha.test.ts` → exit 0，47 passed, 0 failed
+  - `grep -vE "^\s*(//|\*|/\*)" src/view.ts | grep -qE "ci\.verdict_commit" && grep -qE "ci\.verdict_commit" test/why.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/view.ts | grep -qE "model=" && grep -qE "model=" test/why.test.ts` → exit 0，exit 0
+  - `grep -qE "reviewer\.finished" test/timeline.test.ts` → exit 0，exit 0
+  - `grep -qE "声称不符" test/why.test.ts` → exit 0，exit 0
+  - `grep -qE "not\.toHaveProperty\(.rule.\)" test/report-sha.test.ts` → exit 0，exit 0
+  - `grep -qE "ci\.verdict_commit" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43448971821
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
