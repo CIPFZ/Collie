@@ -8,8 +8,8 @@
 > R1 签发自查（v04-b04 后，SPEC 13.12、13.13）：条目正文必须写明要读的 SPEC 小节号（worker 不再通读 SPEC，task 也不带小节开头的说明文字）；
 > 条目要求展示某个值时，写明它取自哪个事件的哪个字段，并核对 R2 确实写了它；只读命令的测试至少有一组夹具来自 fake runner 跑出的真实运行。
 
-更新时间：2026-11-11
-当前版本：v0.4（见 SPEC 第 13 章；v04-b01 已裁定采纳，v04-b04 改签为 v04-b09，队列从 v04-b05 起）
+更新时间：2026-11-13
+当前版本：v0.4（见 SPEC 第 13 章；v04-b05 到 v04-b11 已通过，队列从 v04-b12 起，固定版本 `5b132fd`）
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -57,7 +57,11 @@
 | 37 | v04-b08 | 投影取值修补：attempt 按 R2 口径推算、运行用时、花费缺数据、空数据的 --json | v04-b03 | passed |
 | 38 | v04-b09 | collie why：按 attempt 摊开证据链（重签 v04-b04） | v04-b08 | passed |
 | 39 | v04-b10 | 队列里的中断自动续跑一次、验收失败全记、放行留痕 | v04-b07 | passed |
-| 40 | v04-b11 | R2 的后台 git 读取不抢索引锁 | v04-b10 | blocked |
+| 40 | v04-b11 | R2 的后台 git 读取不抢索引锁 | v04-b10 | passed |
+| 41 | v04-b12 | 活性场景测试的假时钟：冻结前不走，加慢开局用例（只改测试） | v04-b10 | pending |
+| 42 | v04-b13 | 上报原因写对、BLOCK 后的重跑说清原因、单批次 run_id 去掉连字符 | v04-b11 | pending |
+| 43 | v04-b14 | 裁定提交的 CI 在取证后补查一次 | v04-b13 | pending |
+| 44 | v04-b15 | collie why 的结论行：规则号从降级事件推，推不出显示「规则 —」 | v04-b09 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -1647,4 +1651,143 @@ v04-b04 的重签（SPEC 13.12）。规格见 SPEC 13.4；attempt 的取值按 1
 - 为了让测试过而删除或跳过任何测试
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 改动活性检测的判定、阈值与取指纹的算法；改动规则 1~10；新增依赖
+
+记录：第 1 次（队列 q-20261111093302，r-20261111115621）代码做完、已推送、CI success，但 report 的 `head_sha` 与 `commits` 是一个不存在的 40 位 sha
+（前 7 位对，后 33 位是 worker 补的），R2 上报 BLOCK，状态 `blocked`。拦得对；上报原因写错了（SPEC 13.17）。
+第 2 次（2026-11-12，单批次模式，r-20261112-111806）worker 只重写了 report，R2 取证验收 6/6、CI success、reviewer PASS，规则 10 PASS，采纳 `049854d`。
+单批次模式不写状态列，R1 于 2026-11-13 改为 `passed`（SPEC 13.16）。
+
+## v04-b12 活性场景测试的假时钟：冻结前不走，加慢开局用例（只改测试）
+
+优先级：41　依赖：v04-b10
+
+场景 G 的两个用例随机失败（R1 的机器上多次，GitHub CI 上 1 次）：假时钟每调用一次 `now()` 走 1 毫秒，机器一慢就在判空转之前先走过了 `stall_secs`，记成了 `worker.stalled`。
+规格见 SPEC 13.19。本批次只改 `test/`，不改 `src/`。排在最前，是为了不让这个随机失败把后面批次的 CI 弄红。
+
+条目：
+1. 假时钟（SPEC 13.19，读这一节即可）：`test/scenario-g.test.ts` 与 `test/scenario-n.test.ts` 的假时钟改为「指纹冻结之前 `now()` 的返回值不变；冻结之后由注入的 `setTimer` 每次按传入的间隔推进」，
+   删掉每调用一次 `now()` 就自增的写法。两个文件共用的辅助函数可以抽到 `test/support/` 下
+2. 场景 G 加一个慢开局的用例：fake worker 在冻结指纹之前用 `setImmediate` 让出事件循环 40 万次，断言 journal 里有 `worker.idling`、没有 `worker.stalled`。
+   R1 实测：这个用例在旧时钟下必然失败（假时钟走到 300012 毫秒），在新时钟下恰好在 1000 毫秒判空转
+3. `test/invariants.test.ts` 加「`test/scenario-g.test.ts` 与 `test/scenario-n.test.ts` 不含 `+= stepMs`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 两个场景连跑三遍都通过 | `for i in 1 2 3; do npm test -- test/scenario-g.test.ts test/scenario-n.test.ts \|\| exit 1; done` | exit 0 |
+| 自增时钟已删掉 | `! grep -qE "\+= stepMs" test/scenario-g.test.ts test/scenario-n.test.ts` | exit 0 |
+| 慢开局用例断言没有判成卡死 | `grep -qE "worker\.stalled" test/scenario-g.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "stepMs" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 改动 `src/` 下任何文件（活性检测本身没有问题）
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）；新增依赖
+
+## v04-b13 上报原因写对、BLOCK 后的重跑说清原因、单批次 run_id 去掉连字符
+
+优先级：42　依赖：v04-b11
+
+v04-b11 两次运行暴露的三处。规格见 SPEC 13.17（三段各对应一个条目）。结论都不变：sha 校验不过仍是上报 BLOCK，本批次只改「怎么报」和「重跑时怎么说」。
+
+条目：
+1. sha 校验分三步报（SPEC 13.17 第一段；现有校验在 `src/run.ts` 里报 `is not a descendant of base_sha` 的那一处）：先解析 `head_sha` 与 `claims.commits` 的每一项，
+   解析不了报 `does not resolve to a commit`；再分别报「不是 base 的后代」「不是 HEAD 的祖先」；git 命令本身失败不得再被 `.catch(() => false)` 当成「不是祖先」，照旧上报并写 git 的报错原文
+2. BLOCK 后的重跑（SPEC 13.17 第二段；`src/run.ts` 的 `batchHistory` 里拼 `interrupted_at` 的地方，`src/roles/worker.ts` 的 `renderInterruptSection`）：
+   上一轮是 BLOCK 且不是被信号阶梯掐掉的，结束原因写 `escalated` 或 `blocked`，「上一轮中断」一节加一行「上一轮结论：」并写原因原文，不写「请从 `git log` 核实」那一句；真正的中断写法不变
+3. 单批次 run_id（SPEC 13.17 第三段）：`src/cli.ts` 的 `runIdAt` 改为 `r-YYYYMMDDHHMMSS`，函数名与导出不变，现有测试里的字面同步。
+   新建 `test/report-sha.test.ts`，用 `test/support/sandbox.ts` 的 `Sandbox` 让 fake runner 跑真实的 `collie run`：report 写一个不存在的 40 位 sha → 退出码 20、`escalated.reason` 含 `does not resolve to a commit`；
+   sha 存在但不是 base 的后代；同一批次紧接着再跑一次 → task 的 `interrupted_at` 含 `escalated`、正文含「上一轮结论：」与上一轮的原因原文、不含「请从」；被判空转掐掉的中断写法不变（对照）；`runIdAt` 的格式。
+   `test/invariants.test.ts` 加「`src/run.ts` 含 `does not resolve to a commit`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| sha 校验专项测试通过 | `npm test -- test/report-sha.test.ts` | exit 0 |
+| 专项测试不少于 6 个 | `grep -cE "^\s+it\(" test/report-sha.test.ts \| grep -qE "^([6-9]\|[1-9][0-9])$"` | exit 0 |
+| 新的上报原因进代码与测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "does not resolve to a commit" && grep -qE "does not resolve to a commit" test/report-sha.test.ts` | exit 0 |
+| 祖先判断的报错不再被吞（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "isAncestor\(.*\)\.catch\(\(\) => false\)"` | exit 0 |
+| 重跑说明进 task 生成与测试 | `grep -rqE "上一轮结论" src && grep -qE "上一轮结论" test/report-sha.test.ts` | exit 0 |
+| 单批次 run_id 不带连字符 | `npx tsx -e "import('./src/cli.ts').then((m)=>{const id=m.runIdAt(new Date());process.exit(id.length===16&&!id.slice(2).includes('-')?0:1)})"` | exit 0 |
+| 不变量同步 | `grep -qE "does not resolve to a commit" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试（把测试里旧格式的 run_id 字面改成新格式不算）
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动规则 1~10 的判定与上报的结论（sha 校验不过仍是 BLOCK）；改动放行判定、各项阈值；新增依赖
+
+## v04-b14 裁定提交的 CI 在取证后补查一次
+
+优先级：43　依赖：v04-b13
+
+队列里上一条裁定提交总是几秒前才推送的，启动核查查不到结果；第三次队列里 `76a8622` 的 CI 红了，journal 里没有痕迹。规格见 SPEC 13.18、12.1、3.6。
+依赖写 v04-b13 只是为了排在它之后（两批都动 `run.ts`），没有功能上的依赖。
+
+条目：
+1. 补查（SPEC 13.18；启动核查是 `src/run.ts` 里记 `ci.verdict_commit` 的那一段，原条文在 12.1）：启动核查得到 `pending` 或 `no_runs` 时记住这个 sha，本次运行取证结束后再 `queryCi` 一次；
+   有结论照 12.1 记事件，`failure` / `cancelled` 打印同一行 `warning: previous verdict commit …`；同一个 sha 一次运行至多记一次；上报路径不补查
+2. 事件字段（SPEC 13.18、3.6）：`ci.verdict_commit` 加可选字段 `when`，启动时查到的写 `startup`，补查到的写 `after_evidence`。补查只记事件与警告：不改结论、不影响放行判定、不停队列
+3. 新建 `test/verdict-ci-recheck.test.ts`，用 `Sandbox` 加测试注入的 `fetch`（按 sha 与调用次数返回不同结果）：启动时 pending、取证后 success → 一条 `when: after_evidence` 的事件；
+   取证后 failure → 有事件、输出含 `previous verdict commit`、本次运行的结论与退出码不变；两次都 pending → 不记；启动时已有结论 → 只有一条 `when: startup`；上报路径不补查。
+   `test/invariants.test.ts` 加「`src/run.ts` 含 `after_evidence`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 补查专项测试通过 | `npm test -- test/verdict-ci-recheck.test.ts` | exit 0 |
+| 专项测试不少于 5 个 | `grep -cE "^\s+it\(" test/verdict-ci-recheck.test.ts \| grep -qE "^([5-9]\|[1-9][0-9])$"` | exit 0 |
+| 补查标记进代码与测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "after_evidence" && grep -qE "after_evidence" test/verdict-ci-recheck.test.ts` | exit 0 |
+| 测试断言了警告文字 | `grep -qE "previous verdict commit" test/verdict-ci-recheck.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "after_evidence" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 让补查改变任何结论、放行判定或退出码；改动规则 1~10、各项阈值；新增依赖
+
+## v04-b15 collie why 的结论行：规则号从降级事件推，推不出显示「规则 —」
+
+优先级：44　依赖：v04-b09
+
+`why` 在没有 `run.finished.rule` 的 journal 上，结论行是 `结论：FIX，`，逗号后面是空的（操作员在真实 journal 上跑出来的）。规格见 SPEC 13.20。
+
+条目：
+1. 取值（SPEC 13.20，读这一节即可；现有实现是 `src/view.ts` 的 `projectWhy` 与 `conclusionLine`）：规则号依次取 `run.finished.rule`、该运行最后一条 `verdict.downgraded.rule`，都没有显示 `规则 —`；
+   原因依次取 `run.finished.reason`、同一条 `verdict.downgraded.reason`，都没有就不写；结论行不得以逗号结尾；`--json` 的 `rule` / `reason` 按同样的顺序取值
+2. `test/why.test.ts` 加用例：没有 `rule` 但有规则 9 的 `verdict.downgraded` → 结论行含 `规则 9`；两者都没有 → 含 `规则 —` 且不以逗号结尾；带 `rule` 的运行输出不变；`--json` 的取值。
+   这里可以手写夹具（要测的就是旧 journal 的形态，fake runner 跑不出来），事件字段只能用 SPEC 3.6 写明的
+3. `test/invariants.test.ts` 加「`src/view.ts` 含 `规则 —`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| why 专项测试通过 | `npm test -- test/why.test.ts` | exit 0 |
+| 缺规则号的写法进代码与测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/view.ts \| grep -qE "规则 —" && grep -qE "规则 —" test/why.test.ts` | exit 0 |
+| 测试覆盖从降级事件推出规则 9 | `grep -qE "规则 9" test/why.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "规则 —" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动 `run.ts`、`gate.ts`、`arbiter.ts`、规则 1~10；改动 `show`、`status`、`timeline`、`watch` 的输出；让 `why` 写任何文件；新增依赖
 

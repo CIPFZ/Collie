@@ -391,7 +391,7 @@ type EventType =
   | 'verdict.push_skipped' // v0.3：启动补推条件不满足；字段 head / reason
   | 'tool.denied'         // v0.3：PreToolUse 钩子拒绝了一次工具调用；字段 role / tool / command / pattern。
                           //   runner 通过 onEvent 交给 R2，R2 **同时**写进 journal（带 ts / run_id）；只落在角色事件流里不算（v03-b03-fix 第 1 次）
-  | 'ci.verdict_commit'  // v0.3：启动时核查上一条裁定提交的 CI；字段 sha / conclusion / run_url
+  | 'ci.verdict_commit'  // v0.3：启动时核查上一条裁定提交的 CI；字段 sha / conclusion / run_url / when（v0.4，13.18：startup / after_evidence）
   | 'acceptance.failed'   // R2 实测验收未满足；字段 cmd / exit_code / expect。v04-b10 起不论裁决都记（13.14），之前只在规则 8 降级时记
   | 'run.orphaned' | 'worker.stalled' | 'worker.idling'
   | 'worker.signaled' | 'worker.rescued' | 'worker.resumed';  // v0.2，见第 11 章
@@ -946,6 +946,7 @@ b04 与后续批次的汇报改成每批一个 `docs/ops/` 文件（见 AGENT_KI
 本章只做追加：规则 1~10、放行判定、队列逻辑都不变，四个命令全部只读。原定五个批次：13.1 数据补齐，13.2 投影与 `status`，13.3 `timeline`，13.4 `why`，13.5 `watch`。
 第一次队列运行（2026-11-10）之后追加两个修补批次：13.9 环境故障（v04-b06），13.10 队列收尾（v04-b07）；这两个批次改的是 R2，不在「队列逻辑不变」之内。v04-b01 的裁定见 13.11。
 第二次队列运行（2026-11-11）之后：`why` 改签为 v04-b09（13.4），追加 13.13 投影取值修补（v04-b08）、13.14 队列里的中断续跑（v04-b10，改 R2）与 13.15 后台 git 读取不抢索引锁（v04-b11，改 R2）；裁定与开局预算见 13.12。
+第三次队列运行（2026-11-11）之后：裁定见 13.16；追加 13.17 上报原因与重跑说明（v04-b13，改 R2）、13.18 裁定提交的 CI 补查（v04-b14，改 R2）、13.19 活性场景测试的假时钟（v04-b12，只改测试）、13.20 `why` 的结论行（v04-b15）。
 
 ### 13.1 观测数据补齐（v04-b01）
 
@@ -1028,7 +1029,9 @@ attempt 的取值按 13.13，与 `status` / `timeline` 用同一个推算函数�
 v04 的批次用一次 `--continue` 连跑，同时是 ROADMAP 第 5 节 v0.3 的收口实验：数 `queue.paused` 与 BLOCK 的次数，逐个判断该不该打扰；零误放行才算过。
 第一次（2026-11-10，`--max 5`）只跑了 v04-b01 就因环境故障停下（13.11）。第二次（2026-11-11，`--max 6`）跑了三批：v04-b02、v04-b03 通过，
 批次之间放行两次、零误放行，v04-b04 被判空转后停下（13.12）。两次合计打扰 2 次，其中应打扰 1 次；还没有一次连跑满 5 批，收口实验仍未完成。第三次从 v04-b05 起，`--max 7`。
-v0.4 自己的验证放在下一次队列运行：操作员不看源码、不翻原始日志，只用四个命令写出队列汇报；写不出来的每一处记为缺口，进下一个修补批次。
+第三次（2026-11-11，`--max 7`）：v04-b05 到 v04-b10 六批连续一次 PASS，批次之间放行 6 次、零误放行；v04-b11 因 report 里的 sha 不存在被上报 BLOCK（13.16），打扰 1 次、应打扰 0 次。
+按 ROADMAP 第 5 节的通过标准（连跑 5 批、零误放行、被打扰次数 ≤ 应打扰次数 + 1），这一次的数字达标；v0.3 是否记为收口由所有者裁定，本节只记数字。
+v0.4 自己的验证放在第四次队列（v04-b12 起，固定版本前移之后）：操作员不看源码、不翻原始日志，只用四个命令写出队列汇报；写不出来的每一处记为缺口，进下一个修补批次。
 
 ### 13.8 明确不做
 
@@ -1184,4 +1187,78 @@ reviewer 自己判 FIX 时（v04-b02 第 1 次）journal 里没有任何一条�
 修订：R2 拉起的 git 子进程一律带 `GIT_OPTIONAL_LOCKS=0`，在 `src/git.ts` 的统一入口加。它只影响只读命令的可选索引刷新，`add` / `commit` 这些该占的锁照常占。
 
 另记：场景 G 的两个用例在高负载下各失败过 1 次（断言 `worker.idling` 没有出现），设了上面的环境变量也出现过，与索引锁无关，原因没有查。先观察，不签批次。
+（2026-11-13 补：原因已查到，见 13.19。）
+
+### 13.16 第三次队列与 v04-b11 的裁定（2026-11-13）
+
+队列 q-20261111093302（`--max 7`，固定版本 `e042215`，2 小时 28 分，$44.63）：
+- v04-b05 到 v04-b10 六批都是第 1 次 PASS。R1 复核：lint 与类型检查通过，七个批次的专项验收逐条通过，worker 的提交没有碰受保护路径。
+- 开局预算（13.12）见效：7 个 worker 都没有读 `docs/progress.md` / `docs/backlog.md`，也没有通读 SPEC；第一次文件改动在 53~644 秒（中位数 286 秒），只有 1 个压缩过 1 次，没有 `worker.idling`。
+- v04-b11 第 1 次：代码做完、已推送、CI success，但 report 的 `head_sha` 与 `commits` 写的是一个不存在的 40 位 sha（前 7 位对，后 33 位是 worker 自己补的；
+  它整个会话里只见过 7 位短 sha）。R2 走上报路径 BLOCK，队列停下。拦是对的；`escalated.reason` 写的是「不是后代或不是祖先」，真实原因是 sha 不存在（13.17）。
+- v04-b11 第 2 次（2026-11-12，单批次模式 `collie run v04-b11`，r-20261112-111806，$0.94）：worker 只重写了 report，R2 取证验收 6/6、CI success、reviewer PASS，规则 10 **PASS**。
+  单批次模式不写 backlog 状态列（12.2），R1 把 v04-b11 改为 `passed`。这次是 R2 自己取到的证据，不是裁定采纳。
+  这一次能过有运气成分：task 的「上一轮中断」只写了 `unknown`，worker 把原因猜成了「上一轮超时」，是恰好从 `git show` 的输出里拿到了完整 sha（13.17）。
+- 索引锁（13.15）：操作员查了三次队列全部 14 个运行的 worker 与 reviewer 事件流，没有一次真实的 `index.lock` 报错。v04-b11 之后 R1 的机器上 8 次全量测试也没有再出现这类失败。
+  所以 13.15 的现象到目前为止只在 fake worker 的高频测试里出现过。
+
+固定版本从 `e042215` 前移到 `5b132fd`（v04-b11 的裁定提交，13.6）。v04-b01、b06、b07、b10、b11 对 R2 的改动从第四次队列起第一次生效。
+
+R1 自己定的（修 R2 的缺陷与偏离，不改规则）：追加 v04-b12 到 v04-b15（13.17~13.20；只改测试的 v04-b12 排在最前，免得那个随机失败的测试把后面批次的 CI 弄红）；worker 手册写明 sha 的取法；操作员等 next.md 的上限从 12 小时放到 48 小时。
+
+待所有者裁定，本次不做：
+- report 里的 sha 解析不了时，由「上报 BLOCK、队列停下」改为「声称不符 → FIX、自动重跑」。这是改仲裁规则。v04-b13 只把原因写对，结论不变。
+- v0.3 是否记为收口（13.7）。
+
+### 13.17 上报的原因要写对，重跑要说清原因（v04-b13）
+
+**sha 校验分三步报。** R2 读到 report 之后（11.7 的 `head_sha` 校验处）：
+1. 先解析 `head_sha` 与 `claims.commits` 的每一项（`git rev-parse --verify <sha>^{commit}`）。任何一项解析不了：上报原因写 `report head_sha <sha> does not resolve to a commit`
+   （`commits` 里的写 `report commits[<i>] <sha> does not resolve to a commit`），不再往下判。
+2. 能解析但不是首次 `base_sha` 的后代：`report head_sha <sha> is not a descendant of base_sha <base>`。
+3. 是后代但不是当前 `HEAD` 的祖先：`report head_sha <sha> is not an ancestor of HEAD`。
+
+git 命令本身失败（`merge-base --is-ancestor` 的退出码不是 0 或 1）不得再被当成「不是祖先」：现有实现用 `.catch(() => false)` 把它吞掉了，v04-b11 第 1 次的 128（`Not a valid commit name`）因此被报成了祖先关系的问题。
+这类失败照旧上报，原因写 git 的报错原文（截断至 300 字）。**结论不变**：三种情况都仍是上报 BLOCK；要不要改判为 FIX 待所有者裁定（13.16）。
+
+**BLOCK 之后的重跑要告诉 worker 上一轮为什么被拦。** 上一轮 `run.finished.verdict` 是 BLOCK、且不是被信号阶梯掐掉的（没有 `worker_stop_reason`，或它不是 `idling` / `stalled` / `wallclock`）：
+- `interrupted_at` 里的结束原因写 `escalated`（上一轮有 `escalated` 事件）或 `blocked`（规则判的 BLOCK），不再是 `unknown`；
+- 「上一轮中断」一节加一行「上一轮结论：」，写上一轮最后一条 `escalated.reason` 的原文，或「规则 <n>：<run.finished.reason>」（都截断至 500 字）；
+- 这种情况下不写「请从 `git log` 核实已完成到哪一步」那一句（代码没有丢，只是结论被拦），改写「上一轮的提交仍在审核范围内，按上面的结论只补缺口」。
+
+被信号阶梯掐掉、崩溃、孤儿这些真正的中断，写法不变。
+
+**单批次模式的 run_id 去掉中间的 `-`。** 12.2 写的是批次运行 `r-YYYYMMDDHHMMSS`，队列模式早就如此；单批次模式（`cli.ts` 的 `runIdAt`）仍是 `r-YYYYMMDD-HHMMSS`。
+两种格式混在一起时按目录名排序会错位（带 `-` 的排在同一天所有不带的之前），而批次历史正是按目录名排序的。统一成不带 `-` 的；已有的带 `-` 的 journal 照常能读。
+现存唯一一个带 `-` 的 v04 运行是 r-20261112-111806，当天没有别的运行，不影响现有数据。
+
+### 13.18 裁定提交的 CI 要补查（v04-b14）
+
+12.1 的启动核查只在启动那一刻查一次，查到 `pending` / `no_runs` 就不记。队列里上一条裁定提交总是几秒前才推送的，所以除了第一批，这项核查从来查不到结果。
+第一个真实反例：第三次队列里 `76a8622`（`progress: v04-b06 PASS`，只改 docs）的 CI 失败（13.19 的随机失败），journal 里没有任何痕迹，是操作员事后用 token 查出来的。
+
+修订：启动核查得到 `pending` 或 `no_runs` 时，本次运行在自己取证结束后（等过 `head_sha` 的 CI 之后）对同一个 sha 再查一次：
+有结论就照 12.1 记 `ci.verdict_commit`（`failure` / `cancelled` 同样打印那一行 stderr 警告），仍没有结论就不记。同一个 sha 在一次运行里至多记一次。
+`ci.verdict_commit` 追加可选字段 `when`：启动时查到的写 `startup`，补查到的写 `after_evidence`；没有这个字段的旧事件按 `startup` 理解。
+走上报路径、没有取证阶段的运行不补查，留给下一次启动。只记事件与警告：不改任何结论，不影响放行判定，不停队列。队列里最后一条裁定提交仍然要等下一次启动才查得到。
+
+### 13.19 活性场景测试的假时钟（v04-b12，只改测试）
+
+场景 G 的两个用例随机失败（R1 的机器上多次，GitHub CI 上 1 次，即 13.18 的 `76a8622`），原因查到了（2026-11-13）：
+- 失败时 journal 记的是 `worker.stalled` 而不是 `worker.idling`（两次失败都抓到了）。
+- 测试里的假时钟每调用一次 `now()` 走 1 毫秒，而 fake worker 开局的几次 `git commit` 是真实耗时。活性监视器在这段时间里靠 `setImmediate` 空转，每转一圈调用两次 `now()`；
+  机器一慢，圈数把假时钟推过 `stall_secs`（300 秒）就判成了卡死。
+- 对照实验（R1，临时改测试、未提交）：让 fake worker 在冻结指纹之前多让出事件循环 40 万次，旧时钟**必然**失败（假时钟走到 300012 毫秒，记 `worker.stalled`）；
+  把时钟改成「冻结之前不走、冻结之后每次检查按注入的间隔推进」，同样的慢开局下恰好在 1000 毫秒判空转，通过。不加慢开局时两种时钟都通过。
+
+这是测试的缺陷，不是活性检测的缺陷：真实运行用真实时钟。修订只动测试：
+- 场景 G 与场景 N 的假时钟改为：指纹冻结之前 `now()` 的返回值不变；冻结之后由注入的 `setTimer` 每次按传入的间隔推进。不得再有「每调用一次 `now()` 就自增」的时钟。
+- 场景 G 增加一个慢开局的用例（让出事件循环 40 万次），断言记到 `worker.idling`、没有 `worker.stalled`。
+
+### 13.20 `why` 的结论行（v04-b15）
+
+`run.finished` 没有 `rule` 时（v04-b01 生效之前的 journal，以及固定版本 `e042215` 跑出来的全部 journal），结论行是 `结论：FIX，`，逗号后面是空的。修订：
+- 规则号取 `run.finished.rule`；没有就取该运行最后一条 `verdict.downgraded.rule`；再没有显示 `规则 —`。
+- 原因取 `run.finished.reason`；没有就取同一条 `verdict.downgraded.reason`；再没有就不写原因。
+- 结论行不得以逗号结尾。`--json` 里的 `rule` / `reason` 按同样的顺序取值，取不到为 `null`。
 

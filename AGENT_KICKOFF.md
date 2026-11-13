@@ -171,7 +171,8 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
 
   你推送汇报之后等 next.md 变化，用一条阻塞的命令等，不要每分钟一轮对话：
   `B=$(git log -n1 --format=%H -- docs/ops/next.md); for i in $(seq 1 30); do git pull -q --ff-only; [ "$(git log -n1 --format=%H -- docs/ops/next.md)" != "$B" ] && break; sleep 60; done; grep -m1 '^状态：' docs/ops/next.md`
-  你的工具对单条命令有时长上限就分段重复。等满 30 分钟还没有变化，发一条通知「R1 没有回应」，之后继续等；累计等满 12 小时就结束，在对话里说明。
+  你的工具对单条命令有时长上限就分段重复。等满 30 分钟还没有变化，发一条通知「R1 没有回应」，之后继续等；累计等满 48 小时就结束，在对话里说明
+  （原为 12 小时：R1 只在所有者说话时才能行动，前两次都是等满 12 小时后所有者才来，只好再传一次话）。
   所有者说「拉」仍然有效（= 立刻 pull、读 next.md、照做）。
 - **通知。** 所有者会把企业微信群机器人的地址放在 `~/.config/collie/notify-webhook`（不进仓库，不要打印它）。文件不存在就跳过，在汇报里记一句，不算失败：
   `notify() { W=~/.config/collie/notify-webhook; test -s "$W" || { echo "no webhook, skipped"; return 0; }; node -e 'process.stdout.write(JSON.stringify({msgtype:"text",text:{content:process.argv[1]}}))' "$1" | curl -s -m 10 -o /dev/null -w '%{http_code}\n' -H 'Content-Type: application/json' -d @- "$(cat "$W")"; }`
