@@ -954,6 +954,7 @@ b04 与后续批次的汇报改成每批一个 `docs/ops/` 文件（见 AGENT_KI
 第二次队列运行（2026-11-11）之后：`why` 改签为 v04-b09（13.4），追加 13.13 投影取值修补（v04-b08）、13.14 队列里的中断续跑（v04-b10，改 R2）与 13.15 后台 git 读取不抢索引锁（v04-b11，改 R2）；裁定与开局预算见 13.12。
 第三次队列运行（2026-11-11）之后：裁定见 13.16；追加 13.17 上报原因与重跑说明（v04-b13，改 R2）、13.18 裁定提交的 CI 补查（v04-b14，改 R2）、13.19 活性场景测试的假时钟（v04-b12，只改测试）、13.20 `why` 的结论行（v04-b15）。
 所有者 2026-11-13 的两条裁定记在 13.16 末段：v0.3 记为收口；report 里的 sha 解析不了改判为 FIX，规格是 13.21（v04-b16，改 R2）。
+第四次队列运行（2026-11-13）之后：裁定见 13.22；追加 13.23 `why` / `timeline` 补齐 journal 里已有的数据（v04-b17）。
 
 ### 13.1 观测数据补齐（v04-b01）
 
@@ -1039,6 +1040,7 @@ v04 的批次用一次 `--continue` 连跑，同时是 ROADMAP 第 5 节 v0.3 �
 第三次（2026-11-11，`--max 7`）：v04-b05 到 v04-b10 六批连续一次 PASS，批次之间放行 6 次、零误放行；v04-b11 因 report 里的 sha 不存在被上报 BLOCK（13.16），打扰 1 次、应打扰 0 次。
 按 ROADMAP 第 5 节的通过标准（连跑 5 批、零误放行、被打扰次数 ≤ 应打扰次数 + 1），这一次的数字达标；所有者 2026-11-13 裁定 v0.3 记为收口（第 12 章开头）。
 v0.4 自己的验证放在第四次队列（v04-b12 起，固定版本前移之后）：操作员不看源码、不翻原始日志，只用四个命令写出队列汇报；写不出来的每一处记为缺口，进下一个修补批次。
+第四次（2026-11-13，`--max 5`）：v04-b12 到 v04-b16 五批都是第 1 次 PASS，放行 5 次、零误放行，打扰 0 次。操作员第一次只用四个命令填满了「实际经过」表；缺口清单 10 条，裁定见 13.22。
 
 ### 13.8 明确不做
 
@@ -1286,3 +1288,51 @@ git 命令本身失败（`merge-base --is-ancestor` 的退出码不是 0 或 1�
 重跑的 task 按 11.7 的 FIX 语义生成，「上一轮判 FIX」一节加小节「声称不符」，逐条列出上一轮 `claim.mismatch` 的 field / claimed / actual（规则 5~7 的声称不符同样列），
 并写一句「sha 一律抄 `git rev-parse` 的输出」。上一轮没有 `reviewer.verdict` 事件时（本节这种情况），这一节**不读** `verdict.md`
 （仓库里那份可能是更早一轮留下的），Gaps 为空，提交清单取首次 `base_sha..HEAD` 里的 worker 代码提交（按 11.7 的 R2 提交前缀排除）。
+
+### 13.22 第四次队列的裁定（2026-11-13）
+
+队列 q-20261113062615（`--max 5`，固定版本 `5b132fd`，1 小时 52 分，$27.66）：v04-b12 到 b16 五批都是第 1 次 PASS，放行 5 次都记了 `queue.gate_passed`，零误放行，打扰 0 次。
+R1 复核：lint 与类型检查通过；全量测试连跑 3 次都是 50 个文件、965 个全过（v04-b12 之前同一台机器上 3 次里有 1~2 次挂在场景 G）；
+五批的专项验收在 HEAD 上逐条实跑，除下面第 2 条说的一条外都通过；受保护路径只有 backlog 的 5 个状态格；没有删除或跳过的测试（两处 `it(` 的删除行是改成 `async` 后的同名用例）。
+新 R2 第一次生效的几项（`queue.batch_started` 落在 `q-` journal、`queue.gate_passed`、第一次运行的 attempt 为 1、journal 里的轮数与花费）都对，花费与事件流逐个相同。
+
+R1 发现的两处，都进 v04-b17：
+1. **v04-b16 偏离 13.21：** sha 解析不了的 FIX，`run.finished` 带了 `rule: 0`（13.21 写的是不带 rule）。`why` 因此显示「结论：FIX，规则 0：规则 0 — 声称不符：…」。
+   progress 那一行没受影响（`progress.ts` 对规则 0 只写原因）。R1 用 fake runner 实跑了「第 1 次写错、第 2 次写对」的队列：FIX → `fix_retry` → PASS，`claim.mismatch` 两条、重跑 task 的「声称不符」一节都对，只有这一处错。reviewer 没有核到这一处。
+2. **v04-b13 的一条验收在 HEAD 上不再成立**（`test/report-sha.test.ts` 里已经没有 `does not resolve to a commit`）。这是 v04-b16 按裁定改了行为、改写了那条测试，属预期，不追究；已通过批次的验收只说明它通过时的状态。
+
+操作员的缺口清单（`docs/ops/queue-20261113.md` 第 2 段）：
+- 第 1、2、3、5 条（reviewer 的花费没算进合计、`why` 不显示 head_sha、不显示 `ci.verdict_commit`、不显示模型 / 用时 / token）：数据都已经在 journal 里，进 v04-b17。
+  其中花费最要紧：`timeline` 与 `--by version` 只加了 worker，本次少算 $4.02（约 15%）。
+- 第 4 条（worker 声称了什么）：声称只在 `report.md` 里，不在 journal 里。四个命令只读 journal（13.2），不做；要看就用 `show`。
+- 第 6~10 条（开局、取 sha 的过程、推送间隔、每个提交的 CI、开发中途的红测试）：只有 `stream.ndjson` 或 GitHub 有，在 13.2 的边界之外，v0.4 不做。
+
+**不变量的数值放宽**（v04-b16 把 `await push(` 的上限从 4 改成 5，理由正当，但没人提）：R1 定的做法是三方各补一句，不改裁定规则——
+R1 能预见时在条目里写明新的上限；worker 改了 `test/invariants.test.ts` 的任何数值上下限，必须在 report「偏离或疑问」里写出原值、新值和理由；
+reviewer 在核对表里单列一行「不变量数值变化」，原样列出每一处，task 没有写明的同时写进 `reason`。是否算缺口仍按第 3 节的判据，不因此单独判 FIX。
+
+固定版本从 `5b132fd` 前移到 `d7d6e47`（v04-b16 的裁定提交，与 HEAD 的 `src/`、`test/` 完全相同，依赖没变）。v04-b13、b14、b16 对 R2 的改动从第五次队列起生效。
+
+v0.4 的收口：等 v04-b17 通过，第五次队列的汇报仍然只用四个命令写、且没有「数据在 journal 里却看不到」的缺口时，R1 提请所有者裁定。
+
+### 13.23 `why` 与 `timeline` 补齐 journal 里已有的数据（v04-b17）
+
+只用 3.6 与 13.1 已经写进 journal 的字段，不加新事件，不读 `stream.ndjson` / `report.md`。
+
+**花费算上 reviewer。** 一次运行的花费 = `worker.finished.cost_usd` + `reviewer.finished.cost_usd`，只加有的；两者都没有才是 `—`。
+`timeline` 的 `run_end` 与 `--by version` 的 `cost` 都按这个口径，「没有花费数据的运行」指两者都没有的运行。
+
+**`why` 每个 attempt 补四处**（顺序沿用 13.4，取不到的写 `—`）：
+- `worker:` 行追加 `model=`（`worker.started.model`）、`duration=`（`worker.finished.duration_ms`，按 `timeline` 的时长格式）、`tokens=in<N>/out<M>`
+  （in = `usage` 里 `input_tokens`、`cache_creation_input_tokens`、`cache_read_input_tokens` 中有的之和，out = `output_tokens`）；
+- `reviewer:` 行在结论与 gaps 之外追加 `model=`（`reviewer.started.model`）、`turns=`、`cost=`、`duration=`（`reviewer.finished`）；
+- 取证一行之后加 `head_sha: <40 位>`，取 `reviewer.started.head_sha`，没有再取 `ci.resolved.head_sha`；
+- 推送一段之前列出本次运行的每条 `ci.verdict_commit`：`ci.verdict_commit: <sha> <conclusion> when=<when>`，没有 `when` 字段的写 `startup`（13.18）；
+- 每个 attempt 的结论行之前加一行 `cost: worker=<$> reviewer=<$> total=<$>`。
+
+`--json` 增加对应字段：`worker.model` / `worker.durationMs` / `worker.tokensIn` / `worker.tokensOut`、`reviewer.model` / `reviewer.turns` / `reviewer.costUsd` / `reviewer.durationMs`、
+`headSha`、`verdictCommitCi`（数组，元素 `sha` / `conclusion` / `when`）、`cost`（`worker` / `reviewer` / `total`），取不到为 `null`。
+
+**声称不符的结论行。** `run.finished` 没有 `rule`、`reason` 以「声称不符：」开头时，结论行写 `结论：FIX，<reason>`，不写「规则 —」。
+
+**R2 那一处偏离（13.22 第 1 条）。** `run.finished` 只在规则号是 1~10 时写 `rule`；sha 解析不了的 FIX 不写。`progress.md` 的写法不变。

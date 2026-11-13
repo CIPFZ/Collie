@@ -9,7 +9,7 @@
 > 条目要求展示某个值时，写明它取自哪个事件的哪个字段，并核对 R2 确实写了它；只读命令的测试至少有一组夹具来自 fake runner 跑出的真实运行。
 
 更新时间：2026-11-13
-当前版本：v0.4（v0.3 已于 2026-11-13 记为收口；见 SPEC 第 13 章；v04-b05 到 v04-b11 已通过，队列从 v04-b12 起，固定版本 `5b132fd`）
+当前版本：v0.4（v0.3 已于 2026-11-13 记为收口；见 SPEC 第 13 章；v04-b05 到 v04-b16 已通过，队列从 v04-b17 起，固定版本 `d7d6e47`）
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -63,6 +63,7 @@
 | 43 | v04-b14 | 裁定提交的 CI 在取证后补查一次 | v04-b13 | passed |
 | 44 | v04-b15 | collie why 的结论行：规则号从降级事件推，推不出显示「规则 —」 | v04-b09 | passed |
 | 45 | v04-b16 | report 里的 sha 解析不了改判为声称不符：FIX 并自动重跑 | v04-b13 | passed |
+| 46 | v04-b17 | why / timeline 补齐 journal 里已有的数据：reviewer 花费、模型、用时、token、head_sha、裁定提交 CI | v04-b16 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -1828,3 +1829,43 @@ v04-b13 已把这项检查拆成三步，本批次只改第 1 步的去向。
 - 为了让测试过而删除或跳过任何测试（把 v04-b13 那条「不存在的 sha → 退出码 20」的断言改成新行为不算）
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 改动规则 1~10 的判定；让「不是后代」「不是祖先」或其他上报路径变成 FIX；改动放行判定、`fix_max` 与各项阈值；新增依赖
+
+## v04-b17 why / timeline 补齐 journal 里已有的数据：reviewer 花费、模型、用时、token、head_sha、裁定提交 CI
+
+优先级：46　依赖：v04-b16
+
+第四次队列的汇报第一次只用四个命令写成，留下的缺口里有五条的数据其实已经在 journal 里，只是命令没显示；其中花费少算了 reviewer（约 15%）。
+另有 v04-b16 的一处偏离：sha 解析不了的 FIX 写了 `rule: 0`，`why` 显示成「规则 0：规则 0」。规格见 SPEC 13.23（读这一节和 13.4 即可）。
+
+条目：
+1. `src/view.ts`（SPEC 13.23 前两段；timeline 的 `run_end` 与按版本汇总，`projectWhy` / `formatWhy` / `WhyAttempt`）：一次运行的花费 = worker + reviewer 的 `cost_usd`，只加有的，两者都没有才算缺数据；
+   `why` 补 worker 的模型、用时、token，reviewer 的模型、轮数、花费、用时，`head_sha`，本次运行的 `ci.verdict_commit`，每个 attempt 一行 `cost: worker=… reviewer=… total=…`，以及对应的 `--json` 字段
+2. 声称不符的结论行与 R2 的那一处（SPEC 13.23 后两段）：`view.ts` 里 reason 以「声称不符：」开头且没有 rule 时写 `结论：FIX，<reason>`；`src/run.ts` 的 `finish` 只在规则号 1~10 时写 `rule`。
+   `run.ts` 只许改这一处，不改 sha 校验、仲裁和队列的任何逻辑
+3. 测试：`test/why.test.ts` 与 `test/timeline.test.ts` 各加用例，至少一组数据用 `Sandbox` 让 fake runner 跑真实的 `collie run` 产生（fake runner 的 `result` 能脚本化 `costUsd` / `numTurns` / `durationMs` / `usage`）：
+   timeline 的花费等于 worker 与 reviewer 之和、只有 worker 有花费时等于 worker 的；why 的四处与 `--json` 字段；sha 写错的那次运行结论行含「声称不符」、不含「规则 0」与「规则 —」。
+   `test/report-sha.test.ts` 加断言：sha 解析不了时 `run.finished` 没有 `rule` 字段。`test/invariants.test.ts` 加「`src/view.ts` 含 `ci.verdict_commit`」
+
+本批次不应改动 `test/invariants.test.ts` 已有的任何数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 投影专项测试通过 | `npm test -- test/why.test.ts test/timeline.test.ts test/report-sha.test.ts` | exit 0 |
+| why 显示裁定提交 CI（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/view.ts \| grep -qE "ci\.verdict_commit" && grep -qE "ci\.verdict_commit" test/why.test.ts` | exit 0 |
+| why 显示模型（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/view.ts \| grep -qE "model=" && grep -qE "model=" test/why.test.ts` | exit 0 |
+| timeline 测试覆盖 reviewer 花费 | `grep -qE "reviewer\.finished" test/timeline.test.ts` | exit 0 |
+| 声称不符的结论行有测试 | `grep -qE "声称不符" test/why.test.ts` | exit 0 |
+| sha 写错时 run.finished 不带 rule | `grep -qE "not\.toHaveProperty\(.rule.\)" test/report-sha.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "ci\.verdict_commit" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 新增事件或字段；读取 `stream.ndjson` 或 `report.md`；让四个命令写任何文件
+- `run.ts` 除条目 3 那一处外的任何改动；改动规则 1~10、放行判定、各项阈值；新增依赖
