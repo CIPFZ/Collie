@@ -1039,4 +1039,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b16 · r-20261113075508 · PASS
+
+- 时间：2026-11-13T08:18:13.951Z
+- 裁定：规则 10，全部 9 条验收命令通过，3 个条目结构与行为核对均满足，无保护文件变更、无新依赖、scope 无蔓延。CI 以 R2 取证为准。
+- 提交：`9437943`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，965 passed, 0 failed
+  - `npm test -- test/report-sha.test.ts` → exit 0，10 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/report-sha.test.ts | grep -qE "^(9|[1-9][0-9])$"` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "unresolvable" && grep -qE "unresolvable" test/report-sha.test.ts` → exit 0，exit 0
+  - `grep -qE "claim\.mismatch" test/report-sha.test.ts && grep -qE "fix_retry" test/report-sha.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "声称不符" && grep -qE "声称不符" test/report-sha.test.ts` → exit 0，exit 0
+  - `grep -qE "unresolvable" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43391100621
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
