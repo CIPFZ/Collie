@@ -509,8 +509,15 @@ export function projectTimeline(runDataList: readonly RunData[]): TimelineNode[]
           runStarted !== undefined
             ? new Date(e.ts).getTime() - new Date(runStarted.ts).getTime()
             : null;
+        // SPEC 13.23: cost = worker + reviewer; only add what's present, both missing = null.
         const wf = rd.events.find((ev) => ev.event === 'worker.finished');
-        const costUsd = wf !== undefined ? asNumber(wf.cost_usd) : null;
+        const rf = rd.events.find((ev) => ev.event === 'reviewer.finished');
+        const wCost = wf !== undefined ? asNumber(wf.cost_usd) : null;
+        const rCost = rf !== undefined ? asNumber(rf.cost_usd) : null;
+        let costUsd: number | null = null;
+        if (wCost !== null || rCost !== null) {
+          costUsd = (wCost ?? 0) + (rCost ?? 0);
+        }
         nodes.push({
           ts: e.ts,
           kind: 'run_end',
@@ -825,6 +832,14 @@ export interface WhyAttempt {
     stopReason: string | null;
     turns: number | null;
     costUsd: number | null;
+    /** SPEC 13.23: worker.started.model. */
+    model: string | null;
+    /** SPEC 13.23: worker.finished.duration_ms. */
+    durationMs: number | null;
+    /** SPEC 13.23: sum of input_tokens + cache_creation_input_tokens + cache_read_input_tokens. */
+    tokensIn: number | null;
+    /** SPEC 13.23: output_tokens. */
+    tokensOut: number | null;
   } | null;
 
   /** 2. Evidence summary from evidence.collected (SPEC 13.1). */
@@ -837,7 +852,18 @@ export interface WhyAttempt {
   claimMismatches: { field: string; claimed: unknown; actual: unknown }[];
 
   /** 5. Reviewer conclusion and gaps (SPEC 13.4). */
-  reviewer: { verdict: string | null; gaps: string[] } | null;
+  reviewer: {
+    verdict: string | null;
+    gaps: string[];
+    /** SPEC 13.23: reviewer.started.model. */
+    model: string | null;
+    /** SPEC 13.23: reviewer.finished.num_turns. */
+    turns: number | null;
+    /** SPEC 13.23: reviewer.finished.cost_usd. */
+    costUsd: number | null;
+    /** SPEC 13.23: reviewer.finished.duration_ms. */
+    durationMs: number | null;
+  } | null;
 
   /** 6. CI evidence (SPEC 13.4). */
   ciResolved: {
@@ -866,6 +892,15 @@ export interface WhyAttempt {
 
   /** 10. Push events: verdict.pushed / push_failed / push_skipped (SPEC 13.4). */
   pushEvents: { event: string; ts: string; detail: Record<string, unknown> }[];
+
+  /** SPEC 13.23: head_sha from reviewer.started or ci.resolved. */
+  headSha: string | null;
+
+  /** SPEC 13.23: ci.verdict_commit events for this run. */
+  verdictCommitCi: { sha: string; conclusion: string; when: string }[];
+
+  /** SPEC 13.23: cost breakdown per attempt. */
+  cost: { worker: number | null; reviewer: number | null; total: number | null };
 
   /** Conclusion: verdict, rule, reason from run.finished. */
   verdict: string | null;
@@ -920,7 +955,34 @@ function eventDetail(e: Event): Record<string, unknown> {
 function projectWhyAttempt(events: readonly Event[], attempt: number, runId: string): WhyAttempt {
   const started = findEvent(events, 'run.started');
   const finished = findEvent(events, 'run.finished');
+  const workerStarted = findEvent(events, 'worker.started');
   const workerFinished = findEvent(events, 'worker.finished');
+  const reviewerStarted = findEvent(events, 'reviewer.started');
+  const reviewerFinished = findEvent(events, 'reviewer.finished');
+
+  // SPEC 13.23: worker model from worker.started.
+  const workerModel = workerStarted !== undefined ? asString(workerStarted.model) : null;
+
+  // SPEC 13.23: worker token breakdown from usage in worker.finished.
+  let workerTokensIn: number | null = null;
+  let workerTokensOut: number | null = null;
+  if (
+    workerFinished !== undefined &&
+    typeof workerFinished.usage === 'object' &&
+    workerFinished.usage !== null
+  ) {
+    const u = workerFinished.usage as Record<string, unknown>;
+    const inputTokens = typeof u.input_tokens === 'number' ? u.input_tokens : 0;
+    const cacheCreation =
+      typeof u.cache_creation_input_tokens === 'number' ? u.cache_creation_input_tokens : 0;
+    const cacheRead = typeof u.cache_read_input_tokens === 'number' ? u.cache_read_input_tokens : 0;
+    workerTokensIn = inputTokens + cacheCreation + cacheRead;
+    workerTokensOut = typeof u.output_tokens === 'number' ? u.output_tokens : null;
+    // If all were zero defaults (no data), stay null.
+    if (inputTokens === 0 && cacheCreation === 0 && cacheRead === 0 && !('input_tokens' in u)) {
+      workerTokensIn = null;
+    }
+  }
 
   // 1. Worker ending.
   const worker =
@@ -930,6 +992,10 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
           stopReason: asString(workerFinished.stop_reason),
           turns: asNumber(workerFinished.num_turns),
           costUsd: asNumber(workerFinished.cost_usd),
+          model: workerModel,
+          durationMs: asNumber(workerFinished.duration_ms),
+          tokensIn: workerTokensIn,
+          tokensOut: workerTokensOut,
         }
       : null;
 
@@ -964,6 +1030,13 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
           gaps: Array.isArray(reviewerEvent.gaps)
             ? (reviewerEvent.gaps as unknown[]).filter((g): g is string => typeof g === 'string')
             : [],
+          // SPEC 13.23: reviewer.started.model.
+          model: reviewerStarted !== undefined ? asString(reviewerStarted.model) : null,
+          // SPEC 13.23: reviewer.finished fields.
+          turns: reviewerFinished !== undefined ? asNumber(reviewerFinished.num_turns) : null,
+          costUsd: reviewerFinished !== undefined ? asNumber(reviewerFinished.cost_usd) : null,
+          durationMs:
+            reviewerFinished !== undefined ? asNumber(reviewerFinished.duration_ms) : null,
         }
       : null;
 
@@ -1026,6 +1099,31 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
     .filter((e) => WHY_PUSH_TYPES.has(e.event))
     .map((e) => ({ event: e.event, ts: e.ts, detail: eventDetail(e) }));
 
+  // SPEC 13.23: head_sha from reviewer.started, fallback to ci.resolved.
+  const headShaFromReviewer =
+    reviewerStarted !== undefined ? asString(reviewerStarted.head_sha) : null;
+  const ciResolvedForSha = findEvent(events, 'ci.resolved');
+  const headShaFromCi = ciResolvedForSha !== undefined ? asString(ciResolvedForSha.head_sha) : null;
+  const headSha = headShaFromReviewer ?? headShaFromCi;
+
+  // SPEC 13.23: ci.verdict_commit events.
+  const verdictCommitCi = events
+    .filter((e) => e.event === 'ci.verdict_commit')
+    .map((e) => ({
+      sha: asString(e.sha) ?? '—',
+      conclusion: asString(e.conclusion) ?? '—',
+      when: asString(e.when) ?? 'startup',
+    }));
+
+  // SPEC 13.23: cost breakdown = worker + reviewer; both missing = null.
+  const workerCost = worker?.costUsd ?? null;
+  const reviewerCost = reviewer?.costUsd ?? null;
+  let totalCost: number | null = null;
+  if (workerCost !== null || reviewerCost !== null) {
+    totalCost = (workerCost ?? 0) + (reviewerCost ?? 0);
+  }
+  const cost = { worker: workerCost, reviewer: reviewerCost, total: totalCost };
+
   // Conclusion — SPEC 13.20: rule/reason fallback order:
   //   run.finished → last verdict.downgraded → null.
   const verdict = finished !== undefined ? asString(finished.verdict) : null;
@@ -1053,6 +1151,9 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
     interrupts,
     toolDenied,
     pushEvents,
+    headSha,
+    verdictCommitCi,
+    cost,
     verdict,
     rule,
     reason,
@@ -1152,13 +1253,17 @@ const RULE_TEMPLATES: Record<number, string> = {
 };
 /* eslint-enable no-restricted-syntax, @typescript-eslint/no-magic-numbers */
 
-/** Formats the conclusion line for an attempt (SPEC 13.4, 13.20). */
+/** Formats the conclusion line for an attempt (SPEC 13.4, 13.20, 13.23). */
 function conclusionLine(a: WhyAttempt): string {
   if (a.escalated !== null) {
     return `结论：BLOCK，上报：${a.escalated}`;
   }
   if (a.verdict === null) {
     return '结论：（运行未完成）';
+  }
+  // SPEC 13.23: reason starting with "声称不符：" and no rule → show reason only, no 规则.
+  if (a.rule === null && a.reason?.startsWith('声称不符：') === true) {
+    return `结论：${a.verdict}，${a.reason}`;
   }
   // SPEC 13.20: rule fallback already applied in projectWhyAttempt;
   // when still null, display 规则 —.
@@ -1185,6 +1290,9 @@ export function formatWhy(proj: WhyProjection): string {
         `stop_reason=${dash(w.stopReason)}`,
         `turns=${dash(w.turns)}`,
         `cost=${w.costUsd !== null ? `$${w.costUsd.toFixed(COST_DECIMALS)}` : '—'}`,
+        `model=${dash(w.model)}`,
+        `duration=${formatDuration(w.durationMs)}`,
+        `tokens=${w.tokensIn !== null || w.tokensOut !== null ? `in${dash(w.tokensIn)}/out${dash(w.tokensOut)}` : '—'}`,
       ];
       lines.push(`worker: ${parts.join(' ')}`);
     } else {
@@ -1226,7 +1334,13 @@ export function formatWhy(proj: WhyProjection): string {
     // 5. Reviewer.
     if (a.reviewer !== null) {
       const gapStr = a.reviewer.gaps.length > 0 ? `, gaps: ${JSON.stringify(a.reviewer.gaps)}` : '';
-      lines.push(`reviewer: ${dash(a.reviewer.verdict)}${gapStr}`);
+      const revParts = [
+        `model=${dash(a.reviewer.model)}`,
+        `turns=${dash(a.reviewer.turns)}`,
+        `cost=${a.reviewer.costUsd !== null ? `$${a.reviewer.costUsd.toFixed(COST_DECIMALS)}` : '—'}`,
+        `duration=${formatDuration(a.reviewer.durationMs)}`,
+      ];
+      lines.push(`reviewer: ${dash(a.reviewer.verdict)}${gapStr} ${revParts.join(' ')}`);
     } else {
       lines.push('reviewer: —');
     }
@@ -1241,6 +1355,16 @@ export function formatWhy(proj: WhyProjection): string {
       lines.push(
         `ci.wait_timeout: waited ${dash(a.ciWaitTimeout.waitedSecs)}s last_state=${dash(a.ciWaitTimeout.lastState)}`,
       );
+    }
+
+    // SPEC 13.23: head_sha after evidence section.
+    if (a.headSha !== null) {
+      lines.push(`head_sha: ${a.headSha}`);
+    }
+
+    // SPEC 13.23: ci.verdict_commit entries.
+    for (const vc of a.verdictCommitCi) {
+      lines.push(`ci.verdict_commit: ${vc.sha} ${vc.conclusion} when=${vc.when}`);
     }
 
     // 7. Downgraded / escalated.
@@ -1274,6 +1398,14 @@ export function formatWhy(proj: WhyProjection): string {
         .map(([k, v]) => `${k}=${String(v)}`)
         .join(' ');
       lines.push(`${p.event}: ${p.ts}${detail !== '' ? ` ${detail}` : ''}`);
+    }
+
+    // SPEC 13.23: cost breakdown line before conclusion.
+    {
+      const wc = a.cost.worker !== null ? `$${a.cost.worker.toFixed(COST_DECIMALS)}` : '—';
+      const rc = a.cost.reviewer !== null ? `$${a.cost.reviewer.toFixed(COST_DECIMALS)}` : '—';
+      const tc = a.cost.total !== null ? `$${a.cost.total.toFixed(COST_DECIMALS)}` : '—';
+      lines.push(`cost: worker=${wc} reviewer=${rc} total=${tc}`);
     }
 
     // Conclusion line.

@@ -1175,8 +1175,14 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       // SPEC 11.7: run.finished always carries the worker's exit info.
       ...(workerExitCode !== undefined ? { worker_exit_code: workerExitCode } : {}),
       ...(workerStopReason !== undefined ? { worker_stop_reason: workerStopReason } : {}),
-      // SPEC 13.1 (v0.4): rule and reason from the arbiter decision.
-      ...(extra.decision?.rule !== undefined ? { rule: extra.decision.rule } : {}),
+      // SPEC 13.1 (v0.4) / 13.23: rule only when 1–10; sha-unresolvable FIX has no rule.
+      /* eslint-disable no-restricted-syntax, @typescript-eslint/no-magic-numbers -- SPEC 4.3 rule range */
+      ...(extra.decision?.rule !== undefined &&
+      extra.decision.rule >= 1 &&
+      extra.decision.rule <= 10
+        ? { rule: extra.decision.rule }
+        : {}),
+      /* eslint-enable no-restricted-syntax, @typescript-eslint/no-magic-numbers */
       ...(extra.decision?.reason !== undefined
         ? { reason: truncate(extra.decision.reason, REASON_MAX) }
         : {}),
