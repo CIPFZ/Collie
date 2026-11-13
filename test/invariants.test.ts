@@ -388,4 +388,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
     expect(content).toContain('after_evidence');
   });
+
+  it('src/view.ts contains 规则 — for missing rule fallback (v04-b15)', () => {
+    const content = readFileSync(join(ROOT, 'src/view.ts'), 'utf8');
+    expect(content).toContain('规则 —');
+  });
 });

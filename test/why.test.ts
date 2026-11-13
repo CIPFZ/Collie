@@ -552,6 +552,183 @@ describe('why — hand-written fixtures (SPEC 13.4)', () => {
     expect(text).toContain('worker.signaled');
     expect(text).toContain('worker.resumed');
   });
+
+  // SPEC 13.20: conclusion line rule/reason fallback tests.
+
+  it('no rule on run.finished but verdict.downgraded has rule 9 → conclusion shows 规则 9', () => {
+    const RUN = 'r-20261110-200000';
+    const events: Event[] = [
+      makeEvent({ run_id: RUN, event: 'run.started', batch_id: 'v99-b01' }),
+      makeEvent({ run_id: RUN, event: 'worker.started', batch_id: 'v99-b01' }),
+      makeEvent({
+        run_id: RUN,
+        event: 'worker.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T20:05:00Z',
+        exit_code: 0,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'verdict.downgraded',
+        batch_id: 'v99-b01',
+        from: 'PASS',
+        to: 'FIX',
+        rule: 9,
+        reason: 'evidence unavailable',
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'run.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T20:10:00Z',
+        verdict: 'FIX',
+        exit_code: 10,
+        // No rule or reason on run.finished — old journal format.
+      }),
+    ];
+    writeJournal(root, RUN, events);
+    const runs = loadRuns(root);
+    const proj = projectWhy(runs, 'v99-b01');
+    expect(proj).not.toBeNull();
+    const a = proj!.attempts[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    // SPEC 13.20: rule falls back to verdict.downgraded.rule.
+    expect(a.rule).toBe(9);
+    expect(a.reason).toBe('evidence unavailable');
+    const text = formatWhy(proj!); // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(text).toContain('规则 9');
+    expect(text).toContain('证据缺失');
+    expect(text).not.toMatch(/结论：FIX，$/m);
+  });
+
+  it('neither run.finished nor verdict.downgraded has rule → 规则 —, no trailing comma', () => {
+    const RUN = 'r-20261110-210000';
+    const events: Event[] = [
+      makeEvent({ run_id: RUN, event: 'run.started', batch_id: 'v99-b01' }),
+      makeEvent({ run_id: RUN, event: 'worker.started', batch_id: 'v99-b01' }),
+      makeEvent({
+        run_id: RUN,
+        event: 'worker.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T21:05:00Z',
+        exit_code: 0,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'run.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T21:10:00Z',
+        verdict: 'FIX',
+        exit_code: 10,
+        // No rule, no reason, no verdict.downgraded event.
+      }),
+    ];
+    writeJournal(root, RUN, events);
+    const runs = loadRuns(root);
+    const proj = projectWhy(runs, 'v99-b01');
+    expect(proj).not.toBeNull();
+    const a = proj!.attempts[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(a.rule).toBeNull();
+    expect(a.reason).toBeNull();
+    const text = formatWhy(proj!); // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(text).toContain('规则 —');
+    // Must not end with comma (SPEC 13.20).
+    expect(text).not.toMatch(/结论：FIX，$/m);
+    expect(text).not.toMatch(/结论：FIX，\n/);
+  });
+
+  it('run.finished with rule present → output unchanged (existing behaviour)', () => {
+    const RUN = 'r-20261110-220000';
+    const events: Event[] = [
+      makeEvent({ run_id: RUN, event: 'run.started', batch_id: 'v99-b01' }),
+      makeEvent({ run_id: RUN, event: 'worker.started', batch_id: 'v99-b01' }),
+      makeEvent({
+        run_id: RUN,
+        event: 'worker.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T22:05:00Z',
+        exit_code: 0,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'run.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T22:10:00Z',
+        verdict: 'PASS',
+        exit_code: 0,
+        rule: 10,
+        reason: 'looks good',
+      }),
+    ];
+    writeJournal(root, RUN, events);
+    const runs = loadRuns(root);
+    const proj = projectWhy(runs, 'v99-b01');
+    expect(proj).not.toBeNull();
+    const a = proj!.attempts[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(a.rule).toBe(10);
+    expect(a.reason).toBe('looks good');
+    const text = formatWhy(proj!); // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(text).toContain('规则 10');
+    expect(text).toContain('采用 reviewer 原值');
+  });
+
+  it('--json rule/reason fallback from verdict.downgraded (SPEC 13.20)', () => {
+    const RUN = 'r-20261110-230000';
+    const events: Event[] = [
+      makeEvent({ run_id: RUN, event: 'run.started', batch_id: 'v99-b01' }),
+      makeEvent({
+        run_id: RUN,
+        event: 'verdict.downgraded',
+        batch_id: 'v99-b01',
+        from: 'PASS',
+        to: 'FIX',
+        rule: 9,
+        reason: 'evidence missing',
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'run.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T23:10:00Z',
+        verdict: 'FIX',
+        exit_code: 10,
+        // No rule or reason on run.finished.
+      }),
+    ];
+    writeJournal(root, RUN, events);
+    const runs = loadRuns(root);
+    const proj = projectWhy(runs, 'v99-b01');
+    expect(proj).not.toBeNull();
+    // JSON serialization carries fallback values.
+    const json = JSON.parse(JSON.stringify(proj)) as {
+      attempts: { rule: number | null; reason: string | null }[];
+    };
+    expect(json.attempts[0]?.rule).toBe(9);
+    expect(json.attempts[0]?.reason).toBe('evidence missing');
+  });
+
+  it('--json rule/reason are null when neither source has them', () => {
+    const RUN = 'r-20261110-230100';
+    const events: Event[] = [
+      makeEvent({ run_id: RUN, event: 'run.started', batch_id: 'v99-b01' }),
+      makeEvent({
+        run_id: RUN,
+        event: 'run.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T23:15:00Z',
+        verdict: 'FIX',
+        exit_code: 10,
+      }),
+    ];
+    writeJournal(root, RUN, events);
+    const runs = loadRuns(root);
+    const proj = projectWhy(runs, 'v99-b01');
+    expect(proj).not.toBeNull();
+    const json = JSON.parse(JSON.stringify(proj)) as {
+      attempts: { rule: number | null; reason: string | null }[];
+    };
+    expect(json.attempts[0]?.rule).toBeNull();
+    expect(json.attempts[0]?.reason).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -991,8 +991,8 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
         }
       : null;
 
-  // 7. Downgraded / escalated.
-  const downgradeEvent = findEvent(events, 'verdict.downgraded');
+  // 7. Downgraded / escalated (SPEC 13.20: use last verdict.downgraded for fallback).
+  const downgradeEvent = findLastEvent(events, 'verdict.downgraded');
   const downgraded =
     downgradeEvent !== undefined
       ? {
@@ -1026,10 +1026,15 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
     .filter((e) => WHY_PUSH_TYPES.has(e.event))
     .map((e) => ({ event: e.event, ts: e.ts, detail: eventDetail(e) }));
 
-  // Conclusion.
+  // Conclusion — SPEC 13.20: rule/reason fallback order:
+  //   run.finished → last verdict.downgraded → null.
   const verdict = finished !== undefined ? asString(finished.verdict) : null;
-  const rule = finished !== undefined ? asNumber(finished.rule) : null;
-  const reason = finished !== undefined ? asString(finished.reason) : null;
+  const finishedRule = finished !== undefined ? asNumber(finished.rule) : null;
+  const finishedReason = finished !== undefined ? asString(finished.reason) : null;
+  const rule =
+    finishedRule ?? (downgradeEvent !== undefined ? asNumber(downgradeEvent.rule) : null);
+  const reason =
+    finishedReason ?? (downgradeEvent !== undefined ? asString(downgradeEvent.reason) : null);
 
   return {
     attempt,
@@ -1147,7 +1152,7 @@ const RULE_TEMPLATES: Record<number, string> = {
 };
 /* eslint-enable no-restricted-syntax, @typescript-eslint/no-magic-numbers */
 
-/** Formats the conclusion line for an attempt (SPEC 13.4). */
+/** Formats the conclusion line for an attempt (SPEC 13.4, 13.20). */
 function conclusionLine(a: WhyAttempt): string {
   if (a.escalated !== null) {
     return `结论：BLOCK，上报：${a.escalated}`;
@@ -1155,10 +1160,14 @@ function conclusionLine(a: WhyAttempt): string {
   if (a.verdict === null) {
     return '结论：（运行未完成）';
   }
-  const template = a.rule !== null ? (RULE_TEMPLATES[a.rule] ?? `规则 ${String(a.rule)}`) : '';
-  const rulePart = a.rule !== null ? `规则 ${String(a.rule)}：${template}` : '';
+  // SPEC 13.20: rule fallback already applied in projectWhyAttempt;
+  // when still null, display 规则 —.
+  const ruleDisplay =
+    a.rule !== null
+      ? `规则 ${String(a.rule)}：${RULE_TEMPLATES[a.rule] ?? `规则 ${String(a.rule)}`}`
+      : '规则 —';
   const reasonPart = a.reason !== null ? ` — ${a.reason}` : '';
-  return `结论：${a.verdict}，${rulePart}${reasonPart}`;
+  return `结论：${a.verdict}，${ruleDisplay}${reasonPart}`;
 }
 
 /** Formats why as human-readable text (SPEC 13.4). */
