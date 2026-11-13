@@ -139,7 +139,7 @@ describe('scenario E back half: interrupt marking and base_sha reuse', () => {
     await box.run(r1);
 
     // Verify batchHistory after run 1.
-    const h1 = batchHistory(box.root, BATCH);
+    const h1 = await batchHistory(box.root, BATCH);
     expect(h1.attempt).toBe(2);
     expect(h1.interruptedAt).toBeDefined();
     expect(h1.interruptedAt).toContain('run.finished');
@@ -181,7 +181,7 @@ describe('scenario E back half: interrupt marking and base_sha reuse', () => {
     expect(await box.run(r2)).toBe(0);
 
     // After PASS, interrupt context should be cleared.
-    const h = batchHistory(box.root, BATCH);
+    const h = await batchHistory(box.root, BATCH);
     expect(h.interruptedAt).toBeUndefined();
     expect(h.rescueSha).toBeUndefined();
     // PASS does not reset attempt; a re-run of this batch would still be attempt 2.
@@ -221,7 +221,7 @@ describe('scenario E: evidence base_sha reuse (SPEC 11.7)', () => {
     await box.run(r1);
 
     // Record the rescue commit sha from run 1.
-    const h1 = batchHistory(box.root, BATCH);
+    const h1 = await batchHistory(box.root, BATCH);
     expect(h1.rescueSha).toBeDefined();
     const rescueSha = h1.rescueSha;
 
@@ -273,7 +273,7 @@ describe('scenario E: evidence base_sha reuse (SPEC 11.7)', () => {
     await box.run(r1);
 
     // Verify run 1 is interrupted with rescue commit containing SPEC.md.
-    const h1 = batchHistory(box.root, BATCH);
+    const h1 = await batchHistory(box.root, BATCH);
     expect(h1.attempt).toBe(2);
     expect(h1.rescueSha).toBeDefined();
 
@@ -320,7 +320,7 @@ function writeStreamEvent(root: string, runId: string, event: Record<string, unk
 }
 
 describe('scenario E: interrupted_at orphaned and stream.ndjson fallback (SPEC 11.7)', () => {
-  it('orphaned run: interrupted_at contains orphaned and event type from stream.ndjson', () => {
+  it('orphaned run: interrupted_at contains orphaned and event type from stream.ndjson', async () => {
     // Simulate a crashed R2: write journal events (no run.finished) and
     // stream.ndjson with a later event.
     const orphanRunId = 'r-20260101-000000';
@@ -352,7 +352,7 @@ describe('scenario E: interrupted_at orphaned and stream.ndjson fallback (SPEC 1
       timestamp: '2026-01-01T00:02:00.000Z',
     });
 
-    const h = batchHistory(box.root, BATCH);
+    const h = await batchHistory(box.root, BATCH);
     expect(h.attempt).toBe(2);
     expect(h.interruptedAt).toBeDefined();
     // Must contain 'orphaned' as the stop reason.
@@ -363,7 +363,7 @@ describe('scenario E: interrupted_at orphaned and stream.ndjson fallback (SPEC 1
     expect(h.interruptedAt).toContain('tool_use');
   });
 
-  it('orphaned run without stream.ndjson falls back to journal last event', () => {
+  it('orphaned run without stream.ndjson falls back to journal last event', async () => {
     const orphanRunId = 'r-20260101-000001';
 
     // Journal only, no stream.ndjson.
@@ -381,7 +381,7 @@ describe('scenario E: interrupted_at orphaned and stream.ndjson fallback (SPEC 1
       event: 'worker.started',
     });
 
-    const h = batchHistory(box.root, BATCH);
+    const h = await batchHistory(box.root, BATCH);
     expect(h.interruptedAt).toContain('orphaned');
     // Without stream.ndjson, falls back to journal last event.
     expect(h.interruptedAt).toContain('worker.started');
@@ -401,7 +401,7 @@ describe('scenario E: interrupted_at orphaned and stream.ndjson fallback (SPEC 1
     await box.run(r1);
 
     // Verify no rescue_sha in history.
-    const h = batchHistory(box.root, BATCH);
+    const h = await batchHistory(box.root, BATCH);
     expect(h.rescueSha).toBeUndefined();
 
     // Run 2: check that the task.md includes the conclusion text (SPEC 13.17).
@@ -751,7 +751,7 @@ describe('scenario E: wallclock interrupt writes correct stop_reason (v03-b03-fi
     expect(signaled?.reason).toBe('wallclock');
 
     // Check batchHistory: interrupted_at should contain 'wallclock' and not 'error'.
-    const h = batchHistory(box.root, BATCH);
+    const h = await batchHistory(box.root, BATCH);
     expect(h.interruptedAt).toBeDefined();
     expect(h.interruptedAt).toContain('wallclock');
     expect(h.interruptedAt).not.toContain('error');

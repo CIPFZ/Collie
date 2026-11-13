@@ -159,9 +159,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     const pushLines = lines
       .map((line, i) => ({ line, i }))
       .filter(({ line }) => line.includes('await push('));
-    // SPEC 12.1: expect exactly 4 push calls after v04-b07 (3 from v03-b01-fix + 1 for fix_max).
+    // SPEC 12.1: expect exactly 5 push calls after v04-b16 (3 from v03-b01-fix + 1 for fix_max + 1 for unresolvable sha FIX).
     expect(pushLines.length).toBeGreaterThanOrEqual(1);
-    expect(pushLines.length).toBeLessThanOrEqual(4);
+    expect(pushLines.length).toBeLessThanOrEqual(5);
     for (const { line, i } of pushLines) {
       const start = Math.max(0, i - 5);
       const context = lines.slice(start, i).join('\n');
@@ -392,5 +392,10 @@ describe('structural invariants (SPEC 3.2)', () => {
   it('src/view.ts contains 规则 — for missing rule fallback (v04-b15)', () => {
     const content = readFileSync(join(ROOT, 'src/view.ts'), 'utf8');
     expect(content).toContain('规则 —');
+  });
+
+  it('src/run.ts contains unresolvable for claim mismatch actual value (v04-b16)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    expect(content).toContain('unresolvable');
   });
 });

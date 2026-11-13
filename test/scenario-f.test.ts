@@ -47,7 +47,7 @@ describe('scenario F: resume_max gating (SPEC 11.7)', () => {
     await box.run(r1);
 
     // After run 1: attempt=2, resume is eligible (count=0 < 2).
-    const h1 = batchHistory(box.root, BATCH);
+    const h1 = await batchHistory(box.root, BATCH);
     expect(h1.attempt).toBe(2);
     expect(h1.lastSessionId).toBe('sess-001');
     expect(h1.resumeCount).toBe(0);
@@ -61,7 +61,7 @@ describe('scenario F: resume_max gating (SPEC 11.7)', () => {
     expect(r2.calls[0]?.resumeSessionId).toBe('sess-001');
 
     // After run 2: attempt=3, resume count=1, still eligible.
-    const h2 = batchHistory(box.root, BATCH);
+    const h2 = await batchHistory(box.root, BATCH);
     expect(h2.attempt).toBe(3);
     expect(h2.lastSessionId).toBe('sess-002');
     expect(h2.resumeCount).toBe(1);
@@ -72,7 +72,7 @@ describe('scenario F: resume_max gating (SPEC 11.7)', () => {
     expect(r3.calls[0]?.resumeSessionId).toBe('sess-002');
 
     // After run 3: attempt=4, resume count=2. Now at the limit.
-    const h3 = batchHistory(box.root, BATCH);
+    const h3 = await batchHistory(box.root, BATCH);
     expect(h3.attempt).toBe(4);
     expect(h3.resumeCount).toBe(2);
 
@@ -146,7 +146,7 @@ describe('scenario F: resume_max gating (SPEC 11.7)', () => {
     expect(await box.run(r1)).toBe(0);
 
     // After PASS, the history should show attempt=1 (not incremented), no interrupt.
-    const h = batchHistory(box.root, BATCH);
+    const h = await batchHistory(box.root, BATCH);
     expect(h.attempt).toBe(1);
     expect(h.resumeCount).toBe(0);
     expect(h.interruptedAt).toBeUndefined();
@@ -173,7 +173,7 @@ describe('scenario F: resume_max gating (SPEC 11.7)', () => {
     expect(code1).toBe(20); // BLOCK: no report
 
     // History should show lastRunClean=true.
-    const h = batchHistory(box.root, BATCH);
+    const h = await batchHistory(box.root, BATCH);
     expect(h.lastRunClean).toBe(true);
     expect(h.lastSessionId).toBe('sess-pushed-clean');
 

@@ -421,6 +421,17 @@ function realDelay(ms: number): Promise<void> {
  */
 export function renderFixSection(info: FixInfo): string {
   const lines = ['', '## 上一轮判 FIX', ''];
+  // SPEC 13.21 (v04-b16): claim mismatch subsection (unresolvable sha etc).
+  if (info.claimMismatches !== undefined && info.claimMismatches.length > 0) {
+    lines.push('### 声称不符');
+    lines.push('');
+    for (const m of info.claimMismatches) {
+      lines.push(`- ${m.field}：claimed \`${m.claimed}\`，actual \`${m.actual}\``);
+    }
+    lines.push('');
+    lines.push('sha 一律抄 `git rev-parse` 的输出。');
+    lines.push('');
+  }
   // SPEC 13.10 (v04-b07): downgrade reason subsection.
   if (info.downgrade !== undefined) {
     lines.push('### 降级原因');
@@ -588,6 +599,8 @@ export interface FixInfo {
     cause?: string;
     detail?: string;
   };
+  /** SPEC 13.21 (v04-b16): claim mismatches from the previous run (unresolvable sha etc). */
+  claimMismatches?: readonly { field: string; claimed: string; actual: string }[];
 }
 
 export interface BatchHistory {
@@ -657,7 +670,11 @@ function allBatchEvents(root: string): Map<string, Event[]> {
  * Analyzes the journal to determine the state of a batch across previous runs
  * (SPEC 11.7). Returns the context needed for the next task envelope.
  */
-export function batchHistory(root: string, batchId: string, excludeRunId?: string): BatchHistory {
+export async function batchHistory(
+  root: string,
+  batchId: string,
+  excludeRunId?: string,
+): Promise<BatchHistory> {
   const allRuns = allBatchEvents(root);
   let attempt = 1;
   let baseSha: string | undefined;
@@ -736,12 +753,27 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
       // Collect FIX info: gaps + failed acceptance + commits from verdict and journal.
       let gaps: readonly string[] = [];
       let commits: readonly string[] = [];
-      try {
-        const verdict = readVerdict(root, batchId);
-        gaps = [...verdict.gaps];
-        commits = [...verdict.evidence.commits_actual];
-      } catch {
-        // verdict.md not readable: use empty
+      // SPEC 13.21 (v04-b16): when there is no reviewer.verdict event (e.g. unresolvable sha),
+      // don't read verdict.md (it may be from an earlier run). Gaps stay empty.
+      const hasReviewerVerdict = batchEvents.some((e) => e.event === 'reviewer.verdict');
+      if (hasReviewerVerdict) {
+        try {
+          const verdict = readVerdict(root, batchId);
+          gaps = [...verdict.gaps];
+          commits = [...verdict.evidence.commits_actual];
+        } catch {
+          // verdict.md not readable: use empty
+        }
+      }
+
+      // SPEC 13.21: when no reviewer ran, get commit list from base_sha..HEAD (worker code commits).
+      if (!hasReviewerVerdict && baseSha !== undefined) {
+        try {
+          const allCommits = await log(root, baseSha, await revParse(root, 'HEAD'));
+          commits = allCommits.filter((c) => !isR2Commit(c.subject)).map((c) => c.sha);
+        } catch {
+          // Best effort: if git log fails, keep commits empty.
+        }
       }
       const failedAcceptance = batchEvents
         .filter((e) => e.event === 'acceptance.failed')
@@ -762,7 +794,22 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
         };
       }
 
-      fixInfo = { gaps, failedAcceptance, commits, downgrade };
+      // SPEC 13.21 (v04-b16): collect claim.mismatch events for the FIX section.
+      const claimMismatches = batchEvents
+        .filter((e) => e.event === 'claim.mismatch')
+        .map((e) => ({
+          field: typeof e.field === 'string' ? e.field : '',
+          claimed: typeof e.claimed === 'string' ? e.claimed : '',
+          actual: typeof e.actual === 'string' ? e.actual : '',
+        }));
+
+      fixInfo = {
+        gaps,
+        failedAcceptance,
+        commits,
+        downgrade,
+        ...(claimMismatches.length > 0 ? { claimMismatches } : {}),
+      };
     } else {
       // Interrupted: BLOCK / crashed / orphaned.
       attempt++;
@@ -1239,7 +1286,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   // written triggers the error fallback (run.finished → rescue → progress → heartbeat delete).
   try {
     // SPEC 11.7: analyze previous runs to determine attempt, base_sha, and interrupt context.
-    const history = batchHistory(root, batchId, runId);
+    const history = await batchHistory(root, batchId, runId);
 
     // E2: issue the envelope. SPEC 4.3: subsequent attempts reuse the first attempt's base_sha.
     const baseSha = history.baseSha ?? (await revParse(root, 'HEAD'));
@@ -1533,18 +1580,17 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     } catch (error) {
       return await escalate(`no valid report: ${message(error)}`, baseSha);
     }
-    // SPEC 13.17: sha validation in three steps.
+    // SPEC 13.17 / 13.21: sha validation in three steps.
     // eslint-disable-next-line no-restricted-syntax -- SPEC 13.17: reason truncation bound
     const SHA_REASON_MAX = 300;
 
     // Step 1: resolve head_sha and each claims.commits[i].
+    // SPEC 13.21 (v04-b16): unresolvable sha → claim.mismatch + FIX (not escalation).
+    const unresolvableMismatches: { field: string; claimed: string }[] = [];
     try {
       await revParse(root, report.head_sha);
     } catch {
-      return await escalate(
-        `report head_sha ${report.head_sha} does not resolve to a commit`,
-        baseSha,
-      );
+      unresolvableMismatches.push({ field: 'head_sha', claimed: report.head_sha });
     }
     for (let i = 0; i < report.claims.commits.length; i++) {
       const commitSha = report.claims.commits[i];
@@ -1552,11 +1598,98 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       try {
         await revParse(root, commitSha);
       } catch {
-        return await escalate(
-          `report commits[${String(i)}] ${commitSha} does not resolve to a commit`,
-          baseSha,
-        );
+        unresolvableMismatches.push({ field: `commits[${String(i)}]`, claimed: commitSha });
       }
+    }
+
+    if (unresolvableMismatches.length > 0) {
+      // SPEC 13.21: record claim.mismatch for each unresolvable field, no rule.
+      for (const m of unresolvableMismatches) {
+        rec.record('claim.mismatch', {
+          field: m.field,
+          claimed: m.claimed,
+          actual: 'unresolvable',
+        });
+      }
+
+      // SPEC 13.21: no reviewer, no CI, no acceptance. Conclude FIX, exit 10.
+      const firstMismatch = unresolvableMismatches[0];
+      const fixReason =
+        firstMismatch !== undefined
+          ? `声称不符：report ${firstMismatch.field} ${firstMismatch.claimed} does not resolve to a commit`
+          : '声称不符：sha 不存在';
+
+      // SPEC 13.21: evidence gathered via git (same as escalation path).
+      let evidence = emptyEvidence();
+      try {
+        const commits = await log(root, baseSha, 'HEAD');
+        let remoteHasHead = false;
+        try {
+          remoteHasHead = await remoteContains(
+            root,
+            ctx.remote,
+            config.ci.expected_branch,
+            await revParse(root, 'HEAD'),
+          );
+        } catch {
+          // Best effort
+        }
+        evidence = {
+          ...evidence,
+          commits_actual: commits.map((c) => c.sha),
+          remote_has_head: remoteHasHead,
+        };
+      } catch {
+        // Best effort
+      }
+
+      const decision: ArbiterDecision = {
+        final: 'FIX',
+        original: null,
+        rule: 0,
+        reason: fixReason,
+        mismatches: unresolvableMismatches.map((m) => ({
+          rule: 0,
+          field: m.field,
+          claimed: m.claimed,
+          actual: 'unresolvable' as const,
+        })),
+        failedAcceptance: [],
+        downgraded: false,
+      };
+
+      const progressPath = writeProgress(root, {
+        batchId,
+        runId,
+        at: ctx.now().toISOString(),
+        decision,
+        evidence,
+        workerExitCode,
+        workerStopReason,
+      });
+      const fixEnvelopes = [relative(root, progressPath)];
+      // SPEC 12.2: --continue mode updates the backlog status column.
+      // FIX verdicts skip backlog update (the --continue loop retries).
+
+      await commit(root, `progress: ${batchId} ${decision.final}`, fixEnvelopes);
+
+      // SPEC 12.1: push the verdict commit to remote.
+      try {
+        await push(root, ctx.remote, config.ci.expected_branch);
+        const pushSha = await revParse(root, 'HEAD');
+        rec.record('verdict.pushed', {
+          sha: pushSha,
+          remote: ctx.remote,
+          branch: config.ci.expected_branch,
+        });
+      } catch (pushError) {
+        rec.record('verdict.push_failed', {
+          sha: await revParse(root, 'HEAD').catch(() => 'unknown'),
+          error: message(pushError),
+        });
+      }
+
+      return finish('FIX', { decision, evidence });
     }
 
     // Step 2: head_sha must descend from base_sha.
@@ -2218,7 +2351,7 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
     const runId = makeRunId('r-', ctx.now());
 
     // SPEC 12.2 (v03-b04-fix): record queue.batch_started before launching.
-    const history = batchHistory(root, currentBatchId);
+    const history = await batchHistory(root, currentBatchId);
     queueRec.record('queue.batch_started', {
       batch_run_id: runId,
       batch_id: currentBatchId,
