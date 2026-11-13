@@ -378,4 +378,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     const leaked = files.filter((f) => f !== 'src/git.ts');
     expect(leaked, `spawn('git' found outside src/git.ts: ${leaked.join(', ')}`).toHaveLength(0);
   });
+
+  it('src/run.ts contains "does not resolve to a commit" (v04-b13)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    expect(content).toContain('does not resolve to a commit');
+  });
 });
