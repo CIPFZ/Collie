@@ -978,4 +978,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b13 · r-20261113064024 · PASS
+
+- 时间：2026-11-13T07:10:33.467Z
+- 裁定：规则 10，All 10 acceptance commands pass. Three-step sha validation, BLOCK rerun conclusion, and runIdAt format change all implemented correctly with 7 dedicated tests and existing test updates. No protected files modified, no new dependencies. CI 以 R2 取证为准。
+- 提交：`2e5ab89` `28916e4`
+- 验收命令：10/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，946 passed, 0 failed
+  - `npm test -- test/report-sha.test.ts` → exit 0，7 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/report-sha.test.ts | grep -qE "^([6-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "does not resolve to a commit" && grep -qE "does not resolve to a commit" test/report-sha.test.ts` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "isAncestor\(.*\)\.catch\(\(\) => false\)"` → exit 0，exit 0
+  - `grep -rqE "上一轮结论" src && grep -qE "上一轮结论" test/report-sha.test.ts` → exit 0，exit 0
+  - `npx tsx -e "import('./src/cli.ts').then((m)=>{const id=m.runIdAt(new Date());process.exit(id.length===16&&!id.slice(2).includes('-')?0:1)})"` → exit 0，exit 0
+  - `grep -qE "does not resolve to a commit" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43382998609
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
