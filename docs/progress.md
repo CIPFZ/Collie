@@ -1020,4 +1020,23 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b15 · r-20261113074121 · PASS
+
+- 时间：2026-11-13T07:55:04.741Z
+- 裁定：规则 10，全部 7 条验收命令通过；代码正确实现 SPEC 13.20 的 rule/reason 降级取值（run.finished → last verdict.downgraded → null/规则 —）；结论行不以逗号结尾；测试覆盖降级事件推规则 9、两者都没有、已有 rule 不变、JSON 取值四个场景；不变量已同步；无受保护文件修改、无依赖变化、无范围蔓延。CI 以 R2 取证为准。
+- 提交：`dc366ea`
+- 验收命令：7/7 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，961 passed, 0 failed
+  - `npm test -- test/why.test.ts` → exit 0，19 passed, 0 failed
+  - `grep -vE "^\s*(//|\*|/\*)" src/view.ts | grep -qE "规则 —" && grep -qE "规则 —" test/why.test.ts` → exit 0，exit 0
+  - `grep -qE "规则 9" test/why.test.ts` → exit 0，exit 0
+  - `grep -qE "规则 —" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43388251598
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
