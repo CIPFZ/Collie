@@ -381,7 +381,7 @@ type EventType =
   | 'reviewer.started' | 'reviewer.verdict'
   | 'reviewer.finished'   // v0.4（13.1）：reviewer 运行返回后、解析 verdict 之前记；字段 exit_code 与运行级字段
   | 'evidence.collected'  // v0.4（13.1）：R2 取证完成后记一次；字段见 13.1
-  | 'claim.mismatch'
+  | 'claim.mismatch'      // 字段 rule（规则 5~7）/ field / claimed / actual；v0.4（13.21）：report 的 sha 解析不了时 field 为 head_sha 或 commits[<i>]、actual 固定 unresolvable、不带 rule
   | 'verdict.downgraded'  // 字段 from / to / rule / reason；v0.4（13.9）：规则 9 且证据是因环境取不到时追加 cause（固定 evidence_unavailable）/ detail
   | 'escalated'
   | 'ci.wait_timeout'    // 等 CI 超过 ci_wait_secs 仍无结论；字段 head_sha / waited_secs / last_state
@@ -494,6 +494,9 @@ R2 实测 `remote_has_head=false`、CI 未取证；规则 5 只查「声称已�
 后续 attempt 沿用首次 `base_sha`（本节上文），所以未推送的提交在 FIX 重跑时仍在审核范围内。
 规则 9 是「证据缺失」不是「声称失实」，记 `verdict.downgraded`（字段 rule / reason），不记 `claim.mismatch`。
 证据是因环境取不到（限流、认证失败、网络、`git fetch` 失败）时结论仍是 FIX，但 R2 标出 `cause`，队列不重跑（13.9，v04-b06）。
+
+**report 里的 sha 解析不了**（所有者 2026-11-13 裁定，v04-b16，详见 13.21）：`head_sha` 或 `claims.commits` 的任一项不能解析成提交时，这是一条失实的声称，按声称不符处理：
+不进入规则链、不拉起 reviewer，R2 直接判 FIX 并记 `claim.mismatch`。它不是规则 1~10 里的一条，progress 与 `collie show` 写「声称不符：sha 不存在」。v04-b16 生效之前，这种情况走下面的上报路径。
 
 **上报（无 report）**：worker 退出后没有可解析的 report.md 时不进入规则链，直接 BLOCK + `escalated`。
 这不是「规则 0」，progress 与 `collie show` 一律写「上报：无 report」。
@@ -867,6 +870,9 @@ v04-b07 起这一节还要写上一轮的降级规则与原因，提交清单只
 目标（ROADMAP 第 5 节）：无人干预连跑多个批次，只在该打扰人时打扰。通过标准：零误放行；被打扰次数 ≤ 应打扰次数 + 1。
 本章在 v0.2 的结构上只做追加；规则 1~10 不变。三个批次：12.1 收回人工动作，12.2 队列与分流，12.3 放行与停表。
 
+**v0.3 已收口**（2026-11-13，所有者裁定）。依据是第三次队列 q-20261111093302（13.7、13.16）：连过 6 批，批次之间放行 6 次、零误放行，打扰 1 次而应打扰 0 次。
+没有在真实运行里出现过、留到后续运行自然观察的：停表（`queue.paused`，含 `rule9_twice`）；规则 1 的自动重跑。v0.3 的功能在 v0.4 期间又改过几处（13.9、13.10、13.14），以第 13 章为准。
+
 ### 12.1 收回人工动作（v03-b01）
 
 v0.2 期间每轮有两个人工动作：操作员推送 R2 的裁定提交、操作员转发汇报。前者从本批次起由 R2 自己做，后者是 v0.4 的事。
@@ -947,6 +953,7 @@ b04 与后续批次的汇报改成每批一个 `docs/ops/` 文件（见 AGENT_KI
 第一次队列运行（2026-11-10）之后追加两个修补批次：13.9 环境故障（v04-b06），13.10 队列收尾（v04-b07）；这两个批次改的是 R2，不在「队列逻辑不变」之内。v04-b01 的裁定见 13.11。
 第二次队列运行（2026-11-11）之后：`why` 改签为 v04-b09（13.4），追加 13.13 投影取值修补（v04-b08）、13.14 队列里的中断续跑（v04-b10，改 R2）与 13.15 后台 git 读取不抢索引锁（v04-b11，改 R2）；裁定与开局预算见 13.12。
 第三次队列运行（2026-11-11）之后：裁定见 13.16；追加 13.17 上报原因与重跑说明（v04-b13，改 R2）、13.18 裁定提交的 CI 补查（v04-b14，改 R2）、13.19 活性场景测试的假时钟（v04-b12，只改测试）、13.20 `why` 的结论行（v04-b15）。
+所有者 2026-11-13 的两条裁定记在 13.16 末段：v0.3 记为收口；report 里的 sha 解析不了改判为 FIX，规格是 13.21（v04-b16，改 R2）。
 
 ### 13.1 观测数据补齐（v04-b01）
 
@@ -1030,7 +1037,7 @@ v04 的批次用一次 `--continue` 连跑，同时是 ROADMAP 第 5 节 v0.3 �
 第一次（2026-11-10，`--max 5`）只跑了 v04-b01 就因环境故障停下（13.11）。第二次（2026-11-11，`--max 6`）跑了三批：v04-b02、v04-b03 通过，
 批次之间放行两次、零误放行，v04-b04 被判空转后停下（13.12）。两次合计打扰 2 次，其中应打扰 1 次；还没有一次连跑满 5 批，收口实验仍未完成。第三次从 v04-b05 起，`--max 7`。
 第三次（2026-11-11，`--max 7`）：v04-b05 到 v04-b10 六批连续一次 PASS，批次之间放行 6 次、零误放行；v04-b11 因 report 里的 sha 不存在被上报 BLOCK（13.16），打扰 1 次、应打扰 0 次。
-按 ROADMAP 第 5 节的通过标准（连跑 5 批、零误放行、被打扰次数 ≤ 应打扰次数 + 1），这一次的数字达标；v0.3 是否记为收口由所有者裁定，本节只记数字。
+按 ROADMAP 第 5 节的通过标准（连跑 5 批、零误放行、被打扰次数 ≤ 应打扰次数 + 1），这一次的数字达标；所有者 2026-11-13 裁定 v0.3 记为收口（第 12 章开头）。
 v0.4 自己的验证放在第四次队列（v04-b12 起，固定版本前移之后）：操作员不看源码、不翻原始日志，只用四个命令写出队列汇报；写不出来的每一处记为缺口，进下一个修补批次。
 
 ### 13.8 明确不做
@@ -1206,9 +1213,9 @@ reviewer 自己判 FIX 时（v04-b02 第 1 次）journal 里没有任何一条�
 
 R1 自己定的（修 R2 的缺陷与偏离，不改规则）：追加 v04-b12 到 v04-b15（13.17~13.20；只改测试的 v04-b12 排在最前，免得那个随机失败的测试把后面批次的 CI 弄红）；worker 手册写明 sha 的取法；操作员等 next.md 的上限从 12 小时放到 48 小时。
 
-待所有者裁定，本次不做：
-- report 里的 sha 解析不了时，由「上报 BLOCK、队列停下」改为「声称不符 → FIX、自动重跑」。这是改仲裁规则。v04-b13 只把原因写对，结论不变。
-- v0.3 是否记为收口（13.7）。
+所有者 2026-11-13 的两条裁定（R1 提出时标为「待裁定」，当天答复）：
+- report 里的 sha 解析不了时，由「上报 BLOCK、队列停下」改为「声称不符 → FIX、自动重跑」：同意。这是改仲裁规则，规格见 13.21，签 v04-b16（依赖 v04-b13，排在第四次队列最后）。v04-b13 仍只把原因写对。
+- v0.3 记为收口（13.7，第 12 章开头）。
 
 ### 13.17 上报的原因要写对，重跑要说清原因（v04-b13）
 
@@ -1219,7 +1226,7 @@ R1 自己定的（修 R2 的缺陷与偏离，不改规则）：追加 v04-b12 �
 3. 是后代但不是当前 `HEAD` 的祖先：`report head_sha <sha> is not an ancestor of HEAD`。
 
 git 命令本身失败（`merge-base --is-ancestor` 的退出码不是 0 或 1）不得再被当成「不是祖先」：现有实现用 `.catch(() => false)` 把它吞掉了，v04-b11 第 1 次的 128（`Not a valid commit name`）因此被报成了祖先关系的问题。
-这类失败照旧上报，原因写 git 的报错原文（截断至 300 字）。**结论不变**：三种情况都仍是上报 BLOCK；要不要改判为 FIX 待所有者裁定（13.16）。
+这类失败照旧上报，原因写 git 的报错原文（截断至 300 字）。**本批次结论不变**：三种情况都仍是上报 BLOCK。其中「解析不了」一种随后由所有者裁定改判为 FIX，由 v04-b16 实现（13.21）；另两种不变。
 
 **BLOCK 之后的重跑要告诉 worker 上一轮为什么被拦。** 上一轮 `run.finished.verdict` 是 BLOCK、且不是被信号阶梯掐掉的（没有 `worker_stop_reason`，或它不是 `idling` / `stalled` / `wallclock`）：
 - `interrupted_at` 里的结束原因写 `escalated`（上一轮有 `escalated` 事件）或 `blocked`（规则判的 BLOCK），不再是 `unknown`；
@@ -1262,3 +1269,20 @@ git 命令本身失败（`merge-base --is-ancestor` 的退出码不是 0 或 1�
 - 原因取 `run.finished.reason`；没有就取同一条 `verdict.downgraded.reason`；再没有就不写原因。
 - 结论行不得以逗号结尾。`--json` 里的 `rule` / `reason` 按同样的顺序取值，取不到为 `null`。
 
+### 13.21 report 里的 sha 解析不了：声称不符，FIX（v04-b16）
+
+所有者 2026-11-13 裁定，改的是 4.3 的仲裁（13.16）。来源：v04-b11 第 1 次，代码、测试、推送都对，只有 report 里的 sha 是编的；按上报处理，队列就得停下等人，而修复只需要 worker 重写 report。
+
+**判定。** 13.17 的第 1 步（`head_sha` 或 `claims.commits[<i>]` 不能解析成提交）不再上报，改为：
+- 记 `claim.mismatch`，每个解析不了的字段一条：field 为 `head_sha` 或 `commits[<i>]`，claimed 为 report 里的原文，actual 固定为 `unresolvable`，不带 rule；
+- 不拉起 reviewer、不取 CI、不跑验收（没有可审的范围）；
+- 结论 FIX，退出码 10。`run.finished` 的 reason 写 `声称不符：report <field> <sha> does not resolve to a commit`，不带 rule；
+- progress 照常写一条运行记录，裁定一栏写「声称不符：sha 不存在」，提交清单与推送状态按上报路径的办法用 git 实测；裁定提交照 12.1 提交并推送。
+
+13.17 的第 2、3 步（能解析，但不是 `base_sha` 的后代，或不是 `HEAD` 的祖先）与 git 命令本身失败，仍是上报 BLOCK：那是提交历史对不上，不是 worker 重写 report 就能修的。
+假的 sha 仍然过不了，这一轮拿不到 PASS；变的只是不再为它停队列。
+
+**重跑。** `--continue` 下它是一次普通的 FIX：计入 `fix_max`，立即重跑同一批次，`queue.batch_started.why` 为 `fix_retry`；连续写错到超过 `fix_max` 照旧升级停下。
+重跑的 task 按 11.7 的 FIX 语义生成，「上一轮判 FIX」一节加小节「声称不符」，逐条列出上一轮 `claim.mismatch` 的 field / claimed / actual（规则 5~7 的声称不符同样列），
+并写一句「sha 一律抄 `git rev-parse` 的输出」。上一轮没有 `reviewer.verdict` 事件时（本节这种情况），这一节**不读** `verdict.md`
+（仓库里那份可能是更早一轮留下的），Gaps 为空，提交清单取首次 `base_sha..HEAD` 里的 worker 代码提交（按 11.7 的 R2 提交前缀排除）。

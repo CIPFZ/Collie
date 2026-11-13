@@ -9,7 +9,7 @@
 > 条目要求展示某个值时，写明它取自哪个事件的哪个字段，并核对 R2 确实写了它；只读命令的测试至少有一组夹具来自 fake runner 跑出的真实运行。
 
 更新时间：2026-11-13
-当前版本：v0.4（见 SPEC 第 13 章；v04-b05 到 v04-b11 已通过，队列从 v04-b12 起，固定版本 `5b132fd`）
+当前版本：v0.4（v0.3 已于 2026-11-13 记为收口；见 SPEC 第 13 章；v04-b05 到 v04-b11 已通过，队列从 v04-b12 起，固定版本 `5b132fd`）
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -62,6 +62,7 @@
 | 42 | v04-b13 | 上报原因写对、BLOCK 后的重跑说清原因、单批次 run_id 去掉连字符 | v04-b11 | pending |
 | 43 | v04-b14 | 裁定提交的 CI 在取证后补查一次 | v04-b13 | pending |
 | 44 | v04-b15 | collie why 的结论行：规则号从降级事件推，推不出显示「规则 —」 | v04-b09 | pending |
+| 45 | v04-b16 | report 里的 sha 解析不了改判为声称不符：FIX 并自动重跑 | v04-b13 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -1791,3 +1792,39 @@ v04-b11 两次运行暴露的三处。规格见 SPEC 13.17（三段各对应一�
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 改动 `run.ts`、`gate.ts`、`arbiter.ts`、规则 1~10；改动 `show`、`status`、`timeline`、`watch` 的输出；让 `why` 写任何文件；新增依赖
 
+## v04-b16 report 里的 sha 解析不了改判为声称不符：FIX 并自动重跑
+
+优先级：45　依赖：v04-b13
+
+所有者 2026-11-13 裁定（SPEC 13.16、13.21）：report 的 `head_sha` / `commits` 解析不了时不再上报 BLOCK 停队列，改判 FIX、由队列自动重跑。
+v04-b13 已把这项检查拆成三步，本批次只改第 1 步的去向。
+
+条目：
+1. 改判（SPEC 13.21「判定」一段；仲裁原文在 4.3；现有检查是 v04-b13 在 `src/run.ts` 里报 `does not resolve to a commit` 的那一处）：解析不了时记 `claim.mismatch`
+   （field / claimed / actual 为 `unresolvable`，不带 rule），不拉起 reviewer，结论 FIX、退出码 10，progress 写一条记录并照常提交推送；「不是后代」「不是祖先」与 git 命令失败仍是上报 BLOCK
+2. 重跑（SPEC 13.21「重跑」一段；`src/run.ts` 的 `batchHistory` FIX 分支与 `renderFixSection`）：「上一轮判 FIX」一节加小节「声称不符」，列出上一轮每条 `claim.mismatch`；
+   上一轮没有 `reviewer.verdict` 时不读 `verdict.md`，提交清单取 `base_sha..HEAD` 的 worker 代码提交。`--continue` 下按普通 FIX 计入 `fix_max` 并重跑，不加新的队列分支
+3. 测试：`test/report-sha.test.ts`（v04-b13 新建）里「不存在的 sha → 退出码 20」那一条改成新行为，并补：journal 有 `claim.mismatch`（actual 为 `unresolvable`）、没有 `reviewer.started` 与 `escalated`；
+   `--continue` 下第 1 次写错、第 2 次写对 → PASS 且队列继续，第 2 次的 `queue.batch_started.why` 是 `fix_retry`、task 含「声称不符」与写错的那个 sha；
+   仓库里留着更早一轮的 `verdict.md` 时 task 不引用它的 gaps；连续写错超过 `fix_max` → 退出码 20；「不是后代」仍是退出码 20。
+   `test/invariants.test.ts` 加「`src/run.ts` 含 `unresolvable`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| sha 校验专项测试通过 | `npm test -- test/report-sha.test.ts` | exit 0 |
+| 专项测试不少于 9 个 | `grep -cE "^\s+it\(" test/report-sha.test.ts \| grep -qE "^(9\|[1-9][0-9])$"` | exit 0 |
+| 改判进代码与测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "unresolvable" && grep -qE "unresolvable" test/report-sha.test.ts` | exit 0 |
+| 测试断言了声称不符事件与自动重跑 | `grep -qE "claim\.mismatch" test/report-sha.test.ts && grep -qE "fix_retry" test/report-sha.test.ts` | exit 0 |
+| 重跑说明进 task 生成与测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "声称不符" && grep -qE "声称不符" test/report-sha.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "unresolvable" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试（把 v04-b13 那条「不存在的 sha → 退出码 20」的断言改成新行为不算）
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动规则 1~10 的判定；让「不是后代」「不是祖先」或其他上报路径变成 FIX；改动放行判定、`fix_max` 与各项阈值；新增依赖
