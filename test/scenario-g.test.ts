@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { git, revParse } from '../src/git.js';
 import type { FakeSceneContext } from '../src/runner/fake.js';
 import { FakeRunner } from '../src/runner/fake.js';
+import { controllableFingerprint, fakeLivenessClock, instantDelay } from './support/fake-clock.js';
 import { BATCH, Sandbox } from './support/sandbox.js';
 
 let box: Sandbox;
@@ -27,84 +28,6 @@ afterEach(() => {
 });
 
 /**
- * A fake monotonic clock for the liveness monitor (SPEC 11.5). Each call to
- * now() advances time by `stepMs`, ensuring the monitor sees enough elapsed
- * time for idle detection without relying on real wall-clock delays.
- * stepMs=1 keeps the clock advancement slow enough that stall_secs is never
- * reached during setup, while still allowing idle detection (progress_secs=1)
- * after ~500 check cycles.
- */
-function fakeClock(stepMs = 1): { now: () => number } {
-  let t = 0;
-  return {
-    now: () => {
-      t += stepMs;
-      return t;
-    },
-  };
-}
-
-/** Near-instant delay that yields via microtasks, letting the worker effect
- *  react to stop() before the ladder escalates. Records requested durations. */
-function instantDelay(): {
-  delay: (ms: number) => Promise<void>;
-  durations: number[];
-} {
-  const durations: number[] = [];
-  return {
-    delay: async (ms: number) => {
-      durations.push(ms);
-      // Yield several times so the worker's stopped promise and cleanup can run.
-      for (let i = 0; i < 5; i++) {
-        await Promise.resolve();
-      }
-    },
-    durations,
-  };
-}
-
-/**
- * A fake setTimer for the liveness monitor that fires callbacks via setImmediate
- * instead of real timers (SPEC 11.5). Using setImmediate (macrotask) ensures
- * that I/O from real git subprocesses can interleave, preventing the check cycle
- * from starving the worker during setup. The check frequency is controlled by
- * this injected timer, not by the fingerprint function.
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- ms is intentionally unused; the fake fires immediately
-function fakeSetTimer(cb: () => void, _ms: number): ReturnType<typeof setTimeout> {
-  setImmediate(cb);
-  return undefined as unknown as ReturnType<typeof setTimeout>;
-}
-
-/**
- * A controllable fingerprint for tests (SPEC 11.5, v02-b04-fix). Returns a new
- * value on each call (simulating file changes during setup) until freeze() is
- * called, after which it returns a constant (simulating idle — no file changes).
- * This lets the test control exactly when the liveness monitor sees "no progress".
- *
- * Resolves via Promise.resolve() (microtask). The check frequency is controlled
- * by the injected livenessSetTimer (setImmediate-based), not by this function.
- */
-function controllableFingerprint(): {
-  livenessFingerprint: (root: string) => Promise<string>;
-  freeze: () => void;
-} {
-  let counter = 0;
-  let frozen = false;
-  return {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- matches LivenessConfig.fingerprint signature
-    livenessFingerprint: async (_root: string): Promise<string> => {
-      if (!frozen) counter++;
-      await Promise.resolve();
-      return `fp-${String(counter)}`;
-    },
-    freeze: () => {
-      frozen = true;
-    },
-  };
-}
-
-/**
  * An idle worker scene: it commits code (to write a valid report), then emits
  * events in a loop without making further file changes. The liveness monitor
  * sees a frozen fingerprint and triggers the ladder.
@@ -113,8 +36,24 @@ function controllableFingerprint(): {
  * the fake fingerprint (SPEC 11.5, v02-b04-fix: all three — events, clock,
  * fingerprint — controlled by test code).
  */
+/** Yield the event loop `count` times via setImmediate (SPEC 13.19). */
+function yieldLoop(count: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let remaining = count;
+    function next(): void {
+      if (remaining <= 0) {
+        resolve();
+        return;
+      }
+      remaining--;
+      setImmediate(next);
+    }
+    next();
+  });
+}
+
 function idleWorkerScene(
-  opts: { ignoreSoft?: boolean; onEnterIdle?: () => void } = {},
+  opts: { ignoreSoft?: boolean; onEnterIdle?: () => void; preIdleYields?: number } = {},
 ): FakeRunner {
   return new FakeRunner([
     {
@@ -158,6 +97,14 @@ function idleWorkerScene(
         await git(ctx.cwd, ['add', '-A']);
         await git(ctx.cwd, ['commit', '-q', '-m', `report(collie): ${BATCH}`]);
 
+        // Optionally simulate a slow startup by yielding the event loop many
+        // times before freezing (SPEC 13.19). With the old auto-increment
+        // clock this would push now() past stall_secs; with the coupled
+        // clock, time does not advance before freeze.
+        if (opts.preIdleYields) {
+          await yieldLoop(opts.preIdleYields);
+        }
+
         // Freeze the fingerprint: from this point on, the liveness monitor will
         // see no progress and trigger idle detection (SPEC 11.5, v02-b04-fix).
         opts.onEnterIdle?.();
@@ -183,12 +130,12 @@ describe('scenario G: idle worker detected by liveness monitor (SPEC 11.5, 11.6)
     const fp = controllableFingerprint();
     const runner = idleWorkerScene({ onEnterIdle: fp.freeze });
     const { delay } = instantDelay();
-    const clock = fakeClock();
+    const clock = fakeLivenessClock(() => fp.isFrozen());
     const exitCode = await box.run(runner, {
       ladderDelay: delay,
       livenessIntervalMs: 50,
       livenessNow: clock.now,
-      livenessSetTimer: fakeSetTimer,
+      livenessSetTimer: clock.setTimer,
       livenessFingerprint: fp.livenessFingerprint,
     });
 
@@ -218,12 +165,12 @@ describe('scenario G: idle worker detected by liveness monitor (SPEC 11.5, 11.6)
     const fp = controllableFingerprint();
     const runner = idleWorkerScene({ ignoreSoft: true, onEnterIdle: fp.freeze });
     const { delay } = instantDelay();
-    const clock = fakeClock();
+    const clock = fakeLivenessClock(() => fp.isFrozen());
     const exitCode = await box.run(runner, {
       ladderDelay: delay,
       livenessIntervalMs: 50,
       livenessNow: clock.now,
-      livenessSetTimer: fakeSetTimer,
+      livenessSetTimer: clock.setTimer,
       livenessFingerprint: fp.livenessFingerprint,
     });
 
@@ -239,6 +186,34 @@ describe('scenario G: idle worker detected by liveness monitor (SPEC 11.5, 11.6)
     expect(signaled.length).toBeGreaterThanOrEqual(2);
     expect(signaled[0]).toMatchObject({ level: 'soft', reason: 'idling' });
     expect(signaled[1]).toMatchObject({ level: 'hard', reason: 'idling' });
+  });
+
+  it('slow startup: 400k event-loop yields before freeze → idling, not stalled (SPEC 13.19)', async () => {
+    const fp = controllableFingerprint();
+    const runner = idleWorkerScene({
+      onEnterIdle: fp.freeze,
+      preIdleYields: 400_000,
+    });
+    const { delay } = instantDelay();
+    const clock = fakeLivenessClock(() => fp.isFrozen());
+    const exitCode = await box.run(runner, {
+      ladderDelay: delay,
+      livenessIntervalMs: 50,
+      livenessNow: clock.now,
+      livenessSetTimer: clock.setTimer,
+      livenessFingerprint: fp.livenessFingerprint,
+    });
+
+    expect(exitCode).toBe(20);
+
+    const events = box.events();
+    const types = events.map((e) => e.event);
+
+    // The monitor must detect idling (frozen fingerprint), not stalled.
+    // With the old auto-increment clock, 400k yields would push now() past
+    // stall_secs (300 s) and falsely record worker.stalled (SPEC 13.19).
+    expect(types).toContain('worker.idling');
+    expect(types).not.toContain('worker.stalled');
   });
 });
 

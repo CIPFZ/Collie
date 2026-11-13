@@ -354,6 +354,15 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(content).toContain('GIT_OPTIONAL_LOCKS');
   });
 
+  it('scenario-g.test.ts and scenario-n.test.ts do not contain += stepMs (v04-b12)', () => {
+    const g = readFileSync(join(ROOT, 'test/scenario-g.test.ts'), 'utf8');
+    const n = readFileSync(join(ROOT, 'test/scenario-n.test.ts'), 'utf8');
+    // SPEC 13.19: auto-increment clock (t += stepMs) is replaced by a coupled
+    // clock that only advances via setTimer after freeze.
+    expect(g).not.toMatch(/\+= stepMs/);
+    expect(n).not.toMatch(/\+= stepMs/);
+  });
+
   it('src/ files outside src/git.ts do not directly spawn git (v04-b11)', () => {
     let output: string;
     try {

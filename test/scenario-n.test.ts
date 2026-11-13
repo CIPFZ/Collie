@@ -9,62 +9,10 @@ import { git } from '../src/git.js';
 import type { FakeScene, FakeSceneContext } from '../src/runner/fake.js';
 import { FakeRunner } from '../src/runner/fake.js';
 import type { Claims, Report, Verdict } from '../src/schema/index.js';
+import { controllableFingerprint, fakeLivenessClock, instantDelay } from './support/fake-clock.js';
 import { Sandbox, TEST_CMD } from './support/sandbox.js';
 
 const FENCE = '```';
-
-// ---------------------------------------------------------------------------
-// Helpers: monotonic clock, instant delay, controllable fingerprint
-// Mirrors scenario G's approach (SPEC 11.5, v02-b04-fix).
-// ---------------------------------------------------------------------------
-
-function fakeClock(stepMs = 1): { now: () => number } {
-  let t = 0;
-  return {
-    now: () => {
-      t += stepMs;
-      return t;
-    },
-  };
-}
-
-function instantDelay(): { delay: (ms: number) => Promise<void> } {
-  return {
-    delay: async () => {
-      for (let i = 0; i < 5; i++) await Promise.resolve();
-    },
-  };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- matches LivenessConfig.setTimer signature
-function fakeSetTimer(cb: () => void, _ms: number): ReturnType<typeof setTimeout> {
-  setImmediate(cb);
-  return undefined as unknown as ReturnType<typeof setTimeout>;
-}
-
-function controllableFingerprint(): {
-  livenessFingerprint: (root: string) => Promise<string>;
-  freeze: () => void;
-  unfreeze: () => void;
-} {
-  let counter = 0;
-  let frozen = false;
-  return {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- matches LivenessConfig.fingerprint signature
-    livenessFingerprint: async (_root: string): Promise<string> => {
-      if (!frozen) counter++;
-      await Promise.resolve();
-      return `fp-${String(counter)}`;
-    },
-    freeze: () => {
-      frozen = true;
-    },
-    unfreeze: () => {
-      frozen = false;
-      counter++; // bump so next call returns a new value
-    },
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Helpers: backlog and scene builders
@@ -300,14 +248,15 @@ function reviewerFix(box: Sandbox, batchId: string): FakeScene {
 }
 
 // Injected liveness options that make tests fast without real timers.
+// Uses the coupled clock (SPEC 13.19): time only advances after freeze.
 function livenessOpts(fp: ReturnType<typeof controllableFingerprint>) {
   const { delay } = instantDelay();
-  const clock = fakeClock();
+  const clock = fakeLivenessClock(() => fp.isFrozen());
   return {
     ladderDelay: delay,
     livenessIntervalMs: 50,
     livenessNow: clock.now,
-    livenessSetTimer: fakeSetTimer,
+    livenessSetTimer: clock.setTimer,
     livenessFingerprint: fp.livenessFingerprint,
   };
 }
