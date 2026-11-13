@@ -959,4 +959,23 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v04-b12 · r-20261113062615 · PASS
+
+- 时间：2026-11-13T06:40:19.118Z
+- 裁定：规则 10，All 7 acceptance commands pass. Fake clock refactored to coupled model (frozen before freeze, setTimer-driven after). Slow startup test (400k yields) correctly asserts idling not stalled. Invariant test added. No protected files, no src/ changes, no new deps. CI以R2取证为准。
+- 提交：`b76f735`
+- 验收命令：7/7 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，938 passed, 0 failed
+  - `for i in 1 2 3; do npm test -- test/scenario-g.test.ts test/scenario-n.test.ts || exit 1; done` → exit 0，10 passed, 0 failed
+  - `! grep -qE "\+= stepMs" test/scenario-g.test.ts test/scenario-n.test.ts` → exit 0，exit 0
+  - `grep -qE "worker\.stalled" test/scenario-g.test.ts` → exit 0，exit 0
+  - `grep -qE "stepMs" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43379591851
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
