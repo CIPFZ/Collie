@@ -34,6 +34,8 @@ export interface TaskContext {
   rescue_sha?: string;
   /** SPEC 11.7 (v03-b04-fix): pre-rendered "上一轮判 FIX" section, appended when non-empty. */
   fixSection?: string;
+  /** SPEC 13.17: conclusion text when the previous BLOCK was not due to signal ladder. */
+  blockConclusion?: string;
 }
 
 export interface TaskEnvelope {
@@ -128,12 +130,19 @@ function renderBody(batch: Batch): string {
 }
 
 /**
- * SPEC 11.7: when the previous run was interrupted, the task body gets an extra
- * section so the new worker can locate the interrupted state.
+ * SPEC 11.7 / 13.17: when the previous run was interrupted or BLOCK'd, the task
+ * body gets an extra section so the new worker can locate the interrupted state.
+ * SPEC 13.17: when the BLOCK was not from the signal ladder, the section shows
+ * the conclusion reason and tells the worker to only fix the gap, not redo.
  */
 function renderInterruptSection(ctx: TaskContext): string {
   const lines = ['', '## 上一轮中断', '', `中断信息：\`${ctx.interrupted_at ?? ''}\``];
-  if (ctx.rescue_sha !== undefined) {
+  if (ctx.blockConclusion !== undefined) {
+    // SPEC 13.17: BLOCK not due to signal ladder — show conclusion, no git-log prompt.
+    lines.push(`上一轮结论：${ctx.blockConclusion}`);
+    lines.push('');
+    lines.push('上一轮的提交仍在审核范围内，按上面的结论只补缺口。');
+  } else if (ctx.rescue_sha !== undefined) {
     lines.push(`救援提交：\`${ctx.rescue_sha}\``);
     lines.push('');
     lines.push(`请先核实 \`${ctx.rescue_sha}\` 中的半成品是否完整，不要把它当作已完成。`);

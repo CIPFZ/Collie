@@ -204,7 +204,9 @@ describe('scenario E back half: interrupt marking and base_sha reuse', () => {
     const taskContent = box.read(`.collie/batches/${BATCH}/task.md`);
     expect(taskContent).toContain('## 上一轮中断');
     expect(taskContent).toContain('中断信息');
-    expect(taskContent).toContain('救援提交');
+    // SPEC 13.17: BLOCK not from signal ladder shows conclusion, not rescue text.
+    expect(taskContent).toContain('上一轮结论');
+    expect(taskContent).toContain('上一轮的提交仍在审核范围内');
   });
 });
 
@@ -402,7 +404,7 @@ describe('scenario E: interrupted_at orphaned and stream.ndjson fallback (SPEC 1
     const h = batchHistory(box.root, BATCH);
     expect(h.rescueSha).toBeUndefined();
 
-    // Run 2: check that the task.md includes the fallback text.
+    // Run 2: check that the task.md includes the conclusion text (SPEC 13.17).
     const r2 = new FakeRunner([
       workerScene(box, { passing: 5, failing: 0, push: true, claims: honestClaims(5, true) }),
       fooledReviewerScene(box),
@@ -411,8 +413,9 @@ describe('scenario E: interrupted_at orphaned and stream.ndjson fallback (SPEC 1
 
     const taskContent = box.read(`.collie/batches/${BATCH}/task.md`);
     expect(taskContent).toContain('## 上一轮中断');
-    expect(taskContent).toContain('上一轮未留下救援提交');
-    expect(taskContent).toContain('git log');
+    // SPEC 13.17: BLOCK not from signal ladder shows conclusion, not git-log fallback.
+    expect(taskContent).toContain('上一轮结论');
+    expect(taskContent).toContain('上一轮的提交仍在审核范围内');
   });
 });
 

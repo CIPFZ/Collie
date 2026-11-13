@@ -615,6 +615,11 @@ export interface BatchHistory {
    * "上一轮判 FIX" section in the task body.
    */
   fixInfo?: FixInfo;
+  /**
+   * SPEC 13.17: conclusion text when the last run was BLOCK but not due to a
+   * signal-ladder stop. Used by renderInterruptSection to show "上一轮结论：".
+   */
+  blockConclusion?: string;
 }
 
 /** All journal events of every run that touched `batchId`, oldest run first.
@@ -662,6 +667,7 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
   let resumeCount = 0;
   let lastRunClean = false;
   let fixInfo: FixInfo | undefined;
+  let blockConclusion: string | undefined;
 
   // SPEC 11.7 (v02-e-fix2): the excluded run (the current run) may contain
   // run.orphaned events with heartbeat updated_at timestamps, and worker.rescued
@@ -716,6 +722,7 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
       lastSessionId = undefined;
       lastRunClean = false;
       fixInfo = undefined;
+      blockConclusion = undefined;
     } else if (classification === 'fix') {
       // SPEC 11.7 (v03-b04-fix): FIX is not an interrupt. Attempt increments but
       // interrupted_at stays null. Collect FIX-specific context for the task body.
@@ -724,6 +731,7 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
       rescueSha = undefined;
       lastSessionId = undefined;
       lastRunClean = false;
+      blockConclusion = undefined;
 
       // Collect FIX info: gaps + failed acceptance + commits from verdict and journal.
       let gaps: readonly string[] = [];
@@ -781,6 +789,36 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
               ? 'orphaned'
               : 'unknown');
 
+      // SPEC 13.17: detect BLOCK not due to signal ladder. Override stopReason
+      // and build the conclusion text for the task body.
+      const SIGNAL_LADDER_REASONS: ReadonlySet<string> = new Set([
+        'idling',
+        'stalled',
+        'wallclock',
+      ]);
+      const finishedWSR =
+        typeof finished?.worker_stop_reason === 'string' ? finished.worker_stop_reason : undefined;
+      const isSignalLadderStop =
+        finishedWSR !== undefined && SIGNAL_LADDER_REASONS.has(finishedWSR);
+      let effectiveStopReason = stopReason;
+
+      if (finished?.verdict === 'BLOCK' && !isSignalLadderStop) {
+        const escalatedEvt = batchEvents.findLast((e) => e.event === 'escalated');
+        effectiveStopReason = escalatedEvt !== undefined ? 'escalated' : 'blocked';
+
+        // eslint-disable-next-line no-restricted-syntax -- SPEC 13.17: conclusion truncation bound
+        const CONCLUSION_MAX = 500;
+        if (escalatedEvt !== undefined && typeof escalatedEvt.reason === 'string') {
+          blockConclusion = truncate(escalatedEvt.reason, CONCLUSION_MAX);
+        } else {
+          const ruleNum = typeof finished.rule === 'number' ? finished.rule : 0;
+          const reason = typeof finished.reason === 'string' ? finished.reason : '';
+          blockConclusion = truncate(`规则 ${String(ruleNum)}：${reason}`, CONCLUSION_MAX);
+        }
+      } else {
+        blockConclusion = undefined;
+      }
+
       // SPEC 11.7 (v02-e-fix): when journal has no run.finished, fall back to
       // stream.ndjson for the last event (worker events streamed in real-time).
       // v02-e-fix2: readStreamLastEvent now refines event type and resolves
@@ -803,7 +841,7 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
         lastType = journalLast?.event ?? 'unknown';
         lastTs = journalLast?.ts ?? '';
       }
-      interruptedAt = `${runId} ${stopReason} ${lastType}@${lastTs}`;
+      interruptedAt = `${runId} ${effectiveStopReason} ${lastType}@${lastTs}`;
 
       // Session ID from worker.finished for resume eligibility.
       lastSessionId =
@@ -837,6 +875,7 @@ export function batchHistory(root: string, batchId: string, excludeRunId?: strin
     resumeCount,
     lastRunClean,
     fixInfo,
+    blockConclusion,
   };
 }
 
@@ -1236,6 +1275,10 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       rescue_sha: history.rescueSha,
       // SPEC 11.7 (v03-b04-fix): pre-render the FIX section when applicable.
       ...(history.fixInfo !== undefined ? { fixSection: renderFixSection(history.fixInfo) } : {}),
+      // SPEC 13.17: BLOCK conclusion for the task body.
+      ...(history.blockConclusion !== undefined
+        ? { blockConclusion: history.blockConclusion }
+        : {}),
     });
     writeTask(root, batch, task);
     const relTask = taskPath('', batchId);
@@ -1480,23 +1523,69 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     } catch (error) {
       return await escalate(`no valid report: ${message(error)}`, baseSha);
     }
-    // SPEC 11.7 (v03-b03-fix): head_sha must descend from the first base_sha
-    // (not the current task commit — attempt 2 may reference an attempt 1 commit
-    // that is earlier than the current task commit) AND be an ancestor of or equal
-    // to the current HEAD.
-    const headDescendsFromBase = await isAncestor(root, baseSha, report.head_sha).catch(
-      () => false,
-    );
-    const resolvedHead = await revParse(root, report.head_sha).catch(() => '');
-    const currentHead = await revParse(root, 'HEAD').catch(() => '');
-    const headIsAncestorOfHEAD =
-      resolvedHead === currentHead ||
-      (await isAncestor(root, report.head_sha, currentHead).catch(() => false));
-    if (!headDescendsFromBase || !headIsAncestorOfHEAD)
+    // SPEC 13.17: sha validation in three steps.
+    // eslint-disable-next-line no-restricted-syntax -- SPEC 13.17: reason truncation bound
+    const SHA_REASON_MAX = 300;
+
+    // Step 1: resolve head_sha and each claims.commits[i].
+    try {
+      await revParse(root, report.head_sha);
+    } catch {
       return await escalate(
-        `report head_sha ${report.head_sha} is not a descendant of base_sha ${baseSha} or not an ancestor of HEAD`,
+        `report head_sha ${report.head_sha} does not resolve to a commit`,
         baseSha,
       );
+    }
+    for (let i = 0; i < report.claims.commits.length; i++) {
+      const commitSha = report.claims.commits[i];
+      if (commitSha === undefined) continue;
+      try {
+        await revParse(root, commitSha);
+      } catch {
+        return await escalate(
+          `report commits[${String(i)}] ${commitSha} does not resolve to a commit`,
+          baseSha,
+        );
+      }
+    }
+
+    // Step 2: head_sha must descend from base_sha.
+    let headDescendsFromBase: boolean;
+    try {
+      headDescendsFromBase = await isAncestor(root, baseSha, report.head_sha);
+    } catch (ancestryError) {
+      return await escalate(
+        truncate(`git error checking ancestry: ${message(ancestryError)}`, SHA_REASON_MAX),
+        baseSha,
+      );
+    }
+    if (!headDescendsFromBase) {
+      return await escalate(
+        `report head_sha ${report.head_sha} is not a descendant of base_sha ${baseSha}`,
+        baseSha,
+      );
+    }
+
+    // Step 3: head_sha must be an ancestor of (or equal to) current HEAD.
+    const resolvedHead = await revParse(root, report.head_sha).catch(() => '');
+    const currentHead = await revParse(root, 'HEAD').catch(() => '');
+    if (resolvedHead !== currentHead) {
+      let headIsAncestorOfHEAD: boolean;
+      try {
+        headIsAncestorOfHEAD = await isAncestor(root, report.head_sha, currentHead);
+      } catch (ancestryError) {
+        return await escalate(
+          truncate(`git error checking ancestry: ${message(ancestryError)}`, SHA_REASON_MAX),
+          baseSha,
+        );
+      }
+      if (!headIsAncestorOfHEAD) {
+        return await escalate(
+          `report head_sha ${report.head_sha} is not an ancestor of HEAD`,
+          baseSha,
+        );
+      }
+    }
 
     // Worker output is taskSha..head_sha: the task commit is R2's, not the worker's (SPEC 3.3).
     const outcome = await withHeadWorktree(root, batchId, report.head_sha, async (tree) => {

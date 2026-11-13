@@ -80,12 +80,12 @@ function tomlString(value: string): string {
   return JSON.stringify(value);
 }
 
-/** run_id from the clock, e.g. r-20261019-114606 (SPEC 3.6 path-safe). */
+/** run_id from the clock, e.g. r-20261019114606 (SPEC 13.17 path-safe, no dash between date and time). */
 export function runIdAt(date: Date): string {
   const t = ISO_SECONDS.exec(date.toISOString())?.groups;
   if (t === undefined) throw new Error(`unexpected timestamp ${date.toISOString()}`);
   return RunIdSchema.parse(
-    `r-${t.y ?? ''}${t.mo ?? ''}${t.d ?? ''}-${t.h ?? ''}${t.mi ?? ''}${t.s ?? ''}`,
+    `r-${t.y ?? ''}${t.mo ?? ''}${t.d ?? ''}${t.h ?? ''}${t.mi ?? ''}${t.s ?? ''}`,
   );
 }
 

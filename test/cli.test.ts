@@ -28,7 +28,7 @@ describe('cli: init template', () => {
 
 describe('cli: run ids', () => {
   it('derives a path-safe run id from the clock', () => {
-    expect(runIdAt(new Date('2026-10-19T11:46:06.789Z'))).toBe('r-20261019-114606');
+    expect(runIdAt(new Date('2026-10-19T11:46:06.789Z'))).toBe('r-20261019114606');
   });
 });
 
@@ -107,7 +107,7 @@ describe('cli: init, show and the R2 commits', () => {
     await box.run(r);
     const progress = box.read('docs/progress.md');
     expect(progress.startsWith('# 进度\n\n人工维护的内容，Collie 不得改动。\n')).toBe(true);
-    expect(progress).toContain(`### ${BATCH} · r-20261019-120000 · PASS`);
+    expect(progress).toContain(`### ${BATCH} · r-20261019120000 · PASS`);
   });
 
   it('run --runner fake uses an unscripted fake that fails loudly (wiring check)', async () => {
@@ -172,7 +172,7 @@ describe('cli: audit reviewer tool whitelist (SPEC 11.2 v03-b02)', () => {
     box.dispose();
   });
 
-  const RUN_ID = 'r-20261019-120000';
+  const RUN_ID = 'r-20261019120000';
 
   /** Write a reviewer.stream.ndjson with the given lines as raw JSON. */
   function writeStream(lines: unknown[]): void {
