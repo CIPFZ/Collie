@@ -63,8 +63,10 @@ export const MUTATIONS: MutationItem[] = [
   {
     name: 'rule1-unparseable',
     file: 'src/arbiter.ts',
-    original: 'if (!input.verdict.ok) {',
-    replacement: 'if (false) {',
+    original:
+      "if (!input.verdict.ok) {\n    return decide(null, 'BLOCK', RULE_UNPARSEABLE, `verdict unparseable: ${input.verdict.error}`);\n  }\n  const verdict = input.verdict.value;",
+    replacement:
+      'const verdict = input.verdict.ok\n    ? input.verdict.value\n    : (null as unknown as Verdict);',
   },
   {
     name: 'rule2-protected',
@@ -374,7 +376,8 @@ function runMutation(item: MutationItem, repoRoot: string): Result {
   if (!checkUnique(content, item.original)) return 'stale';
 
   // Create a temporary copy of the repo in the system temp directory.
-  const tmpDir = mkdtempSync(join(tmpdir(), `collie-mut-${item.name}-`));
+  const safeName = item.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const tmpDir = mkdtempSync(join(tmpdir(), `collie-mut-${safeName}-`));
   try {
     // Copy source, test, and scripts directories, plus configs needed to compile and run tests.
     const toCopy = [
