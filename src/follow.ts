@@ -32,7 +32,11 @@ export interface SpawnResult {
 export type OutputMode = 'full' | 'tail';
 
 /** Subprocess spawner signature — receives full command line and output mode (SPEC 14.12 item 3). */
-export type SpawnFn = (cmd: readonly string[], cwd: string, mode: OutputMode) => Promise<SpawnResult>;
+export type SpawnFn = (
+  cmd: readonly string[],
+  cwd: string,
+  mode: OutputMode,
+) => Promise<SpawnResult>;
 
 /** Notification sender signature. */
 export type NotifySender = (text: string) => Promise<void>;
@@ -643,7 +647,10 @@ async function syncWithRemote(
   let allReport = false;
   try {
     const localOnlyLog = await git(root, ['log', '--oneline', 'origin/main..HEAD']);
-    const lines = localOnlyLog.trim().split('\n').filter((l) => l.length > 0);
+    const lines = localOnlyLog
+      .trim()
+      .split('\n')
+      .filter((l) => l.length > 0);
     allReport =
       lines.length > 0 &&
       lines.every((l) => {
