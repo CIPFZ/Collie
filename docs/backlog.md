@@ -67,7 +67,7 @@
 | 47 | v045-b01 | 开跑前检查与 audit 并进队列：collie preflight、queue.preflight、audit 不符停表 | v04-b17 | passed |
 | 48 | v045-b02 | collie report：把一次队列运行写成 Markdown 汇报 | v045-b01 | passed |
 | 49 | v045-b03 | 通知与交接协议：notify 模块、next.md 的键值行、下一步动作的判定 | v045-b02 | passed |
-| 50 | v045-b04 | collie follow：常驻循环，按 next.md 开跑、交汇报、发通知 | v045-b03 | pending |
+| 50 | v045-b04 | collie follow：常驻循环，按 next.md 开跑、交汇报、发通知 | v045-b03 | passed |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。

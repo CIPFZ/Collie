@@ -1150,4 +1150,27 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b04 · r-20261116083629 · PASS
+
+- 时间：2026-11-16T09:03:02.414Z
+- 裁定：规则 10，All 11 acceptance commands pass. Code implements all SPEC 14.4 requirements: injected side-effects, per-sha pinned directories, dry-run with zero side-effects, minimal report fallback, push retry. 10 tests pass using Sandbox with fake clock/sleep/spawn/notify. No protected files modified, no new deps, scope fully within task items. CI 以 R2 取证为准。
+- 提交：`b46efc8`
+- 验收命令：11/11 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1059 passed, 0 failed
+  - `npm test -- test/follow.test.ts` → exit 0，10 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/follow.test.ts | grep -qE "^(9|[1-9][0-9])$"` → exit 0，exit 0
+  - `grep -qE "Sandbox\.create" test/follow.test.ts` → exit 0，exit 0
+  - `test -f test/follow.test.ts && ! grep -qE "setInterval|setTimeout\(" test/follow.test.ts` → exit 0，exit 0
+  - `npx tsx src/cli.ts follow --help 2>&1 | grep -qE "dry-run"` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/follow.ts | grep -qE "ops: report queue"` → exit 0，exit 0
+  - `grep -qE "follow\.json" .gitignore` → exit 0，exit 0
+  - `grep -qE "follow\.ts" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43835169037
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
