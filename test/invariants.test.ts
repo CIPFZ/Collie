@@ -445,4 +445,17 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/follow.ts'), 'utf8');
     expect(content).toContain('handoff');
   });
+
+  it('src/follow.ts does not contain execFileSync (v045-b05)', () => {
+    // SPEC 14.9 item 4: subprocess must use streaming spawn, not buffered sync call.
+    const lines = readFileSync(join(ROOT, 'src/follow.ts'), 'utf8').split('\n');
+    const codeLines = lines.filter(
+      (l) =>
+        !l.trimStart().startsWith('//') &&
+        !l.trimStart().startsWith('*') &&
+        !l.trimStart().startsWith('/*'),
+    );
+    const hasExecFileSync = codeLines.some((l) => l.includes('execFileSync'));
+    expect(hasExecFileSync, 'execFileSync should not appear in non-comment code').toBe(false);
+  });
 });

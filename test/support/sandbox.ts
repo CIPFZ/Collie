@@ -118,7 +118,9 @@ export class Sandbox {
       .replace(/^commands = .*$/m, `commands = ["${TEST_CMD}"]`)
       // SPEC 13.9: sandbox must not depend on real home; remove token_file so
       // readCiTokenChecked does not fail in CI or with HOME=$(mktemp -d).
-      .replace(/^token_file = .*$/m, '# token_file removed for sandbox');
+      .replace(/^token_file = .*$/m, '# token_file removed for sandbox')
+      // SPEC 14.9 item 7: remove webhook_file so tests don't read real notify address.
+      .replace(/^webhook_file = .*$/m, '# webhook_file removed for sandbox');
     box.write('.collie/collie.toml', toml);
     box.write('.gitignore', '.collie/runs/\n.collie/heartbeat.json\n');
     box.write('SPEC.md', '# SPEC\n\nThe feature must exist.\n');

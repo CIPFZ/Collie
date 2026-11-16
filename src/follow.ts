@@ -1,4 +1,4 @@
-// SPEC 14.4: `collie follow` — constant loop that reads docs/ops/next.md,
+// SPEC 14.4 / 14.9: `collie follow` — constant loop that reads docs/ops/next.md,
 // decides via handoff.ts, and executes the chosen action (run queue, notify,
 // sleep). All side-effects (clock, sleep, subprocess, notify, fs) are injected
 // so tests never touch the network or real timers.
@@ -21,28 +21,38 @@ import { loadConfig } from './config.js';
 // Types
 // ---------------------------------------------------------------------------
 
-/** Result of spawning a subprocess (SPEC 14.4: injected). */
+/** Result of spawning a subprocess (SPEC 14.9 item 4: injected). */
 export interface SpawnResult {
   exitCode: number;
   stdout: string;
   stderr: string;
 }
 
-/** Subprocess spawner signature — (args, cwd) → result. */
-export type SpawnFn = (args: readonly string[], cwd: string) => Promise<SpawnResult>;
+/** Subprocess spawner signature — receives full command line (SPEC 14.9 item 4). */
+export type SpawnFn = (cmd: readonly string[], cwd: string) => Promise<SpawnResult>;
 
 /** Notification sender signature. */
 export type NotifySender = (text: string) => Promise<void>;
 
-/** State persisted to .collie/follow.json between iterations (SPEC 14.4). */
+/** Retry/backoff state persisted in follow.json (SPEC 14.9 item 2). */
+export interface RetryState {
+  failures: number;
+  notBefore: number;
+}
+
+/** State persisted to .collie/follow.json between iterations (SPEC 14.4/14.9). */
 export interface FollowJson {
   handledBase: string | null;
   notified: string[];
   /** Pending push: the file that was committed but not yet pushed. */
   pendingPush?: boolean;
+  /** Retry/backoff state (SPEC 14.9 item 2). */
+  retry?: RetryState;
+  /** Count of consecutive git-pull failures (SPEC 14.9 item 2). */
+  pullFailures?: number;
 }
 
-/** Options for the follow loop (SPEC 14.4). */
+/** Options for the follow loop (SPEC 14.4/14.9). */
 export interface FollowOpts {
   root: string;
   once?: boolean;
@@ -53,16 +63,18 @@ export interface FollowOpts {
   now?: () => number;
   /** Injected sleep (SPEC 14.4). */
   sleep?: (ms: number) => Promise<void>;
-  /** Injected subprocess spawner (SPEC 14.4). */
+  /** Injected subprocess spawner (SPEC 14.9 item 4). */
   spawn?: SpawnFn;
   /** Injected notification sender (SPEC 14.4). */
   sendNotify?: NotifySender;
   /** Injected output. */
   out?: (text: string) => void;
+  /** SPEC 14.9 item 6: parent directory for pinned R2 dirs (default: os.tmpdir). */
+  pinnedParentDir?: string;
 }
 
 // ---------------------------------------------------------------------------
-// Constants (SPEC 14.4)
+// Constants (SPEC 14.4 / 14.9)
 // ---------------------------------------------------------------------------
 
 // eslint-disable-next-line no-restricted-syntax -- SPEC 14.4: default polling interval (not a tunable threshold)
@@ -76,6 +88,21 @@ const SHA_PREFIX_LEN = 12;
 
 // eslint-disable-next-line no-restricted-syntax -- SPEC 14.4 step 5: tail lines for minimal report
 const MINIMAL_REPORT_TAIL = 50;
+
+// eslint-disable-next-line no-restricted-syntax -- SPEC 14.9 item 5: tail lines for appendix
+const APPENDIX_TAIL = 20;
+
+// eslint-disable-next-line no-restricted-syntax, @typescript-eslint/no-magic-numbers -- SPEC 14.9 item 2: initial backoff in ms (5 minutes)
+const BACKOFF_INITIAL_MS = 5 * 60 * MS_PER_SEC;
+
+// eslint-disable-next-line no-restricted-syntax, @typescript-eslint/no-magic-numbers -- SPEC 14.9 item 2: max backoff in ms (60 minutes)
+const BACKOFF_MAX_MS = 60 * 60 * MS_PER_SEC;
+
+// eslint-disable-next-line no-restricted-syntax -- SPEC 14.9 item 2: pull failures before notification
+const PULL_FAIL_NOTIFY_THRESHOLD = 3;
+
+// eslint-disable-next-line no-restricted-syntax -- SPEC 14.9 item 4: max tail lines kept in memory for default spawn
+const SPAWN_TAIL_LINES = 200;
 
 const FOLLOW_STATE_PATH = '.collie/follow.json';
 const NEXT_MD_PATH = 'docs/ops/next.md';
@@ -124,16 +151,22 @@ function projectName(root: string): string {
 }
 
 /**
- * SPEC 14.4 step 2: prepare pinned R2 directory.
- * Directory is `<tmpdir>/collie-r2-<project>-<sha12>`.
+ * SPEC 14.4 step 2 / 14.9 item 6: prepare pinned R2 directory.
+ * Directory is `<parentDir>/collie-r2-<project>-<sha12>`.
  * If it already exists, reuse it. Otherwise `git worktree add --detach`.
  * If the pinned sha's package-lock.json matches HEAD's, symlink node_modules.
+ * parentDir defaults to os.tmpdir() but can be injected (SPEC 14.9 item 6).
  */
-async function preparePinnedR2(root: string, pinnedSha: string, spawnFn: SpawnFn): Promise<string> {
+async function preparePinnedR2(
+  root: string,
+  pinnedSha: string,
+  spawnFn: SpawnFn,
+  parentDir: string,
+): Promise<string> {
   const name = projectName(root);
   const shaPrefix = pinnedSha.slice(0, SHA_PREFIX_LEN);
   const dirName = `collie-r2-${name}-${shaPrefix}`;
-  const pinnedDir = join(tmpdir(), dirName);
+  const pinnedDir = join(parentDir, dirName);
 
   if (existsSync(pinnedDir)) return pinnedDir;
 
@@ -152,7 +185,7 @@ async function preparePinnedR2(root: string, pinnedSha: string, spawnFn: SpawnFn
         symlinkSync(targetModules, pinnedModules);
       }
     } else {
-      // Different lock files: run npm ci
+      // Different lock files: run npm ci (SPEC 14.9 item 4: full command line)
       await spawnFn(['npm', 'ci'], pinnedDir);
     }
   } catch {
@@ -180,6 +213,67 @@ function findQueueRunDirs(root: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Return last N lines of text. */
+function lastLines(text: string, n: number): string {
+  const lines = text.split('\n');
+  return lines.slice(-n).join('\n');
+}
+
+/** Check if baseSha was already handled by looking at git log for a matching commit. */
+async function isHandledInGitLog(root: string, baseSha: string): Promise<boolean> {
+  const shaPrefix = baseSha.slice(0, SHA_PREFIX_LEN);
+  const marker = `(base ${shaPrefix})`;
+  try {
+    const logOutput = await git(root, ['log', `${baseSha}..HEAD`, '--oneline']);
+    return logOutput
+      .split('\n')
+      .some((line) => line.includes('ops: report queue') && line.includes(marker));
+  } catch {
+    return false;
+  }
+}
+
+/** Compute backoff delay in ms for a given failure count (SPEC 14.9 item 2). */
+function computeBackoffMs(failures: number): number {
+  // eslint-disable-next-line no-restricted-syntax, @typescript-eslint/no-magic-numbers -- SPEC 14.9: 2^(failures-1) multiplier
+  const multiplier = Math.pow(2, failures - 1);
+  return Math.min(BACKOFF_INITIAL_MS * multiplier, BACKOFF_MAX_MS);
+}
+
+/** Extract failed item names from preflight --json output (SPEC 14.9 item 3). */
+function extractPreflightFailNames(stdout: string): string[] {
+  try {
+    const parsed = JSON.parse(stdout) as { checks?: { name: string; ok: boolean }[] };
+    if (Array.isArray(parsed.checks)) {
+      return parsed.checks.filter((c) => !c.ok).map((c) => c.name);
+    }
+  } catch {
+    // Not valid JSON, ignore
+  }
+  return [];
+}
+
+/** Build notification key for preflight failures (SPEC 14.9 item 2). */
+function preflightNotifyKey(baseSha: string, failNames: string[]): string {
+  const sorted = [...failNames].sort();
+  return `preflight:${baseSha}:${sorted.join(',')}`;
+}
+
+/** Try to extract queue.finished.reason via `report --queue <id> --json` (SPEC 14.9 item 3). */
+function extractQueueReason(reportJsonStdout: string): string | null {
+  try {
+    const parsed = JSON.parse(reportJsonStdout) as { reason?: string };
+    if (typeof parsed.reason === 'string') return parsed.reason;
+  } catch {
+    // Not valid JSON
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Write minimal report (SPEC 14.4 step 5 fallback)
 // ---------------------------------------------------------------------------
 
@@ -190,10 +284,6 @@ function writeMinimalReport(
   stdout: string,
   stderr: string,
 ): void {
-  const lastLines = (text: string, n: number): string => {
-    const lines = text.split('\n');
-    return lines.slice(-n).join('\n');
-  };
   const content = [
     `# 队列运行 ${qRunId}`,
     '',
@@ -217,20 +307,81 @@ function writeMinimalReport(
   writeFileSync(reportPath, content);
 }
 
+/** Build the appendix section for the report (SPEC 14.9 item 5). */
+function buildAppendix(ctx: {
+  baseSha: string;
+  pinnedSha: string;
+  runCmd: readonly string[];
+  runExitCode: number;
+  preflightLastLine: string;
+  runStdout: string;
+  runStderr: string;
+}): string {
+  return [
+    '',
+    '## 运行环境（follow 记录）',
+    '',
+    `基准提交：${ctx.baseSha}`,
+    `固定版本：${ctx.pinnedSha}`,
+    `run 命令行：${ctx.runCmd.join(' ')}`,
+    `run 退出码：${String(ctx.runExitCode)}`,
+    `preflight 末行：${ctx.preflightLastLine}`,
+    '',
+    '### run stdout (末 20 行)',
+    '',
+    '```',
+    lastLines(ctx.runStdout, APPENDIX_TAIL),
+    '```',
+    '',
+    '### run stderr (末 20 行)',
+    '',
+    '```',
+    lastLines(ctx.runStderr, APPENDIX_TAIL),
+    '```',
+    '',
+  ].join('\n');
+}
+
 // ---------------------------------------------------------------------------
-// Run one cycle (SPEC 14.4 steps 1–8)
+// Run one cycle (SPEC 14.4 steps 1–8, with 14.9 hardening)
 // ---------------------------------------------------------------------------
 
-async function executeRun(
-  root: string,
-  baseSha: string,
-  pinnedSha: string,
-  max: number,
-  spawnFn: SpawnFn,
-  sendNotify: NotifySender,
-  out: (text: string) => void,
-): Promise<{ handled: boolean; newNotified: string[] }> {
+interface ExecuteRunOpts {
+  root: string;
+  baseSha: string;
+  pinnedSha: string;
+  max: number;
+  spawnFn: SpawnFn;
+  sendNotify: NotifySender;
+  out: (text: string) => void;
+  stateJson: FollowJson;
+  nowFn: () => number;
+  pinnedParentDir: string;
+}
+
+interface ExecuteRunResult {
+  /** Always true after run --continue starts (SPEC 14.9 item 1). */
+  handled: boolean;
+  newNotified: string[];
+  pushNotifyKey: string | null;
+  retryState: RetryState | undefined;
+}
+
+async function executeRun(opts: ExecuteRunOpts): Promise<ExecuteRunResult> {
+  const {
+    root,
+    baseSha,
+    pinnedSha,
+    max,
+    spawnFn,
+    sendNotify,
+    out,
+    stateJson,
+    nowFn,
+    pinnedParentDir,
+  } = opts;
   const newNotified: string[] = [];
+  const notifiedSet = new Set(stateJson.notified);
 
   // Step 1: baseSha must be ancestor of HEAD (SPEC 14.4)
   const headSha = (await git(root, ['rev-parse', 'HEAD'])).trim();
@@ -241,34 +392,82 @@ async function executeRun(
     isAnc = false;
   }
   if (!isAnc) {
-    // Treat as format error — notify once
+    // SPEC 14.9 item 2: notify once with key ancestor:<baseSha>, then just wait — no subprocess
     const key = `ancestor:${baseSha}`;
-    await sendNotify(`[Collie] 基准提交 ${baseSha} 不是 HEAD 的祖先，跳过`);
-    newNotified.push(key);
-    return { handled: false, newNotified };
+    if (!notifiedSet.has(key)) {
+      await sendNotify(`[Collie] 基准提交 ${baseSha} 不是 HEAD 的祖先，跳过`);
+      newNotified.push(key);
+    }
+    return { handled: false, newNotified, pushNotifyKey: null, retryState: stateJson.retry };
   }
 
-  // Step 2: prepare pinned R2 directory (SPEC 14.4)
-  const pinnedDir = await preparePinnedR2(root, pinnedSha, spawnFn);
+  // SPEC 14.9 item 1: check if already handled via git log
+  const handledInLog = await isHandledInGitLog(root, baseSha);
+  if (handledInLog) {
+    return { handled: true, newNotified, pushNotifyKey: null, retryState: stateJson.retry };
+  }
+
+  // SPEC 14.9 item 2: check backoff — if within notBefore, skip this cycle
+  if (stateJson.retry !== undefined && nowFn() < stateJson.retry.notBefore) {
+    return { handled: false, newNotified, pushNotifyKey: null, retryState: stateJson.retry };
+  }
+
+  // Step 2: prepare pinned R2 directory (SPEC 14.4 / 14.9 item 6)
+  let pinnedDir: string;
+  try {
+    pinnedDir = await preparePinnedR2(root, pinnedSha, spawnFn, pinnedParentDir);
+  } catch {
+    // SPEC 14.9 item 2: pinned dir failure → notify once, enter backoff
+    const key = `pinned:${pinnedSha}`;
+    if (!notifiedSet.has(key)) {
+      await sendNotify(`[Collie] 固定版本目录准备失败：${pinnedSha}`);
+      newNotified.push(key);
+    }
+    const failures = (stateJson.retry?.failures ?? 0) + 1;
+    const retryState: RetryState = {
+      failures,
+      notBefore: nowFn() + computeBackoffMs(failures),
+    };
+    return { handled: false, newNotified, pushNotifyKey: null, retryState };
+  }
   const pinnedCli = join(pinnedDir, 'src', 'cli.ts');
 
-  // Step 3: preflight --smoke (SPEC 14.4)
-  const preflightResult = await spawnFn([pinnedCli, 'preflight', '--smoke'], root);
+  // Step 3: preflight --smoke --json (SPEC 14.9 items 2–3)
+  const preflightCmd = ['npx', 'tsx', pinnedCli, 'preflight', '--smoke', '--json'];
+  const preflightResult = await spawnFn(preflightCmd, root);
   if (preflightResult.exitCode !== 0) {
-    const key = `preflight:${baseSha}`;
-    const failItems = preflightResult.stdout || preflightResult.stderr || 'unknown failure';
-    await sendNotify(`[Collie] preflight 失败：${failItems.trim()}`);
-    newNotified.push(key);
-    // Not recorded as handled — next cycle retries
-    return { handled: false, newNotified };
+    // Extract failed item names from JSON output (SPEC 14.9 item 3)
+    const failNames = extractPreflightFailNames(preflightResult.stdout);
+    const key = preflightNotifyKey(baseSha, failNames);
+    if (!notifiedSet.has(key)) {
+      // Notify with just names, no detail / no paths (SPEC 14.9 item 3)
+      const nameList = failNames.length > 0 ? failNames.join(', ') : 'unknown';
+      await sendNotify(`[Collie] preflight 失败：${nameList}`);
+      newNotified.push(key);
+    }
+    // Enter backoff (SPEC 14.9 item 2)
+    const failures = (stateJson.retry?.failures ?? 0) + 1;
+    const retryState: RetryState = {
+      failures,
+      notBefore: nowFn() + computeBackoffMs(failures),
+    };
+    return { handled: false, newNotified, pushNotifyKey: null, retryState };
   }
+
+  // Preflight succeeded — clear backoff (SPEC 14.9 item 2: success clears retry)
+  const preflightLastLine =
+    (preflightResult.stdout || preflightResult.stderr || '').trim().split('\n').pop() ?? '';
 
   // Track queue run dirs before the run
   const qRunsBefore = new Set(findQueueRunDirs(root));
 
-  // Step 4: run --continue --max (SPEC 14.4)
-  const runResult = await spawnFn([pinnedCli, 'run', '--continue', '--max', String(max)], root);
+  // Step 4: run --continue --max (SPEC 14.9 item 4: full command line)
+  const runCmd = ['npx', 'tsx', pinnedCli, 'run', '--continue', '--max', String(max)];
+  const runResult = await spawnFn(runCmd, root);
   const runExitCode = runResult.exitCode;
+
+  // SPEC 14.9 item 1: after starting run --continue, always mark handled
+  // (regardless of subsequent failures)
 
   // Step 5: find new q- run directories
   const qRunsAfter = findQueueRunDirs(root);
@@ -277,14 +476,35 @@ async function executeRun(
 
   // Try generating report with workspace HEAD's cli.ts (SPEC 14.4 step 5)
   let reportGenerated = false;
+  let reportJsonStdout = '';
   try {
     const headCli = join(root, 'src', 'cli.ts');
-    const reportResult = await spawnFn([headCli, 'report', '--queue', qRunId], root);
+    const reportCmd = ['npx', 'tsx', headCli, 'report', '--queue', qRunId];
+    const reportResult = await spawnFn(reportCmd, root);
     if (reportResult.exitCode === 0 && reportResult.stdout.trim().length > 0) {
+      let reportContent = reportResult.stdout;
+      // SPEC 14.9 item 5: append environment section
+      const appendix = buildAppendix({
+        baseSha,
+        pinnedSha,
+        runCmd,
+        runExitCode,
+        preflightLastLine,
+        runStdout: runResult.stdout,
+        runStderr: runResult.stderr,
+      });
+      reportContent += appendix;
+
       const reportPath = join(root, 'docs', 'ops', `queue-${qRunId}.md`);
       mkdirSync(dirname(reportPath), { recursive: true });
-      writeFileSync(reportPath, reportResult.stdout);
+      writeFileSync(reportPath, reportContent);
       reportGenerated = true;
+    }
+    // Also try JSON for extracting reason (SPEC 14.9 item 3)
+    const reportJsonCmd = ['npx', 'tsx', headCli, 'report', '--queue', qRunId, '--json'];
+    const jsonResult = await spawnFn(reportJsonCmd, root);
+    if (jsonResult.exitCode === 0) {
+      reportJsonStdout = jsonResult.stdout;
     }
   } catch {
     // Fall through to minimal report
@@ -295,9 +515,10 @@ async function executeRun(
     writeMinimalReport(root, qRunId, runExitCode, runResult.stdout, runResult.stderr);
   }
 
-  // Step 6: commit and push (SPEC 14.4)
+  // Step 6: commit and push (SPEC 14.9 item 1: commit msg includes base sha prefix)
+  const baseShaPrefix = baseSha.slice(0, SHA_PREFIX_LEN);
   const reportFile = `docs/ops/queue-${qRunId}.md`;
-  const commitMsg = `ops: report queue ${qRunId}`;
+  const commitMsg = `ops: report queue ${qRunId} (base ${baseShaPrefix})`;
   try {
     await git(root, ['add', '--', reportFile]);
     await git(root, ['commit', '-m', commitMsg, '--', reportFile]);
@@ -305,25 +526,30 @@ async function executeRun(
     // Commit may fail if file unchanged; continue
   }
 
-  // Push
-  let pushFailed = false;
+  // Push (SPEC 14.9 item 1: push, notify once on failure)
+  let pushNotifyKey: string | null = null;
   try {
     await push(root, 'origin', 'main');
   } catch {
-    pushFailed = true;
-    await sendNotify('[Collie] 推送失败，下一圈重试');
+    const key = `push:${baseSha}`;
+    if (!notifiedSet.has(key)) {
+      await sendNotify('[Collie] 推送失败，下一圈重试');
+      pushNotifyKey = key;
+      newNotified.push(key);
+    }
   }
 
-  // Step 7: notify queue end (SPEC 14.4)
-  const reason = runExitCode === 0 ? 'exhausted' : `exit ${String(runExitCode)}`;
+  // Step 7: notify queue end (SPEC 14.9 item 3: reason from journal)
+  const journalReason = extractQueueReason(reportJsonStdout);
+  const reason = journalReason ?? `exit ${String(runExitCode)}`;
   await sendNotify(
     `[Collie] 队列 ${qRunId} 结束：${reason}，退出码 ${String(runExitCode)}。到对话里说「看」`,
   );
 
   out(`action: run baseSha=${baseSha} qRunId=${qRunId} exitCode=${String(runExitCode)}\n`);
 
-  // Step 8: mark handled unless push failed
-  return { handled: !pushFailed, newNotified };
+  // Step 8: always mark handled (SPEC 14.9 item 1)
+  return { handled: true, newNotified, pushNotifyKey, retryState: undefined };
 }
 
 // ---------------------------------------------------------------------------
@@ -340,7 +566,38 @@ async function retryPendingPush(root: string): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
-// Main loop (SPEC 14.4)
+// Push if local is ahead (SPEC 14.9 item 1)
+// ---------------------------------------------------------------------------
+
+async function pushIfAhead(
+  root: string,
+  baseSha: string,
+  sendNotify: NotifySender,
+  notifiedSet: ReadonlySet<string>,
+): Promise<{ pushed: boolean; notifyKey: string | null }> {
+  // Check if local is ahead of remote
+  try {
+    const localHead = (await git(root, ['rev-parse', 'HEAD'])).trim();
+    const remoteHead = (await git(root, ['rev-parse', 'origin/main'])).trim();
+    if (localHead === remoteHead) return { pushed: true, notifyKey: null };
+  } catch {
+    // Can't determine, try pushing anyway
+  }
+  try {
+    await push(root, 'origin', 'main');
+    return { pushed: true, notifyKey: null };
+  } catch {
+    const key = `push:${baseSha}`;
+    if (!notifiedSet.has(key)) {
+      await sendNotify('[Collie] 推送失败，下一圈重试');
+      return { pushed: false, notifyKey: key };
+    }
+    return { pushed: false, notifyKey: null };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Main loop (SPEC 14.4 / 14.9)
 // ---------------------------------------------------------------------------
 
 export async function follow(opts: FollowOpts): Promise<number> {
@@ -355,6 +612,7 @@ export async function follow(opts: FollowOpts): Promise<number> {
   const nowFn = opts.now ?? (() => Date.now());
   const sleepFn = opts.sleep ?? defaultSleep;
   const spawnFn = opts.spawn ?? defaultSpawn;
+  const pinnedParentDir = opts.pinnedParentDir ?? tmpdir();
 
   // Build notification sender
   const sendNotify: NotifySender =
@@ -396,8 +654,25 @@ export async function follow(opts: FollowOpts): Promise<number> {
     if (!dryRun) {
       try {
         await git(root, ['pull', '--ff-only', '--quiet']);
+        // Pull succeeded — clear pull failure count (SPEC 14.9 item 2)
+        if ((stateJson.pullFailures ?? 0) > 0) {
+          stateJson.pullFailures = 0;
+          saveFollowState(root, stateJson);
+        }
       } catch {
-        // Pull failure: continue with current state
+        // SPEC 14.9 item 2: git pull failure tracking
+        const prevFails = stateJson.pullFailures ?? 0;
+        const newFails = prevFails + 1;
+        stateJson.pullFailures = newFails;
+        saveFollowState(root, stateJson);
+        if (newFails >= PULL_FAIL_NOTIFY_THRESHOLD) {
+          const notifiedSet = new Set(stateJson.notified);
+          if (!notifiedSet.has('pull')) {
+            await sendNotify('[Collie] git pull 连续失败');
+            stateJson.notified = [...stateJson.notified, 'pull'];
+            saveFollowState(root, stateJson);
+          }
+        }
       }
     }
 
@@ -454,19 +729,31 @@ export async function follow(opts: FollowOpts): Promise<number> {
         return 0;
       }
       case 'run': {
-        const result = await executeRun(
+        // SPEC 14.9 item 1: push if local is ahead before starting
+        const notifiedSet = new Set(stateJson.notified);
+        const pushResult = await pushIfAhead(root, action.baseSha, sendNotify, notifiedSet);
+        if (pushResult.notifyKey !== null) {
+          stateJson.notified = [...stateJson.notified, pushResult.notifyKey];
+          saveFollowState(root, stateJson);
+        }
+
+        const result = await executeRun({
           root,
-          action.baseSha,
-          action.pinnedSha,
-          action.max,
+          baseSha: action.baseSha,
+          pinnedSha: action.pinnedSha,
+          max: action.max,
           spawnFn,
           sendNotify,
           out,
-        );
+          stateJson,
+          nowFn,
+          pinnedParentDir,
+        });
         const updated: FollowJson = {
           handledBase: result.handled ? action.baseSha : stateJson.handledBase,
           notified: [...stateJson.notified, ...result.newNotified],
-          ...(result.handled ? {} : { pendingPush: true }),
+          retry: result.retryState,
+          pullFailures: stateJson.pullFailures,
         };
         saveFollowState(root, updated);
         break;
@@ -489,27 +776,67 @@ function defaultSleep(ms: number): Promise<void> {
   });
 }
 
-async function defaultSpawn(args: readonly string[], cwd: string): Promise<SpawnResult> {
-  const cp = await import('node:child_process');
-  try {
-    const stdout = cp.execFileSync('npx', ['tsx', ...args], {
+/**
+ * SPEC 14.9 item 4: default subprocess spawner.
+ * Streams child's output to follow's stdout. Keeps only the last 200 lines
+ * in memory (no buffer size limit). cmd[0] is the program to execute.
+ */
+async function defaultSpawn(cmd: readonly string[], cwd: string): Promise<SpawnResult> {
+  const { spawn: spawnChild } = await import('node:child_process');
+  return new Promise<SpawnResult>((resolve) => {
+    const program = cmd[0] ?? 'echo';
+    const args = cmd.slice(1);
+    const child = spawnChild(program, args, {
       cwd,
-      encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    return { exitCode: 0, stdout, stderr: '' };
-  } catch (error: unknown) {
-    const err = error as { status?: number; stdout?: string; stderr?: string };
-    return {
-      exitCode: err.status ?? 1,
-      stdout: err.stdout ?? '',
-      stderr: err.stderr ?? '',
+
+    const stdoutLines: string[] = [];
+    const stderrLines: string[] = [];
+    let stdoutBuf = '';
+    let stderrBuf = '';
+
+    const pushLines = (buf: string, lines: string[]): string => {
+      const combined = buf;
+      const parts = combined.split('\n');
+      // Last element is the incomplete line (carry over)
+      const carry = parts.pop() ?? '';
+      for (const line of parts) {
+        process.stdout.write(line + '\n');
+        lines.push(line);
+        if (lines.length > SPAWN_TAIL_LINES) lines.shift();
+      }
+      return carry;
     };
-  }
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutBuf = pushLines(stdoutBuf + chunk.toString(), stdoutLines);
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderrBuf = pushLines(stderrBuf + chunk.toString(), stderrLines);
+    });
+
+    child.on('close', (code: number | null) => {
+      // Flush remaining
+      if (stdoutBuf.length > 0) {
+        stdoutLines.push(stdoutBuf);
+        if (stdoutLines.length > SPAWN_TAIL_LINES) stdoutLines.shift();
+      }
+      if (stderrBuf.length > 0) {
+        stderrLines.push(stderrBuf);
+        if (stderrLines.length > SPAWN_TAIL_LINES) stderrLines.shift();
+      }
+      resolve({
+        exitCode: code ?? 1,
+        stdout: stdoutLines.join('\n'),
+        stderr: stderrLines.join('\n'),
+      });
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Format helpers
 // ---------------------------------------------------------------------------
 
 function formatActionDetail(action: DecideAction): string {
