@@ -1082,4 +1082,27 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b01 · r-20261116070603 · PASS
+
+- 时间：2026-11-16T07:48:39.868Z
+- 裁定：规则 10，All 11 acceptance commands pass. Commits pushed (head is ancestor of origin/main). No protected files modified, no new dependencies. All structural and behavioral requirements verified with file:line evidence and test execution. CI 以 R2 取证为准。
+- 提交：`772fb41`
+- 验收命令：11/11 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1002 passed, 0 failed
+  - `npm test -- test/preflight.test.ts test/queue-audit.test.ts` → exit 0，15 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/preflight.test.ts | grep -qE "^([8-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `grep -cE "^\s+it\(" test/queue-audit.test.ts | grep -qE "^([4-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `npx tsx src/cli.ts preflight 2>&1 | grep -qE "worktree_clean"` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "queue\.preflight" && grep -qE "queue\.preflight" src/schema/index.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "audit_mismatch" && grep -qE "audit_mismatch" test/queue-audit.test.ts` → exit 0，exit 0
+  - `grep -qE "min_free_mb" src/schema/index.ts` → exit 0，exit 0
+  - `grep -qE "queue\.preflight" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43825514213
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
