@@ -19,6 +19,7 @@ import {
   readEnvelope,
   readCiTokenChecked,
   REVIEWER_STREAM_FILE_NAME,
+  auditReviewerTools,
   runBatch,
   runQueue,
 } from './run.js';
@@ -37,6 +38,7 @@ import {
   projectWhy,
 } from './view.js';
 import { DEFAULT_INTERVAL_SECS, watch } from './watch.js';
+import { formatPreflight, runPreflight } from './preflight.js';
 
 /** How `collie run` obtains its runner (SPEC 5: default is the real one). */
 export type RunnerChoice =
@@ -68,6 +70,8 @@ export interface CliDeps {
   livenessFingerprint?: (root: string) => Promise<string>;
   /** Test hook: injected sleep for `collie watch` (SPEC 13.5). */
   watchSleep?: (ms: number) => Promise<void>;
+  /** SPEC 14.1: injectable disk-free reader (MB) for preflight. */
+  diskFreeMb?: (root: string) => number;
 }
 
 const TEMPLATE = join(import.meta.dirname, '..', 'templates', 'collie.toml');
@@ -247,6 +251,7 @@ async function runContinue(
     ...(deps.livenessFingerprint === undefined
       ? {}
       : { livenessFingerprint: deps.livenessFingerprint }),
+    ...(deps.diskFreeMb === undefined ? {} : { diskFreeMb: deps.diskFreeMb }),
   });
   const batchSummary =
     outcome.batches.map((b) => `${b.batch_id}:${b.verdict}`).join(', ') || 'none';
@@ -489,67 +494,38 @@ export const WHY_EXIT = { HAS_DATA: 0, NOT_IN_BACKLOG: 1, NO_JOURNAL: 2 } as con
  * `collie audit <run_id>`: reads reviewer.stream.ndjson, extracts the init
  * message's tool list, compares it with the reviewer whitelist from config.
  * Exit 0 = match, 1 = mismatch (prints diff), 2 = no stream or no init.
+ * SPEC 14.1: now uses the shared auditReviewerTools function.
  */
 function audit(deps: CliDeps, runId: string): number {
-  const streamPath = join(deps.cwd, RUNS_RELATIVE_DIR, runId, REVIEWER_STREAM_FILE_NAME);
-  let content: string;
-  try {
-    content = readFileSync(streamPath, 'utf8');
-  } catch {
-    // SPEC (v03-b03-fix): escalation path or worker crash means no reviewer ran.
-    deps.err(`no reviewer in run ${runId} (escalation path or worker crash); nothing to audit\n`);
-    return AUDIT_EXIT.NO_DATA;
-  }
-  if (content.trim() === '') {
+  const config = loadConfig(deps.cwd);
+  const result = auditReviewerTools(root(deps), runId, [...config.agent.reviewer.allowed_tools]);
+
+  if (result === undefined) {
     deps.err(`no reviewer in run ${runId} (escalation path or worker crash); nothing to audit\n`);
     return AUDIT_EXIT.NO_DATA;
   }
 
-  // Find the SDK init message: { type: 'system', subtype: 'init', tools: [...] }
-  const lines = content.trim().split('\n');
-  let initTools: string[] | undefined;
-  for (const line of lines) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      (parsed as Record<string, unknown>).type === 'system' &&
-      (parsed as Record<string, unknown>).subtype === 'init' &&
-      Array.isArray((parsed as Record<string, unknown>).tools)
-    ) {
-      initTools = (parsed as Record<string, unknown>).tools as string[];
-      break;
-    }
-  }
-  if (initTools === undefined) {
+  if (result.outcome === 'no_init') {
     deps.err(`no init message found in ${REVIEWER_STREAM_FILE_NAME} for run ${runId}\n`);
     return AUDIT_EXIT.NO_DATA;
   }
 
-  const config = loadConfig(deps.cwd);
-  const whitelist = [...config.agent.reviewer.allowed_tools].sort();
-  const actual = [...initTools].sort();
-
-  if (JSON.stringify(actual) === JSON.stringify(whitelist)) {
+  if (result.outcome === 'match') {
     deps.out(`audit ${runId}: tools match reviewer whitelist\n`);
     return AUDIT_EXIT.MATCH;
   }
 
-  // Print the symmetric difference.
-  const whitelistSet = new Set(whitelist);
-  const actualSet = new Set(actual);
-  const extra = actual.filter((t) => !whitelistSet.has(t));
-  const missing = whitelist.filter((t) => !actualSet.has(t));
+  // mismatch
   const parts: string[] = [];
-  if (extra.length > 0) parts.push(`extra: ${extra.join(', ')}`);
-  if (missing.length > 0) parts.push(`missing: ${missing.join(', ')}`);
+  if (result.extra.length > 0) parts.push(`extra: ${result.extra.join(', ')}`);
+  if (result.missing.length > 0) parts.push(`missing: ${result.missing.join(', ')}`);
   deps.err(`audit ${runId}: tools mismatch (${parts.join('; ')})\n`);
   return AUDIT_EXIT.MISMATCH;
+}
+
+/** Shorthand to avoid renaming `deps.cwd` everywhere. */
+function root(deps: CliDeps): string {
+  return deps.cwd;
 }
 
 /**
@@ -846,6 +822,62 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
     .option('--json', 'output as JSON')
     .action((batchId: string, opts: { attempt?: number; json?: boolean }) => {
       code = why(deps, batchId, opts);
+    });
+  program
+    .command('preflight')
+    .description('check environment readiness: worktree, remote, token, disk (SPEC 14.1)')
+    .option('--smoke', 'also test runner and CI connectivity')
+    .option('--json', 'output as JSON')
+    .option('--runner <kind>', 'agent runner: claude (default) or fake')
+    .action(async (opts: { smoke?: boolean; json?: boolean; runner?: string }) => {
+      let config: ReturnType<typeof loadConfig>;
+      try {
+        config = loadConfig(deps.cwd);
+      } catch (error) {
+        deps.err(`collie: ${error instanceof Error ? error.message : String(error)}\n`);
+        code = EXIT_CODES.ERROR;
+        return;
+      }
+      const smokeOpts =
+        opts.smoke === true
+          ? (() => {
+              const kind = opts.runner;
+              if (kind !== undefined && kind !== 'claude' && kind !== 'fake') {
+                deps.err(`unknown runner ${JSON.stringify(kind)}; use claude or fake\n`);
+                return null; // signal error
+              }
+              const choice: RunnerChoice | AgentRunner | undefined =
+                kind === 'fake' && deps.runner !== undefined
+                  ? deps.runner
+                  : kind === 'claude' || kind === 'fake'
+                    ? { kind }
+                    : deps.runner;
+              const runner = resolveRunner(choice, deps.cwd);
+              if (runner === undefined) {
+                deps.err('no agent runner is available\n');
+                return null;
+              }
+              return { runner, fetch: deps.fetch };
+            })()
+          : undefined;
+      if (smokeOpts === null) {
+        code = EXIT_CODES.ERROR;
+        return;
+      }
+      const result = await runPreflight({
+        root: deps.cwd,
+        remote: deps.remote ?? 'origin',
+        config,
+        ...(deps.diskFreeMb === undefined ? {} : { diskFreeMb: deps.diskFreeMb }),
+        ...(smokeOpts === undefined ? {} : { smoke: smokeOpts }),
+      });
+      if (opts.json === true) {
+        // eslint-disable-next-line no-restricted-syntax, @typescript-eslint/no-magic-numbers -- standard JSON indent
+        deps.out(JSON.stringify(result, null, 2) + '\n');
+      } else {
+        deps.out(formatPreflight(result));
+      }
+      code = result.ok ? EXIT_CODES.PASS : EXIT_CODES.ERROR;
     });
 
   try {

@@ -51,6 +51,7 @@ const validConfig: CollieConfig = {
     ci_wait_secs: 1800,
     ci_poll_secs: 30,
     grace_secs: 20,
+    min_free_mb: 1024,
   },
   verify: { commands: ['npm run lint', 'npm run typecheck', 'npm test'] },
   ci: { provider: 'github-actions', expected_branch: 'main' },
@@ -248,7 +249,7 @@ describe('schema: Event round-trip', () => {
   });
 
   it('defines the v0.1 event types plus v0.2 and v0.3 types added so far', () => {
-    expect(EVENT_TYPES).toHaveLength(35);
+    expect(EVENT_TYPES).toHaveLength(37);
     expect(EVENT_TYPES).toContain('ci.wait_timeout');
     expect(EVENT_TYPES).toContain('acceptance.failed');
     // v0.2 additions (SPEC 11.3–11.6)
@@ -281,6 +282,9 @@ describe('schema: Event round-trip', () => {
     expect(EVENT_TYPES).toContain('evidence.collected');
     // v0.4 additions (SPEC 13.14)
     expect(EVENT_TYPES).toContain('queue.gate_passed');
+    // v0.45 additions (SPEC 14.1)
+    expect(EVENT_TYPES).toContain('queue.preflight');
+    expect(EVENT_TYPES).toContain('audit.result');
   });
 
   it.each(['../escape', 'a/b', '', '.hidden', 'r 1'])('rejects unsafe run_id %j', (run_id) => {

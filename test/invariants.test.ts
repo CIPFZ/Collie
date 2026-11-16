@@ -403,4 +403,14 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/view.ts'), 'utf8');
     expect(content).toContain('ci.verdict_commit');
   });
+
+  it('src/run.ts contains queue.preflight (v045-b01)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    expect(content).toContain('queue.preflight');
+  });
+
+  it('src/schema/index.ts contains audit.result (v045-b01)', () => {
+    const content = readFileSync(join(ROOT, 'src/schema/index.ts'), 'utf8');
+    expect(content).toContain('audit.result');
+  });
 });

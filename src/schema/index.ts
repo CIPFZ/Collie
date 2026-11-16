@@ -19,6 +19,13 @@ export const BATCH_ITEMS_MAX = 3;
 // eslint-disable-next-line no-restricted-syntax -- SPEC 11.1: grace period default, named constant
 export const DEFAULT_GRACE_SECS = 20;
 
+/**
+ * SPEC 14.1: default min_free_mb for the preflight disk check. Used when the
+ * field is absent from collie.toml (v0.45 field, schema-optional).
+ */
+// eslint-disable-next-line no-restricted-syntax -- SPEC 14.1: disk free threshold default, named constant
+export const DEFAULT_MIN_FREE_MB = 1024;
+
 /** JSON value, the only payload an NDJSON event line can round-trip losslessly (SPEC 3.6). */
 export type JsonValue =
   string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -100,6 +107,8 @@ export const LimitsSchema = z.strictObject({
   ci_poll_secs: z.number().int().positive(),
   /** SPEC 11.1: grace period between signal ladder levels; optional, defaults to 20s. */
   grace_secs: z.number().int().positive().optional().default(DEFAULT_GRACE_SECS),
+  /** SPEC 14.1: minimum free disk space (MB) for the preflight check; optional, defaults to 1024. */
+  min_free_mb: z.number().int().positive().optional().default(DEFAULT_MIN_FREE_MB),
 });
 export type Limits = z.infer<typeof LimitsSchema>;
 
@@ -215,6 +224,10 @@ export const EVENT_TYPES = [
   'queue.batch_started',
   // v0.4 (SPEC 13.14): PASS and gate conditions met; fields batch_id / batch_run_id.
   'queue.gate_passed',
+  // v0.45 (SPEC 14.1): preflight check at queue start; fields ok / checks.
+  'queue.preflight',
+  // v0.45 (SPEC 14.1): reviewer tool audit; fields outcome / extra? / missing?.
+  'audit.result',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);

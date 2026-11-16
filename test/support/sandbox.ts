@@ -177,6 +177,8 @@ export class Sandbox {
       now: () => new Date(Date.UTC(2026, 9, 19, 12, 0, this.tick++)),
       out: (t) => this.output.push(t),
       err: (t) => this.output.push(t),
+      // SPEC 14.1: inject disk-free to avoid depending on real disk space.
+      diskFreeMb: () => 10_000, // test double, not a threshold
       ...extra,
     });
   }

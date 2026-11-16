@@ -43,6 +43,7 @@ import {
 } from './heartbeat.js';
 import { createJournal, EVENTS_FILE_NAME, RUNS_RELATIVE_DIR, type Journal } from './journal.js';
 import { LivenessMonitor, runLadder, type LadderReason } from './ladder.js';
+import { runPreflight } from './preflight.js';
 import { writeProgress } from './progress.js';
 import { readVerdict, runReviewer, verdictPath } from './roles/reviewer.js';
 import { buildTask, readReport, runWorker, taskPath, writeTask } from './roles/worker.js';
@@ -151,6 +152,8 @@ export interface RunOutcome {
   evidenceUnavailableCause?: string;
   /** SPEC 13.14: worker_stop_reason from run.finished, used by queue interrupt retry. */
   workerStopReason?: string;
+  /** SPEC 14.1: audit outcome from reviewer tool check. */
+  auditResult?: 'match' | 'mismatch' | 'no_init';
 }
 
 class Recorder {
@@ -1899,6 +1902,19 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     });
     const { verdict, collected } = outcome;
 
+    // SPEC 14.1: audit reviewer tools (both single-batch and --continue modes).
+    // Only when the reviewer ran (stream file exists).
+    let auditResult: 'match' | 'mismatch' | 'no_init' | undefined;
+    const auditOutcome = auditReviewerTools(root, runId, [...config.agent.reviewer.allowed_tools]);
+    if (auditOutcome !== undefined) {
+      auditResult = auditOutcome.outcome;
+      rec.record('audit.result', {
+        outcome: auditOutcome.outcome,
+        ...(auditOutcome.extra.length > 0 ? { extra: auditOutcome.extra } : {}),
+        ...(auditOutcome.missing.length > 0 ? { missing: auditOutcome.missing } : {}),
+      });
+    }
+
     // SPEC 13.18: recheck verdict commit CI after evidence collection.
     // Only on the normal path (not escalation) when startup got pending/no_runs.
     if (verdictCiRecheckSha !== undefined) {
@@ -2075,6 +2091,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       evidence: collected.evidence,
       gaps: verdict.ok ? verdict.value.gaps : [],
       ...(evidenceUnavailableCause !== undefined ? { evidenceUnavailableCause } : {}),
+      ...(auditResult !== undefined ? { auditResult } : {}),
     });
   } catch (outerError) {
     // SPEC 11.3: exception fallback. Any unexpected error after heartbeat write
@@ -2157,6 +2174,79 @@ export function readEnvelope(root: string, batchId: string, name: string): strin
 }
 
 // ---------------------------------------------------------------------------
+// Shared audit logic (SPEC 14.1): extracted from cli.ts so both `collie audit`
+// and the post-reviewer audit inside runBatch use the same function.
+// ---------------------------------------------------------------------------
+
+/** SPEC 14.1: structured audit outcome, shared by CLI and run pipeline. */
+export interface AuditOutcome {
+  outcome: 'match' | 'mismatch' | 'no_init';
+  extra: string[];
+  missing: string[];
+}
+
+/**
+ * SPEC 14.1: reads reviewer.stream.ndjson for `runId`, extracts the init
+ * message's tool list, and compares it with `whitelist`.
+ * Returns undefined when no stream file exists (no reviewer ran at all).
+ */
+export function auditReviewerTools(
+  root: string,
+  runId: string,
+  whitelist: readonly string[],
+): AuditOutcome | undefined {
+  const streamPath = join(root, RUNS_RELATIVE_DIR, runId, REVIEWER_STREAM_FILE_NAME);
+  let content: string;
+  try {
+    content = readFileSync(streamPath, 'utf8');
+  } catch {
+    return undefined; // no stream file → no reviewer
+  }
+  if (content.trim() === '') return undefined;
+
+  // Find the SDK init message: { type: 'system', subtype: 'init', tools: [...] }
+  const lines = content.trim().split('\n');
+  let initTools: string[] | undefined;
+  for (const line of lines) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      (parsed as Record<string, unknown>).type === 'system' &&
+      (parsed as Record<string, unknown>).subtype === 'init' &&
+      Array.isArray((parsed as Record<string, unknown>).tools)
+    ) {
+      initTools = (parsed as Record<string, unknown>).tools as string[];
+      break;
+    }
+  }
+
+  if (initTools === undefined) {
+    return { outcome: 'no_init', extra: [], missing: [] };
+  }
+
+  const sorted = [...whitelist].sort();
+  const actual = [...initTools].sort();
+
+  if (JSON.stringify(actual) === JSON.stringify(sorted)) {
+    return { outcome: 'match', extra: [], missing: [] };
+  }
+
+  const whitelistSet = new Set(sorted);
+  const actualSet = new Set(actual);
+  return {
+    outcome: 'mismatch',
+    extra: actual.filter((t) => !whitelistSet.has(t)),
+    missing: sorted.filter((t) => !actualSet.has(t)),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Queue mode: --continue (SPEC 12.2)
 // ---------------------------------------------------------------------------
 
@@ -2177,6 +2267,8 @@ export interface QueueContext {
   livenessNow?: () => number;
   livenessSetTimer?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>;
   livenessFingerprint?: (root: string) => Promise<string>;
+  /** SPEC 14.1: injectable disk-free reader for preflight. */
+  diskFreeMb?: (root: string) => number;
 }
 
 export interface QueueOutcome {
@@ -2315,6 +2407,36 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
   // Ensure the queue run directory exists.
   mkdirSync(join(root, RUNS_RELATIVE_DIR, queueRunId), { recursive: true });
 
+  // SPEC 14.1: preflight check before selecting the first batch (no --smoke).
+  // Single-batch mode does not auto-check.
+  const preflightResult = await runPreflight({
+    root,
+    remote: ctx.remote,
+    config,
+    ...(ctx.diskFreeMb !== undefined ? { diskFreeMb: ctx.diskFreeMb } : {}),
+  });
+  queueRec.record('queue.preflight', {
+    ok: preflightResult.ok,
+    checks: preflightResult.checks.map((c) => ({
+      name: c.name,
+      ok: c.ok,
+      ...(c.detail !== undefined ? { detail: c.detail } : {}),
+    })),
+  });
+  if (!preflightResult.ok) {
+    const failedItems = preflightResult.checks
+      .filter((c) => !c.ok)
+      .map((c) => c.name)
+      .join(', ');
+    ctx.err?.(`preflight failed: ${failedItems}\n`);
+    queueRec.record('queue.finished', {
+      reason: 'preflight_failed',
+      batches: [],
+      paused_count: 0,
+    });
+    return { exitCode: EXIT_CODES.ERROR, reason: 'preflight_failed', batches: [], pausedCount: 0 };
+  }
+
   let currentBatchId: string | undefined;
 
   // SPEC 12.3: track queue.paused count for this --continue session.
@@ -2389,6 +2511,24 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
         : { livenessFingerprint: ctx.livenessFingerprint }),
     });
     batchesRun.push({ batch_id: currentBatchId, run_id: runId, verdict: outcome.final });
+
+    // SPEC 14.1: audit_mismatch stops the queue regardless of the verdict.
+    // The batch itself ran to completion (verdict/progress committed); only the queue stops.
+    if (outcome.auditResult === 'mismatch') {
+      pausedCount++;
+      queueRec.record('queue.paused', { batch_id: currentBatchId, reasons: ['audit_mismatch'] });
+      queueRec.record('queue.finished', {
+        reason: 'paused',
+        batches: batchesRun,
+        paused_count: pausedCount,
+      });
+      return {
+        exitCode: EXIT_CODES.PAUSED,
+        reason: 'paused',
+        batches: batchesRun,
+        pausedCount,
+      };
+    }
 
     if (outcome.final === 'PASS') {
       // SPEC 12.3: gate decision — check seven conditions before continuing.

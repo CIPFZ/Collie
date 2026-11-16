@@ -103,6 +103,7 @@ describe('config: the repository .collie/collie.toml', () => {
       ci_wait_secs: 1800,
       ci_poll_secs: 30,
       grace_secs: 20,
+      min_free_mb: 1024,
     });
   });
 
