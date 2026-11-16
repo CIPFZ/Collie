@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-run_id: r-20261116154308
+run_id: r-20261116162606
 batch_id: v045-b08
 base_sha: 99baf56044fc2f7537bcbcb8dd80adea50a117ea
-created_at: 2026-11-16T15:43:09.773Z
-attempt: 1
+created_at: 2026-11-16T16:26:06.873Z
+attempt: 2
 interrupted_at: null
 issued_by: collie
 ---
@@ -58,3 +58,22 @@ issued_by: collie
 完成后写 `.collie/batches/v045-b08/report.md`：固定四段（做了什么 / 测试结果 / 偏离或疑问 / 下一步建议）
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v045-b08` 为提交信息单独提交并推送该文件。
+
+## 上一轮判 FIX
+
+### Gaps
+
+- 验收命令 #1 (npm run lint) 退出码 1：src/follow.ts 有 2 处 Prettier 格式不一致（第 35 行 SpawnFn 类型签名、第 646 行链式调用）。运行 npx prettier --write src/follow.ts 即可修复。
+- test #29 未测试真正的 defaultSpawn：条目 3 要求「用一个不存在的程序名调缺省的子进程实现得到退出码 127」，当前测试创建 fake 返回 127 然后验证返回 127，同义反复。需重写为调用实际 defaultSpawn（export 后直接调用，或不注入 spawn 走 follow 路径触发 ENOENT）。
+
+### 未通过的验收命令
+
+- `npm run lint` → exit 1
+
+### 上一轮代码提交
+
+- `132bf2f91590c10f843c9aa5ea97dfcdc1acb604`
+- `7bf4a6d4a5c4b75181f6cf9e6b87d93775833b1d`
+- `572836a93a1fdcfa20cce29bb5c00fd081f5e597`
+
+这些提交已在审核范围内，只补缺口，不要重做。
