@@ -42,6 +42,7 @@ import {
 } from './view.js';
 import { DEFAULT_INTERVAL_SECS, watch } from './watch.js';
 import { formatPreflight, runPreflight } from './preflight.js';
+import { notify } from './notify.js';
 
 /** How `collie run` obtains its runner (SPEC 5: default is the real one). */
 export type RunnerChoice =
@@ -965,6 +966,33 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
         deps.out(formatPreflight(result));
       }
       code = result.ok ? EXIT_CODES.PASS : EXIT_CODES.ERROR;
+    });
+  program
+    .command('notify')
+    .description('send a text notification via configured webhook (SPEC 14.3)')
+    .argument('<text>', 'notification text')
+    .action(async (text: string) => {
+      let config: ReturnType<typeof loadConfig>;
+      try {
+        config = loadConfig(deps.cwd);
+      } catch {
+        // No config at all → skip.
+        deps.out('skipped (no webhook)\n');
+        code = EXIT_CODES.PASS;
+        return;
+      }
+      const result = await notify(text, config, deps.cwd, deps.fetch);
+      if (result === 'sent') {
+        deps.out('sent\n');
+        code = EXIT_CODES.PASS;
+      } else if (result === 'skipped') {
+        deps.out('skipped (no webhook)\n');
+        code = EXIT_CODES.PASS;
+      } else {
+        // result starts with 'failed: '
+        deps.out(`${result}\n`);
+        code = EXIT_CODES.ERROR;
+      }
     });
 
   try {

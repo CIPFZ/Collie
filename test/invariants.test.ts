@@ -418,4 +418,25 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/view.ts'), 'utf8');
     expect(content).toContain('projectReport');
   });
+
+  it('src/handoff.ts does not import node:fs or node:child_process (v045-b03)', () => {
+    const lines = readFileSync(join(ROOT, 'src/handoff.ts'), 'utf8').split('\n');
+    // SPEC 14.3: handoff must be pure functions — no filesystem or subprocess.
+    // Only check non-comment code lines (铁律 26).
+    const codeLines = lines.filter(
+      (l) =>
+        !l.trimStart().startsWith('//') &&
+        !l.trimStart().startsWith('*') &&
+        !l.trimStart().startsWith('/*'),
+    );
+    const code = codeLines.join('\n');
+    expect(code).not.toContain('node:fs');
+    expect(code).not.toContain('node:child_process');
+  });
+
+  it('src/notify.ts exists (v045-b03)', () => {
+    // SPEC 14.3: notify module must exist.
+    const content = readFileSync(join(ROOT, 'src/notify.ts'), 'utf8');
+    expect(content).toContain('notify');
+  });
 });

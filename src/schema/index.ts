@@ -112,6 +112,13 @@ export const LimitsSchema = z.strictObject({
 });
 export type Limits = z.infer<typeof LimitsSchema>;
 
+/** SPEC 14.3: optional notification configuration. */
+export const NotifyConfigSchema = z.strictObject({
+  /** Path to a file containing the webhook URL; `~` expands to home (same tilde rule as CI token). */
+  webhook_file: z.string().optional(),
+});
+export type NotifyConfig = z.infer<typeof NotifyConfigSchema>;
+
 export const CollieConfigSchema = z.strictObject({
   schema_version: z.literal(SCHEMA_VERSION),
   project: z.strictObject({
@@ -132,6 +139,8 @@ export const CollieConfigSchema = z.strictObject({
     /** SPEC 3.1: optional path to a file containing a read-only GitHub PAT; `~` expands to home. */
     token_file: z.string().optional(),
   }),
+  /** SPEC 14.3: optional notification section. */
+  notify: NotifyConfigSchema.optional(),
 });
 export type CollieConfig = z.infer<typeof CollieConfigSchema>;
 
