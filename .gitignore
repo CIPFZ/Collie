@@ -9,4 +9,7 @@ coverage/
 # SPEC 3.1 (token_file): CI token file must never be committed.
 .collie/github-token
 
+# SPEC 14.4: follow state must not be committed.
+.collie/follow.json
+
 .DS_Store

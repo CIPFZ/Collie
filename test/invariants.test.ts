@@ -439,4 +439,10 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/notify.ts'), 'utf8');
     expect(content).toContain('notify');
   });
+
+  it('src/follow.ts exists and uses handoff.ts (v045-b04)', () => {
+    // SPEC 14.4: follow module must exist and use handoff for decision logic.
+    const content = readFileSync(join(ROOT, 'src/follow.ts'), 'utf8');
+    expect(content).toContain('handoff');
+  });
 });

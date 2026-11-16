@@ -43,6 +43,7 @@ import {
 import { DEFAULT_INTERVAL_SECS, watch } from './watch.js';
 import { formatPreflight, runPreflight } from './preflight.js';
 import { notify } from './notify.js';
+import { follow } from './follow.js';
 
 /** How `collie run` obtains its runner (SPEC 5: default is the real one). */
 export type RunnerChoice =
@@ -80,7 +81,12 @@ export interface CliDeps {
 
 const TEMPLATE = join(import.meta.dirname, '..', 'templates', 'collie.toml');
 const ISO_SECONDS = /^(?<y>\d{4})-(?<mo>\d{2})-(?<d>\d{2})T(?<h>\d{2}):(?<mi>\d{2}):(?<s>\d{2})/;
-const GITIGNORE_ENTRIES = ['.collie/runs/', '.collie/heartbeat.json', '.collie/github-token'];
+const GITIGNORE_ENTRIES = [
+  '.collie/runs/',
+  '.collie/heartbeat.json',
+  '.collie/github-token',
+  '.collie/follow.json',
+];
 const GITHUB_SSH = /^git@github\.com:(?<path>[^\s]+?)(?:\.git)?$/;
 const GITHUB_HTTPS = /^https:\/\/github\.com\/(?<path>[^\s]+?)(?:\.git)?\/?$/;
 
@@ -994,6 +1000,26 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
         code = EXIT_CODES.ERROR;
       }
     });
+
+  program
+    .command('follow')
+    .description('loop: pull, read docs/ops/next.md, decide, execute (SPEC 14.4)')
+    .option('--once', 'run one iteration and exit')
+    .option('--dry-run', 'print the action but do not execute anything')
+    .option('--interval <secs>', 'polling interval in seconds', parseInt)
+    .option('--timeout <secs>', 'exit 0 after this many seconds', parseInt)
+    .action(
+      async (opts: { once?: boolean; dryRun?: boolean; interval?: number; timeout?: number }) => {
+        code = await follow({
+          root: deps.cwd,
+          once: opts.once,
+          dryRun: opts.dryRun,
+          intervalSecs: opts.interval,
+          timeoutSecs: opts.timeout,
+          out: deps.out,
+        });
+      },
+    );
 
   try {
     await program.parseAsync([...argv], { from: 'user' });
