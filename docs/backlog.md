@@ -7,9 +7,11 @@
 > 凡验收表含 grep 类结构检查的批次，条目正文必须写「同步加进 `test/invariants.test.ts`」，验收加一条 grep 该文件（SPEC 3.2 结构不变量）。
 > R1 签发自查（v04-b04 后，SPEC 13.12、13.13）：条目正文必须写明要读的 SPEC 小节号（worker 不再通读 SPEC，task 也不带小节开头的说明文字）；
 > 条目要求展示某个值时，写明它取自哪个事件的哪个字段，并核对 R2 确实写了它；只读命令的测试至少有一组夹具来自 fake runner 跑出的真实运行。
+> R1 签发自查（v045-b04 后，SPEC 14.8）：条目里有「只做一次」「重试」「退避」这类跨多圈才看得出的行为，写明「连续 N 圈之后是什么样」并要求测试真的走 N 圈；
+> 要求「数据来自真实运行」时点名是哪几条断言；一个批次不要既改 R2 又加新命令（v045-b01 因此用满了 200 轮）。
 
 更新时间：2026-11-16
-当前版本：v0.4（v0.3 已于 2026-11-13 记为收口；见 SPEC 第 13 章；v04-b05 到 v04-b17 已通过；v0.4 是否收口待所有者裁定，见 SPEC 13.24；所有者 2026-11-16 选定先做 SPEC 第 14 章「收掉操作员」，队列从 v045-b01 起，固定版本 `60e9017`）
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b04 已通过，队列从 v045-b05 起，固定版本 `f901a8f`
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -68,6 +70,9 @@
 | 48 | v045-b02 | collie report：把一次队列运行写成 Markdown 汇报 | v045-b01 | passed |
 | 49 | v045-b03 | 通知与交接协议：notify 模块、next.md 的键值行、下一步动作的判定 | v045-b02 | passed |
 | 50 | v045-b04 | collie follow：常驻循环，按 next.md 开跑、交汇报、发通知 | v045-b03 | passed |
+| 51 | v045-b05 | collie follow 加固：已处理落在仓库里、失败只通知一次并退避、通知不带路径、子进程与汇报附录 | v045-b04 | pending |
+| 52 | v045-b06 | collie report 与 why 补齐：开始与墙钟、合计、轮数上限、tool.denied、批次状态、CI 链接 | v045-b02 | pending |
+| 53 | v045-b07 | 变异检查：删掉规则、放行条件或受保护路径里的任意一处，测试必须变红 | v04-b17 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -2018,3 +2023,126 @@ SPEC 第 14 章「收掉操作员」的第一批：把操作员每轮手工做�
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner、真实的 `npx` 子进程或真实网络请求；自己在工作区里运行不带 `--dry-run` 的 `collie follow`（它会按 next.md 再起一个队列）
 - 让 `follow` 写 `docs/ops/queue-*.md` 之外的仓库文件、改 backlog、改结论；改动 `run.ts`、`gate.ts`、`arbiter.ts`；新增依赖
+
+## v045-b05 collie follow 加固：已处理落在仓库里、失败只通知一次并退避、通知不带路径、子进程与汇报附录
+
+优先级：51　依赖：v045-b04
+
+`collie follow`（v045-b04）四批都过了验收，但有 3 处会在第一次真实使用时出事：环境坏着时每圈都通知并调一次模型、汇报推送失败后把整个队列重跑一遍、`npm ci` 实际没执行。
+操作员读代码发现，R1 用假时钟驱动真实循环逐条实测属实。规格见 SPEC 14.9（读这一节；原设计在 14.4，协议与判定表在 14.3，实测记录在 14.8）。
+
+条目：
+1. 「已处理」与推送（SPEC 14.9 第 1 条）：汇报提交信息加 `(base <基准提交前 12 位>)`；「已处理」= 本地 `git log <基准提交>..HEAD` 里有这样一条提交，或 `follow.json` 的 `handledBase` 等于它；
+   起了 `run --continue` 之后不论后面哪一步失败都记 `handledBase`；本地领先远端时每圈先推送，失败通知一次，推上去之后不再提。
+   **连续 3 圈、第 1 圈推送失败的情形下，`run --continue` 只起 1 次，仓库里只有 1 份汇报**
+2. 失败只通知一次并退避、通知内容、子进程（SPEC 14.9 第 2~4 条）：按 14.9 的通知键去重；preflight 或固定版本目录失败后退避 5 分钟起、每次翻倍、最长 60 分钟，退避期内不起子进程；
+   preflight 用 `--json` 只列失败项名字；队列结束的原因取 journal 的 `queue.finished.reason`；注入的子进程函数收完整命令行，`npm ci` 不经 `npx tsx`；缺省实现边跑边转发输出、内存里只留末 200 行。
+   **preflight 连续失败 3 圈（间隔 60 秒）时：`preflight` 起 1 次、通知 1 条；假时钟推进到 5 分钟之后的那一圈才起第 2 次，通知仍是 1 条**
+3. 汇报附录、目录注入与测试（SPEC 14.9 第 5~7 条）：汇报末尾加 `## 运行环境（follow 记录）`；固定版本目录的父目录可注入；`test/support/sandbox.ts` 生成配置时去掉 `webhook_file` 一行。
+   `test/follow.test.ts` 改写并补齐：上面两条加粗的情形各一条，必须真的走多圈并断言子进程与通知的次数；基准提交不是祖先连续 3 圈只通知 1 条、不起子进程；`follow.json` 删掉后同一个基准不再跑；
+   preflight 失败的通知不含 `/`；通知里的原因来自 journal（`limit` 不得写成 `exhausted`）；锁文件不同时子进程收到的命令行第一个词是 `npm`；汇报里有附录一节；
+   跑完后注入的父目录之外没有新建固定版本目录。`test/invariants.test.ts` 加「`src/follow.ts` 不含 `execFileSync`」
+
+本批次不改 `src/handoff.ts`、`src/run.ts`、`src/preflight.ts`。不应改动 `test/invariants.test.ts` 已有的任何数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| follow 专项测试通过 | `npm test -- test/follow.test.ts` | exit 0 |
+| 专项测试不少于 16 个 | `grep -cE "^\s+it\(" test/follow.test.ts \| grep -qE "^(1[6-9]\|[2-9][0-9])$"` | exit 0 |
+| 专项测试不在系统临时目录留下固定版本目录 | `d=$(mktemp -d) && TMPDIR=$d npm test -- test/follow.test.ts && ! ls -d "$d"/collie-r2-* >/dev/null 2>&1` | exit 0 |
+| 退避进了代码与测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/follow.ts \| grep -qE "notBefore" && grep -qE "notBefore" test/follow.test.ts` | exit 0 |
+| 汇报提交带基准提交、汇报带附录（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/follow.ts \| grep -qE "\(base " && grep -vE "^\s*(//\|\*\|/\*)" src/follow.ts \| grep -qE "follow 记录"` | exit 0 |
+| 子进程不再用带缓冲上限的同步调用（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" src/follow.ts \| grep -qE "execFileSync"` | exit 0 |
+| 沙箱不读真实机器的通知地址 | `grep -qE "webhook_file" test/support/sandbox.ts` | exit 0 |
+| 不变量同步 | `grep -qE "execFileSync" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `.collie/collie.toml`）；改动 `templates/collie.toml`
+- 为了让测试过而删除或跳过任何测试（改写 `test/follow.test.ts` 里与新行为冲突的旧用例不算）
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner、真实的 `npx` 子进程或真实网络请求；自己在工作区里运行不带 `--dry-run` 的 `collie follow`
+- 让 `follow` 写 `docs/ops/queue-*.md` 之外的仓库文件、改 backlog、改结论；改动 `handoff.ts`、`run.ts`、`gate.ts`、`arbiter.ts`；新增依赖
+
+## v045-b06 collie report 与 why 补齐：开始与墙钟、合计、轮数上限、tool.denied、批次状态、CI 链接
+
+优先级：52　依赖：v045-b02
+
+操作员把手写汇报和 `collie report` 生成的那份逐条对照，19 处差异里有几处数据其实已在 journal 里；其中「开始」与「墙钟」在真实数据上永远是 `—`，因为实现去找一条 R2 从来不写的事件，而测试手写了它。
+规格见 SPEC 14.10（读这一节；`report` 的章节结构在 14.2，取值口径在 13.13 与 13.23）。
+
+条目：
+1. 开始、墙钟与合计（SPEC 14.10 前两条；`src/view.ts` 的 `projectReport` / `formatReport` 与 timeline 的投影）：开始 = 队列 journal 第一条事件的时间；`timeline` 输出 `queue_start` 节点；
+   「实际经过」表加合计行；删除 `test/report.test.ts` 里手工写进队列 journal 的 `run.started`。
+   **开始时间、墙钟、合计这三处的断言必须用 `Sandbox` 让 fake runner 真实跑出来的 `run --continue`，不得手写事件**
+2. 轮数上限（SPEC 14.10 第三条）：`src/run.ts` 的 `worker.started` 与 `reviewer.started` 追加可选字段 `max_turns`（取自配置）——`run.ts` 只许改这两处记录；
+   `why` 与 `report` 显示 `<轮数>/<上限>`，相等时加「（到上限）」；没有上限数据的旧 journal 只显示轮数
+3. 其余补齐与测试（SPEC 14.10 第四、五条）：`report` 的「放行与打扰」加 `tool.denied` 合计与每条 `batch.status`；`why` 的 `ci:` 行加 `polls=` 与 `run_url`，`ci.verdict_commit:` 行加 `run_url`。
+   `test/report.test.ts`、`test/why.test.ts`、`test/timeline.test.ts`、`test/journal-fields.test.ts` 各补用例。`test/invariants.test.ts` 加「`src/run.ts` 含 `max_turns`」
+
+本批次不应改动 `test/invariants.test.ts` 已有的任何数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 四个专项测试通过 | `npm test -- test/report.test.ts test/why.test.ts test/timeline.test.ts test/journal-fields.test.ts` | exit 0 |
+| 测试里不再手写队列 journal 的 run.started | `! grep -A3 -E "run_id: 'q-" test/report.test.ts \| grep -qE "run\.started"` | exit 0 |
+| 轮数上限进 journal 且有测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "max_turns" && grep -qE "max_turns" test/journal-fields.test.ts` | exit 0 |
+| 到上限的标注进代码与测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/view.ts \| grep -qE "到上限" && grep -qE "到上限" test/why.test.ts` | exit 0 |
+| why 显示 CI 轮询次数（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/view.ts \| grep -qE "polls=" && grep -qE "polls=" test/why.test.ts` | exit 0 |
+| timeline 测试覆盖队列开始节点 | `grep -qE "queue_start" test/timeline.test.ts && grep -qE "Sandbox\.create" test/timeline.test.ts` | exit 0 |
+| 不变量同步 | `grep -qE "max_turns" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试（删掉手写的那条队列 `run.started` 夹具并改用真实运行不算）
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- `run.ts` 除条目 2 那两处记录外的任何改动；改动 `gate.ts`、`arbiter.ts`、`follow.ts`；读取 `stream.ndjson` 或 `report.md`；让 `report` / `why` / `timeline` 写任何文件；新增依赖
+
+## v045-b07 变异检查：删掉规则、放行条件或受保护路径里的任意一处，测试必须变红
+
+优先级：53　依赖：v04-b17
+
+R1 在 `6cc1bd5` 上逐个删掉仲裁规则、放行条件、受保护清单里的一处判断，共 44 处：7 处漏过各模块自己的单元测试，其中 6 处连全量测试也发现不了。规格见 SPEC 第 15 章（读这一章即可）。
+依赖写 v04-b17 只是为了不被别的批次挡住，没有功能上的依赖。
+
+条目：
+1. 补测试（SPEC 15.2）：`test/evidence.test.ts` 让 `PROTECTED_PATHS` 的 9 项每一项都有一条行为用例（worker 的提交改了该路径下的文件 → `spec_diff_lines` 大于 0）；
+   `test/arbiter.test.ts` 加规则 6 的两条单边用例（只有通过数不符、只有失败数不符）和规则 9「只有 CI 结论不是 success」的用例。只加测试，不改 `src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`
+2. 变异检查（SPEC 15.1）：新建 `scripts/mutation.ts`，`package.json` 加脚本 `test:mutation`（不并进 `test`，不改 `.github/`）。清单按 15.1 的 44 个名字写全；在系统临时目录的副本里改，不动工作区，结束后删掉副本；
+   结果只有 `caught` / `survived` / `invalid` / `timeout` / `stale` 五种，超时与编译不过都不算被发现；支持 `--list` 与 `--only`
+3. 测试基础设施（SPEC 15.3）与专项测试：`vitest.config.ts` 的 `testTimeout` 与 `hookTimeout` 改为 `120_000`；`test/invariants.test.ts` 里「只有 `run.ts` 与 `evidence.ts` 访问 `.token_file`」改成只看非注释行。
+   新建 `test/mutation.test.ts`：只测判定函数与清单的形状（名字不重复、不少于 44 项、每项的原文在当前文件里恰好出现一次；测试进程全过 → `survived`，编译不过 → `invalid`，超时 → `timeout`，有断言失败 → `caught`），**不在里面跑变异**。
+   `test/invariants.test.ts` 加「`package.json` 有 `test:mutation`」
+
+本批次不应改动 `test/invariants.test.ts` 已有的任何数值上下限（把 `.token_file` 那条改成不看注释行不算）。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 变异检查全部被发现 | `npm run test:mutation` | exit 0 |
+| 清单不少于 44 项 | `npx tsx scripts/mutation.ts --list \| grep -c . \| grep -qE "^(4[4-9]\|[5-9][0-9]\|[1-9][0-9][0-9])$"` | exit 0 |
+| 受保护清单每一项都在变异清单里 | `npx tsx scripts/mutation.ts --list \| grep -cE "^protected:" \| grep -qE "^(9\|[1-9][0-9])$"` | exit 0 |
+| 原先漏过的三处规则条件现在被发现 | `npx tsx scripts/mutation.ts --only rule6-failed-count-half,rule6-passed-count-half,rule9-ci-third` | exit 0 |
+| 判定函数的专项测试通过 | `npm test -- test/mutation.test.ts` | exit 0 |
+| 超时放宽到 120 秒 | `grep -cE "(test\|hook)Timeout: 120_000" vitest.config.ts \| grep -qE "^2$"` | exit 0 |
+| 不变量同步 | `grep -qE "test:mutation" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/` 下任何文件
+- 改动 `src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`（本批次只加测试与检查脚本）
+- 为了让测试过而删除或跳过任何测试；为了让变异检查通过而从清单里去掉某一项、或把超时与编译不过算成被发现
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 把变异检查并进 `npm test`；让它改动工作区里的文件；新增依赖

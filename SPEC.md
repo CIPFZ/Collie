@@ -378,7 +378,7 @@ type EventType =
   | 'queue.batch_started' // v0.3（12.2）：队列拉起一次批次运行；字段 batch_run_id（v04-b07 前叫 run_id，见 13.10）/ batch_id / attempt / why（new / fix_retry / rule1_retry / interrupt_retry）
   | 'queue.gate_passed'  // v0.4（13.14）：PASS 后放行判定通过；字段 batch_id / batch_run_id
   | 'queue.preflight'    // 14.1：队列开头的开跑前检查；字段 ok / checks（数组，元素 name / ok / detail）
-  | 'audit.result'       // 14.1：reviewer 结束后核对它的工具清单，记在批次 journal；字段 result（match / mismatch / no_init）/ extra / missing
+  | 'audit.result'       // 14.1：reviewer 结束后核对它的工具清单，记在批次 journal；字段 outcome（match / mismatch / no_init）/ extra / missing（v045-b01 的实现用了 outcome，14.8 裁定以实现为准）
   | 'worker.started' | 'worker.finished' | 'worker.crashed'
   | 'reviewer.started' | 'reviewer.verdict'
   | 'reviewer.finished'   // v0.4（13.1）：reviewer 运行返回后、解析 verdict 之前记；字段 exit_code 与运行级字段
@@ -959,7 +959,8 @@ b04 与后续批次的汇报改成每批一个 `docs/ops/` 文件（见 AGENT_KI
 所有者 2026-11-13 的两条裁定记在 13.16 末段：v0.3 记为收口；report 里的 sha 解析不了改判为 FIX，规格是 13.21（v04-b16，改 R2）。
 第四次队列运行（2026-11-13）之后：裁定见 13.22；追加 13.23 `why` / `timeline` 补齐 journal 里已有的数据（v04-b17）。
 第五次队列运行（2026-11-13）之后：裁定见 13.24；没有新批次。v0.4 是否收口待所有者裁定。
-所有者 2026-11-16：下一步先做「收掉操作员」（第 14 章），排在 v0.5 之前。v0.4 是否记为收口，所有者这一次没有答复，仍待裁定。
+所有者 2026-11-16：下一步先做「收掉操作员」（第 14 章），排在 v0.5 之前。
+**v0.4 已收口**（2026-11-16，所有者裁定）。依据是 13.24：第五次队列的汇报只用四个命令写成，「数据在 journal 里、命令却不显示」的缺口为 0。与 ROADMAP 验证方法的出入（用的是 v04 自己的批次，不是 v0.3 的）与没做的几处小遗漏，见 13.24。
 
 ### 13.1 观测数据补齐（v04-b01）
 
@@ -1362,6 +1363,7 @@ v0.4 的验证（13.7、ROADMAP 第 6 节）：
 
 固定版本前移到 `60e9017`（v04-b17 的裁定提交，与 HEAD 的 `src/`、`test/` 完全相同）。backlog 里没有 pending 的批次。
 v0.4 是否记为收口、下一步做什么，提请所有者裁定；`docs/ops/next.md` 的状态是「等所有者裁定」。
+（2026-11-16：所有者裁定记为收口，下一步先做第 14 章。）
 
 ## 14. 收掉操作员（自举第 3 步）
 
@@ -1370,6 +1372,7 @@ v0.4 是否记为收口、下一步做什么，提请所有者裁定；`docs/ops
 还要所有者每轮对它说一次「拉」。本章把这四件事做进 Collie：做完之后操作员那一侧只剩一条常驻命令 `collie follow`，所有者不用再说「拉」。
 所有者对 R1 说的那一声「看」本章去不掉：R1 只在所有者说话时才能行动，要去掉它得把 R1 也做成命令（ROADMAP v0.7）。
 规则 1~10 与放行判定的六项不变；停表清单加一条（14.1）。四个批次：14.1 开跑前检查与 audit，14.2 `collie report`，14.3 通知与交接协议，14.4 `collie follow`。
+第六次队列（2026-11-16）之后：裁定见 14.8；追加 14.9 `follow` 加固（v045-b05）与 14.10 `report` / `why` 补齐（v045-b06）；另有第 15 章的变异检查（v045-b07）。
 
 ### 14.1 开跑前检查与 audit 并进队列（v045-b01，改 R2）
 
@@ -1460,9 +1463,132 @@ v0.4 是否记为收口、下一步做什么，提请所有者裁定；`docs/ops
 四个批次用固定版本 `60e9017` 由操作员照旧手工跑（第六次队列）。跑完后固定版本前移，R1 改写 `AGENT_KICKOFF.md` 的操作员一节；
 下一次队列由操作员只起一条 `collie follow`，R1 推一份新的 next.md，数：从 R1 推送到汇报出现在仓库，中间有没有人动过手；`collie report` 生成的汇报够不够 R1 做裁定，不够的每一处记为缺口。
 
+（2026-11-16 补）第六次队列四批都过了，但 `follow` 有 3 处会在第一次真实使用时出事（14.8）。顺序改为：第七次队列仍由操作员手工跑（固定版本 `f901a8f`，v045-b05 到 b07）；通过后固定版本再前移，R1 往配置里加 `[notify]`、改写 `AGENT_KICKOFF.md`，第八次队列才是 `collie follow` 的第一次真实使用，第一次要有人看着并带 `--timeout`。
+
 ### 14.7 明确不做
 
 - 把 R1 做成命令（ROADMAP v0.7）；所有者对 R1 说的「看」。
 - `follow` 的并发保护、旧固定版本目录的清理、通知的重试与去重之外的任何投递保证。
 - 企业微信之外的通知渠道；通知进 journal。
 - 让 `report` 判断「该不该打扰」或给出建议。
+
+### 14.8 第六次队列的裁定（2026-11-16）
+
+队列 q-20261116070603（`--max 4`，固定版本 `60e9017`，1 小时 57 分，$34.49）：v045-b01 到 b04 四批都是第 1 次 PASS，放行 4 次，打扰 0 次。
+R1 复核：lint 与类型检查通过；四批的 32 条专项验收在 HEAD 上逐条通过；受保护路径只有 backlog 的 4 个状态格；不变量没有数值改动；没有删除或跳过的测试；
+本次队列的 CI（Run 252~264）从 GitHub 公开页面看全部成功。
+
+全量测试在 R1 的机器上出了新情况（负载约 18）：按默认的 30 秒超时跑 3 次，每次都有 4~6 个用例超时；把超时放宽到 240 秒跑 2 次，1059 个全过，整套约 125 秒。
+操作员机器与 CI 上都是全过。失败的全是超时，没有一条断言失败。测试从 983 个涨到 1059 个，跑真实一轮的用例越来越多，超时留的余量在变小；v045-b07 把超时提到 120 秒（15.3）。
+
+**`collie follow` 现在不能用。** 操作员读代码指出 3 处问题，R1 用假时钟、假子进程、假通知驱动真实的 `follow` 循环，逐条实测属实：
+- 开跑前检查一直失败时，3 圈（每圈 60 秒）里 `preflight --smoke` 起了 3 次、通知发了 3 条；通知正文是 preflight 的全部输出，里面有 token 文件的绝对路径。
+  「基准提交不是 HEAD 的祖先」同样每圈通知一次（3 圈 3 条）。14.3 的判定表写的是只通知一次。
+- 汇报推送失败一次之后，下一圈把整个队列又跑了一遍：3 圈里 `run --continue` 起了 2 次，仓库里出现两份汇报。14.4 第 8 步写的是无条件记为已处理。
+- 锁文件不同时要跑的 `npm ci`，实际执行的是 `npx tsx npm ci`：R1 单独试，退出码 1，什么也没装，失败又被吞掉。
+- 另外四处小的：「队列结束」通知里的原因是按退出码猜的（`limit` 会写成 `exhausted`）；`git pull` 失败不声不响；子进程输出有 1MB 的缓冲上限；
+  `follow` 的测试每跑一次，在系统临时目录留下 2 个固定版本目录不清理（R1 的机器上攒了 25 个）。
+
+reviewer 判了 PASS：那条测试名叫「只通知一次」，实际只跑了失败的一圈。验收只数了用例个数，这是 R1 签批次时的疏漏。修法见 14.9。
+
+其余发现：
+- **`collie report` 的「开始」与「墙钟」在真实数据上永远是 `—`。** 实现去队列 journal 里找 `run.started`，R2 从来不往那里写这条事件；测试手写了一条，所以测试过了。
+  这和 13.13 是同一类错：v045-b02 的条目要求了「至少两组数据来自真实运行」，但没有点名哪条断言必须用真实数据。修法见 14.10。
+- **v045-b01 的 worker 用了 200 轮，正好是 `max_turns`。** 再多一轮就是异常退出。journal 里没有上限，`why` 看不出来（14.10 补上）。这一批把改 R2 与新命令放在了一起（962 行），是 R1 拆得太大。
+- `audit.result` 的字段实现写成了 `outcome`，14.1 写的是 `result`。`report` 读的也是 `outcome`，功能不受影响；3.6 改成与实现一致。
+- 不带 `--smoke` 的 `preflight` 只查 token 文件读得到，查不出 token 过期。`follow` 每轮先跑带 `--smoke` 的，手工跑队列时仍要按 `AGENT_KICKOFF.md` 手工查。
+- 「只有 `run.ts` 与 `evidence.ts` 访问 `.token_file`」这条不变量连注释也算，v045-b03 的 worker 为了让它过改了注释措辞，并如实写进了 report。改成不看注释行（15.3）。
+
+R1 签批次的两条自查（写进 `docs/backlog.md` 文件头）：
+- 条目里有「只做一次」「重试」「退避」这类跨多圈才看得出的行为，必须写明「连续 N 圈之后是什么样」，并要求测试真的走 N 圈；
+- 要求「数据来自真实运行」时，点名是哪几条断言。
+
+R1 定的：固定版本前移到 `f901a8f`（v045-b04 的裁定提交，与 HEAD 的 `src/`、`test/` 相同，依赖没变），队列开头的检查与 audit 停表从第七次队列起生效；
+追加 v045-b05（14.9）、v045-b06（14.10）、v045-b07（第 15 章）；第七次队列仍由操作员手工跑，`follow` 等 v045-b05 通过、固定版本再前移之后才第一次真实使用。
+
+### 14.9 `collie follow` 加固（v045-b05）
+
+改的是 14.4 的实现；14.3 的协议与判定表不变，`src/handoff.ts` 不动。
+
+1. **「已处理」落在仓库里。** 汇报提交的信息改为 `ops: report queue <q_run_id> (base <基准提交前 12 位>)`。
+   某个基准提交算已处理，当且仅当：本地 `git log <基准提交>..HEAD` 里有一条信息以 `(base <它的前 12 位>)` 结尾的 `ops: report queue` 提交，或者 `.collie/follow.json` 的 `handledBase` 等于它。
+   起了 `run --continue` 之后，不论后面哪一步失败，都把它记进 `handledBase`。推送失败、`follow.json` 丢了、换了目录重新克隆，都不会把同一个队列再跑一遍。
+   本地领先远端时每圈先 `git push`；失败通知一次（键 `push:<基准提交>`），推上去之后不再提。
+2. **失败只通知一次，重试要退避。** 通知键：`preflight:<基准提交>:<失败项按字母序拼接>`、`pinned:<固定版本>`（固定版本目录准备失败，含 `npm ci` 失败）、`ancestor:<基准提交>`、`push:<基准提交>`、`pull`。发过的键不再发。
+   preflight 或固定版本目录失败之后进入退避：下一次尝试在 5 分钟后，每失败一次翻倍，最长 60 分钟；退避期内不起任何子进程。成功一次就清零。状态记在 `follow.json` 的 `retry`（`failures` / `notBefore`）。
+   「基准提交不是 HEAD 的祖先」通知一次后只等，不起子进程。`git pull` 连续失败 3 圈通知一次，成功后清除。
+3. **通知里写什么。** preflight 失败：用 `preflight --smoke --json`，只列失败项的名字，不带 detail（里面可能有路径）。
+   队列结束：原因取这次队列 journal 的 `queue.finished.reason`（经 `report --queue <id> --json`），取不到才写 `exit <退出码>`。
+4. **子进程。** 注入的函数收完整的命令行：调 Collie 时由 `follow` 自己拼 `npx tsx <cli.ts> …`，`npm ci` 就是 `npm ci`。
+   缺省实现边跑边把子进程的输出转到 `follow` 自己的标准输出，只在内存里留末 200 行，不设输出缓冲上限。
+5. **汇报末尾附一节 `## 运行环境（follow 记录）`**：基准提交、固定版本、`run` 的命令行与退出码、preflight 的末行、`run` 的标准输出与标准错误各末 20 行。这些 journal 里没有，只有 `follow` 知道。
+6. **固定版本目录的父目录可注入**，缺省仍是系统临时目录。测试必须注入到沙箱目录里，不得在系统临时目录留下任何东西。
+7. `test/support/sandbox.ts` 生成配置时去掉 `webhook_file` 一行（与 `token_file` 同理）：这一批通过之后 R1 才往 `.collie/collie.toml` 与模板里加 `[notify]`，测试不能读到真实机器上的通知地址。
+
+### 14.10 `collie report` 与 `why` 补齐（v045-b06）
+
+来源是操作员「手写汇报里有、生成的那份没有」的 19 条对照（`docs/ops/queue-20261116.md` 第 3 段）。数据已在 journal 里的补上，其余不做：
+- **开始与墙钟。** 开始 = 这次队列 journal 第一条事件的时间（`queue.preflight` 或 `queue.batch_started`），墙钟 = 结束 − 开始。`timeline` 的 `queue_start` 节点取同一个时间（13.13 留下的那一项）。
+- **「实际经过」表**末尾加一行合计（用时、worker 花费、reviewer 花费、合计花费）。worker 轮数在有上限数据时显示 `<轮数>/<上限>`，两者相等时写 `<轮数>/<上限>（到上限）`。
+- **轮数上限进 journal（改 R2，只这一处）。** `worker.started` 与 `reviewer.started` 追加可选字段 `max_turns`，取自配置。`why` 的 `worker:` 与 `reviewer:` 行同样显示 `turns=<轮数>/<上限>`。
+- **「放行与打扰」**加两行：`tool.denied：<本次队列各运行合计条数>`；每条 `batch.status`（批次、from → to）。
+- **`why`**：`ci:` 行追加 `polls=<n>` 与 `run_url`；`ci.verdict_commit:` 行追加 `run_url`。
+- **夹具。** 开始时间、墙钟、合计三处的断言必须来自 `Sandbox` 让 fake runner 真实跑出来的 `run --continue`；删除 `test/report.test.ts` 里手工写进队列 journal 的 `run.started`。
+
+不做：每批的提交清单（journal 只有计数，看 `git log`）；开局与开发中途的测试失败（只在 `stream.ndjson`）。
+worker 的「偏离或疑问」与 reviewer 的核对表在仓库里的 `.collie/batches/<id>/report.md` 与 `verdict.md`，R1 审队列时直接读这两个文件，不经 `report`。
+
+## 15. 守规则的测试要经得起删（变异检查，v045-b07）
+
+来源：所有者 2026-11-16 让 R1 对照开源项目 agent-autoloop 找可借鉴的做法。它有一份手写的「删掉一个判断」清单，每删一处测试必须变红，漏过一处就算失败。
+R1 当天照这个办法在 `6cc1bd5` 上试了一次：`src/arbiter.ts`（规则 1~9）、`src/gate.ts`（放行六项）、`src/evidence.ts`（受保护路径清单）共 44 处，一次只删一处。
+- 只跑各模块自己的单元测试：37 处被发现，7 处漏过。
+- 这 7 处再跑全量测试（1002 个，超时放宽到 240 秒）：1 处被场景 M 的一条断言发现，另外 6 处全量全绿：
+  - 受保护清单里的 `ROADMAP.md`、`ROLES.md`、`docs/decisions`、`docs/progress.md`，任意删掉一项都没有测试变红（现有测试只覆盖另外 5 项）；
+  - 规则 6 比对「通过数」「失败数」的两个半边，任意删掉一个都没有测试变红（现有用例里两个数同时不符）。
+
+清单和规则今天都是对的，这不是线上缺陷。缺的是：以后有人把其中一处改掉，测试不会报，只能指望 reviewer 读 diff 时看出来。
+方法上的一条教训：第一遍全量跑把 7 处都报成了「被发现」，复查是机器高负载下 30 秒超时造成的（抓到的一次是 `test/verdict-ci-recheck.test.ts` 超时）。所以超时和编译不过都不能算「被发现」。
+
+### 15.1 变异检查
+
+`scripts/mutation.ts`，由 `npm run test:mutation` 运行。不并进 `npm test`：它要起几十次测试进程，放进去会拖慢每一次验收。
+它要不要成为每批必过的检查（进 `[verify] commands` 或 CI）是改放行门槛，待所有者裁定（`docs/decisions/OPEN.md` D2）；在那之前由 R1 每次审队列时跑一遍。本批次不改 `.github/`。
+- 清单写在脚本里，每项四个值：名字、文件、原文、改成什么。原文在文件里必须恰好出现一次，否则这一项记为 `stale`。
+- 在系统临时目录的副本里改，不动工作区；副本复用工作区的 `node_modules`；结束后删掉副本。
+- 每项只跑该文件自己的单元测试：`arbiter.ts` → `test/arbiter.test.ts` 与 `test/progress.test.ts`；`gate.ts` → `test/gate.test.ts`；`evidence.ts` → `test/evidence.test.ts`。
+  别的测试碰巧变红不算：一条规则要由它自己的测试守着（上面被场景 M 发现的那一处，在这里仍算漏过）。
+- 先不改任何东西跑一遍这些测试：必须全过且确实执行了测试，否则整个检查失败。
+- 每项的结果四选一：`caught`（测试执行了，且至少一条断言失败）、`survived`（全过）、`invalid`（改完编译不过）、`timeout`（超时，自动重试一次后仍超时）。
+  全部是 `caught` 才退出码 0；否则逐个打印名字与结果，退出码 1。
+- `--list` 每行打印一个名字；`--only <名字,名字>` 只跑指定的几项。
+- 清单至少有下面 44 项，名字固定（R1 试跑用的原文与改法留在仓库外，实现者按名字自己写）：
+  - 规则入口 9 项（让这条规则永不命中）：`rule1-unparseable`、`rule2-protected`、`rule3-deps`、`rule4-reviewer-mismatch`、`rule5-push`、`rule6-tests`、`rule7-ci`、`rule8-acceptance`、`rule9-evidence`；
+  - 规则内的条件 17 项：`rule2-denial-recorded`、`rule3-copyleft-half`、`rule3-unapproved-half`、`rule3-denial-recorded`、`rule4-pass-to-fix`、
+    `rules5-7-block-not-softened`（reviewer 判 BLOCK 时规则 5~7 不得改成 FIX）、`rule6-unmeasured`（没量到测试数时算不符）、
+    `rule6-zero-failed-needs-exit0`（声称 0 失败时退出码也得是 0）、`rule6-failed-count-half`、`rule6-passed-count-half`、`rule7-branch-half`、`rule7-conclusion-half`、
+    `rule8-keeps-failed-list`、`rule9-push-third`、`rule9-ci-third`、`rule9-branch-third`、`downgraded-flag`；
+  - 放行 9 项：`gate-downgraded`、`gate-claim-mismatches`、`gate-ci`、`gate-ci-branch-half`、`gate-ci-conclusion-half`、`gate-deps`、`gate-spec`、`gate-gaps`、`gate-pass-always`；
+  - 受保护清单 9 项：`protected:<路径>`，`PROTECTED_PATHS` 里每一项一个（把它从清单里删掉）。
+- 以后的批次在这三个文件里新增或改动一个判断，就在清单里加一项；reviewer 按第 3 节的结构要求核对。
+
+### 15.2 先补上漏掉的 7 处
+
+只加测试，不改 `src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`：
+- `test/evidence.test.ts`：受保护清单的 9 项每一项都有一条行为用例（worker 的提交改了这个路径下的文件 → `spec_diff_lines` 大于 0）。
+- `test/arbiter.test.ts`：规则 6 加两条单边用例（只有通过数不符；只有失败数不符）；规则 9 加一条「已推送、分支一致、只有 CI 结论不是 success」的用例。
+
+### 15.3 顺带的两处测试基础设施
+
+- **超时。** `vitest.config.ts` 的 `testTimeout` 与 `hookTimeout` 由 30 秒提到 120 秒（14.8：R1 的机器在高负载下 3 次全量都有 4~6 个用例超时，放宽后全过；没有断言依赖这个数）。
+- **不变量不看注释。** `test/invariants.test.ts` 里「只有 `run.ts` 与 `evidence.ts` 访问 `.token_file`」改成只看非注释行（14.8：v045-b03 的 worker 为了让它过改了注释措辞）。
+
+### 15.4 明确不做（对照 agent-autoloop 后）
+
+- **格式写错只重写、不重跑。** reviewer 的裁定格式错（规则 1）v0.2 以来发生过 2 次（v02-b04-tests、v02-b04-fix4），都是重跑一次就过。
+  重跑时 worker 并不重做：v04-b11 第 2 次是同类路径，worker 只重写了 report，$0.44，加 reviewer 共 $0.94。省下的不到 $1 一次，不值一个批次。
+  哪天同一个批次因格式错重跑两次仍不过，再做。
+- **返修时把上一轮的缺口给 reviewer。** v0.2 以来同一批次判 FIX 后重审共 3 次（v02-b04-fix、v03-b04、v04-b02），都是一次就过；v04-b01 连续 3 次 FIX 是 token 丢失。
+  没有出现过「每轮从头审、越审越多」。它还会动到「reviewer 用干净上下文」这条前提。哪天一个批次连续两轮 FIX 且第二轮报的是新问题，再议。
+- **心跳核对进程命令**：记在 ROADMAP v1.0 的范围里，本章不做。
+- **队列花费上限**：`follow` 无人值守之后比 v1.0 更早需要，是否提前做待所有者裁定（`docs/decisions/OPEN.md` D3）。
