@@ -28,14 +28,17 @@ import type { AgentRunner } from './runner/index.js';
 import { RunIdSchema, type Event } from './schema/index.js';
 import {
   buildStatus,
+  formatReport,
   formatStatus,
   formatTimeline,
   formatVersionSummary,
   formatWhy,
   loadRuns,
+  projectReport,
   projectTimeline,
   projectVersionSummary,
   projectWhy,
+  type RunData,
 } from './view.js';
 import { DEFAULT_INTERVAL_SECS, watch } from './watch.js';
 import { formatPreflight, runPreflight } from './preflight.js';
@@ -490,6 +493,11 @@ export const AUDIT_EXIT = { MATCH: 0, MISMATCH: 1, NO_DATA: 2 } as const;
 export const WHY_EXIT = { HAS_DATA: 0, NOT_IN_BACKLOG: 1, NO_JOURNAL: 2 } as const;
 /* eslint-enable no-restricted-syntax, @typescript-eslint/no-magic-numbers */
 
+/* eslint-disable no-restricted-syntax, @typescript-eslint/no-magic-numbers -- report-specific exit codes (SPEC 14.2) */
+/** Exit codes for `collie report` (SPEC 14.2). */
+export const REPORT_EXIT = { HAS_DATA: 0, NO_QUEUE_DATA: 2 } as const;
+/* eslint-enable no-restricted-syntax, @typescript-eslint/no-magic-numbers */
+
 /**
  * `collie audit <run_id>`: reads reviewer.stream.ndjson, extracts the init
  * message's tool list, compares it with the reviewer whitelist from config.
@@ -643,6 +651,77 @@ function why(deps: CliDeps, batchId: string, opts: { attempt?: number; json?: bo
     deps.out(formatWhy(proj));
   }
   return WHY_EXIT.HAS_DATA;
+}
+
+/**
+ * SPEC 14.2: `collie report [--queue <q_run_id>] [--json]`.
+ * Markdown report of a queue run printed to stdout. Read-only: no files written.
+ * Exit 0 = data; 2 = no queue journal on this machine.
+ */
+function report(deps: CliDeps, opts: { queue?: string; json?: boolean }): number {
+  const runDataList = loadRuns(deps.cwd);
+
+  // Find the target queue run.
+  const queueRuns = runDataList.filter(
+    (r): r is RunData & { status: 'ok' } => r.status === 'ok' && r.runId.startsWith('q-'),
+  );
+
+  let targetRun: (RunData & { status: 'ok' }) | undefined;
+  if (opts.queue !== undefined) {
+    targetRun = queueRuns.find((r) => r.runId === opts.queue);
+    if (targetRun === undefined) {
+      deps.err(`no journal found for queue run ${opts.queue}\n`);
+      return REPORT_EXIT.NO_QUEUE_DATA;
+    }
+  } else {
+    // Default: most recent queue run.
+    targetRun = queueRuns[queueRuns.length - 1];
+    if (targetRun === undefined) {
+      deps.err('no queue runs found on this machine\n');
+      return REPORT_EXIT.NO_QUEUE_DATA;
+    }
+  }
+
+  const proj = projectReport(runDataList, targetRun.events, targetRun.runId);
+
+  if (opts.json === true) {
+    // eslint-disable-next-line no-restricted-syntax, @typescript-eslint/no-magic-numbers -- standard JSON indent
+    deps.out(JSON.stringify(proj, null, 2) + '\n');
+    return REPORT_EXIT.HAS_DATA;
+  }
+
+  // §5: why text for each batch
+  const whyTexts = new Map<string, string>();
+  for (const bid of proj.batchIds) {
+    const whyProj = projectWhy(runDataList, bid);
+    if (whyProj !== null) {
+      whyTexts.set(bid, formatWhy(whyProj));
+    }
+  }
+
+  // §6: show --queue equivalent (reuse describeEvent via showQueue-like logic)
+  const queueTimelineLines = targetRun.events.map(describeEvent).join('\n');
+
+  // §7: queue remaining from backlog
+  let batches: readonly { id: string; title: string; status: string; depends_on: string[] }[];
+  try {
+    batches = loadBacklog(deps.cwd);
+  } catch {
+    batches = [];
+  }
+  const pendingBatches = batches.filter((b) => b.status === 'pending');
+  const blockedBatches = batches.filter((b) => b.status === 'blocked');
+  const remainingParts: string[] = [];
+  if (pendingBatches.length > 0) {
+    remainingParts.push(`pending: ${pendingBatches.map((b) => b.id).join(', ')}`);
+  }
+  if (blockedBatches.length > 0) {
+    remainingParts.push(`blocked: ${blockedBatches.map((b) => b.id).join(', ')}`);
+  }
+  const queueRemainingText = remainingParts.length > 0 ? remainingParts.join('\n') : '(none)';
+
+  deps.out(formatReport(proj, whyTexts, queueTimelineLines, queueRemainingText));
+  return REPORT_EXIT.HAS_DATA;
 }
 
 /** Real elapsed-time sleep for `collie watch` (SPEC 13.5); tests inject one. */
@@ -822,6 +901,14 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
     .option('--json', 'output as JSON')
     .action((batchId: string, opts: { attempt?: number; json?: boolean }) => {
       code = why(deps, batchId, opts);
+    });
+  program
+    .command('report')
+    .description('markdown report of a queue run (SPEC 14.2)')
+    .option('--queue <q_run_id>', 'specific queue run (default: most recent)')
+    .option('--json', 'output as JSON')
+    .action((opts: { queue?: string; json?: boolean }) => {
+      code = report(deps, opts);
     });
   program
     .command('preflight')

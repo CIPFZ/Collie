@@ -1436,6 +1436,354 @@ export function formatWhy(proj: WhyProjection): string {
   return lines.join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// Report projection (SPEC 14.2)
+// ---------------------------------------------------------------------------
+
+/** Exit-code mapping for queue.finished reasons (SPEC 14.2). */
+/* eslint-disable no-restricted-syntax, @typescript-eslint/no-magic-numbers -- SPEC 14.2 exit codes per reason */
+const QUEUE_REASON_EXIT: Record<string, number> = {
+  limit: 0,
+  exhausted: 0,
+  blocked: 20,
+  fix_max: 20,
+  escalated: 20,
+  evidence_unavailable: 20,
+  paused: 30,
+  preflight_failed: 1,
+};
+/* eslint-enable no-restricted-syntax, @typescript-eslint/no-magic-numbers */
+
+/** One batch-run row in the 实际经过 table (SPEC 14.2 §3). */
+export interface ReportBatchRow {
+  seq: number;
+  batchId: string;
+  runId: string;
+  attempt: number;
+  verdict: string | null;
+  rule: number | null;
+  durationMs: number | null;
+  workerCost: number | null;
+  reviewerCost: number | null;
+  totalCost: number | null;
+  workerTurns: number | null;
+  headSha: string | null;
+  auditOutcome: string | null;
+}
+
+/** A preflight check item (SPEC 14.2 §2). */
+export interface PreflightCheck {
+  name: string;
+  ok: boolean;
+  detail: string | null;
+}
+
+/** A queue.paused entry (SPEC 14.2 §4). */
+export interface ReportPaused {
+  batchId: string | null;
+  reasons: string[];
+}
+
+/** A batch.retried entry (SPEC 14.2 §4). */
+export interface ReportRetried {
+  batchId: string | null;
+  rule: number | null;
+  cause: string | null;
+}
+
+/** Full queue report projection (SPEC 14.2). */
+export interface ReportProjection {
+  queueRunId: string;
+  started: string | null;
+  finished: string | null;
+  wallclockMs: number | null;
+  reason: string | null;
+  reasonExitCode: number | null;
+
+  preflight: PreflightCheck[] | null;
+
+  batchRows: ReportBatchRow[];
+
+  gatePassedCount: number;
+  pausedEntries: ReportPaused[];
+  blockCount: number;
+  retriedEntries: ReportRetried[];
+  disturbCount: number;
+
+  /** Batch IDs that had runs in this queue (for §5). */
+  batchIds: string[];
+}
+
+/**
+ * SPEC 14.2: projects a queue run's events into a report structure.
+ * Pure function — no I/O, no clock.
+ */
+export function projectReport(
+  allRunData: readonly RunData[],
+  queueEvents: readonly Event[],
+  queueRunId: string,
+): ReportProjection {
+  const started = findEvent(queueEvents, 'run.started');
+  const finished = findLastEvent(queueEvents, 'queue.finished');
+
+  const startedTs = started?.ts ?? null;
+  const finishedTs = finished?.ts ?? null;
+  let wallclockMs: number | null = null;
+  if (startedTs !== null && finishedTs !== null) {
+    wallclockMs = new Date(finishedTs).getTime() - new Date(startedTs).getTime();
+  }
+  const reason = finished !== undefined ? asString(finished.reason) : null;
+  const reasonExitCode = reason !== null ? (QUEUE_REASON_EXIT[reason] ?? null) : null;
+
+  // §2: preflight
+  const preflightEvent = findEvent(queueEvents, 'queue.preflight');
+  let preflight: PreflightCheck[] | null = null;
+  if (preflightEvent !== undefined && Array.isArray(preflightEvent.checks)) {
+    preflight = (preflightEvent.checks as unknown[])
+      .filter(
+        (c): c is { name: string; ok: boolean; detail?: string } =>
+          typeof c === 'object' &&
+          c !== null &&
+          typeof (c as Record<string, unknown>).name === 'string' &&
+          typeof (c as Record<string, unknown>).ok === 'boolean',
+      )
+      .map((c) => ({
+        name: c.name,
+        ok: c.ok,
+        detail: typeof c.detail === 'string' ? c.detail : null,
+      }));
+  }
+
+  // §3: batch rows — one per queue.batch_started
+  const batchStartedEvents = queueEvents.filter((e) => e.event === 'queue.batch_started');
+  const batchRows: ReportBatchRow[] = [];
+  const batchIds: string[] = [];
+
+  for (let i = 0; i < batchStartedEvents.length; i++) {
+    const bs = batchStartedEvents[i];
+    if (bs === undefined) continue;
+    const batchId = asString(bs.batch_id) ?? '—';
+    const batchRunId = asString(bs.batch_run_id) ?? asString(bs.run_id) ?? '';
+
+    if (!batchIds.includes(batchId)) batchIds.push(batchId);
+
+    // Find the batch run's events in allRunData.
+    const batchRunData = allRunData.find((rd) => rd.status === 'ok' && rd.runId === batchRunId);
+    const batchEvents = batchRunData?.status === 'ok' ? batchRunData.events : [];
+
+    // attempt via computeAttempt
+    const attempt = computeAttempt(allRunData, batchRunId, batchId);
+
+    // verdict from run.finished
+    const runFinished = findEvent(batchEvents, 'run.finished');
+    const verdict = runFinished !== undefined ? asString(runFinished.verdict) : null;
+    const rule = runFinished !== undefined ? asNumber(runFinished.rule) : null;
+
+    // duration
+    const runStarted = findEvent(batchEvents, 'run.started');
+    let durationMs: number | null = null;
+    if (runStarted !== undefined && runFinished !== undefined) {
+      durationMs = new Date(runFinished.ts).getTime() - new Date(runStarted.ts).getTime();
+    }
+
+    // cost: worker + reviewer (SPEC 13.23)
+    const wf = batchEvents.find((ev) => ev.event === 'worker.finished');
+    const rf = batchEvents.find((ev) => ev.event === 'reviewer.finished');
+    const workerCost = wf !== undefined ? asNumber(wf.cost_usd) : null;
+    const reviewerCost = rf !== undefined ? asNumber(rf.cost_usd) : null;
+    let totalCost: number | null = null;
+    if (workerCost !== null || reviewerCost !== null) {
+      totalCost = (workerCost ?? 0) + (reviewerCost ?? 0);
+    }
+
+    // worker turns
+    const workerTurns = wf !== undefined ? asNumber(wf.num_turns) : null;
+
+    // head_sha: from reviewer.started or ci.resolved (SPEC 13.23)
+    const reviewerStarted = findEvent(batchEvents, 'reviewer.started');
+    const ciResolved = findEvent(batchEvents, 'ci.resolved');
+    const headSha =
+      (reviewerStarted !== undefined ? asString(reviewerStarted.head_sha) : null) ??
+      (ciResolved !== undefined ? asString(ciResolved.head_sha) : null);
+
+    // audit result from queue events for this batch
+    const auditEvent = queueEvents.find(
+      (e) => e.event === 'audit.result' && e.batch_id === batchId && e.run_id === queueRunId,
+    );
+    // If not in queue events, look in batch events.
+    const auditInBatch = batchEvents.find((e) => e.event === 'audit.result');
+    const auditOutcome = asString(auditEvent?.outcome) ?? asString(auditInBatch?.outcome) ?? null;
+
+    batchRows.push({
+      seq: i + 1,
+      batchId,
+      runId: batchRunId,
+      attempt,
+      verdict,
+      rule,
+      durationMs,
+      workerCost,
+      reviewerCost,
+      totalCost,
+      workerTurns,
+      headSha,
+      auditOutcome,
+    });
+  }
+
+  // §4: gate_passed, paused, BLOCK, retried
+  let gatePassedCount = 0;
+  const pausedEntries: ReportPaused[] = [];
+  const retriedEntries: ReportRetried[] = [];
+
+  for (const e of queueEvents) {
+    if ((e.event as string) === 'queue.gate_passed') {
+      gatePassedCount++;
+    }
+    if (e.event === 'queue.paused') {
+      const reasons = Array.isArray(e.reasons)
+        ? (e.reasons as unknown[]).filter((r): r is string => typeof r === 'string')
+        : [];
+      pausedEntries.push({ batchId: asString(e.batch_id), reasons });
+    }
+    if (e.event === 'batch.retried') {
+      retriedEntries.push({
+        batchId: asString(e.batch_id),
+        rule: asNumber(e.rule),
+        cause: asString(e.cause),
+      });
+    }
+  }
+
+  // Count BLOCK verdicts in batch rows
+  const blockCount = batchRows.filter((r) => r.verdict === 'BLOCK').length;
+
+  const disturbCount = pausedEntries.length + blockCount;
+
+  return {
+    queueRunId,
+    started: startedTs,
+    finished: finishedTs,
+    wallclockMs,
+    reason,
+    reasonExitCode,
+    preflight,
+    batchRows,
+    gatePassedCount,
+    pausedEntries,
+    blockCount,
+    retriedEntries,
+    disturbCount,
+    batchIds,
+  };
+}
+
+/**
+ * SPEC 14.2: formats a queue report as Markdown text.
+ * Sections 5, 6, 7 require external data (why text, show-queue text, status queue text)
+ * which are passed in.
+ */
+export function formatReport(
+  proj: ReportProjection,
+  whyTexts: ReadonlyMap<string, string>,
+  showQueueText: string,
+  queueRemainingText: string,
+): string {
+  const lines: string[] = [];
+
+  // §1: header
+  lines.push(`# 队列运行 ${proj.queueRunId}`);
+  lines.push('');
+  lines.push(`开始：${dash(proj.started)}`);
+  lines.push(`结束：${dash(proj.finished)}`);
+  lines.push(`墙钟：${formatDuration(proj.wallclockMs)}`);
+  lines.push(`结束原因：${dash(proj.reason)}`);
+  lines.push(`退出码：${dash(proj.reasonExitCode)}`);
+  lines.push('');
+
+  // §2: preflight
+  lines.push('## 开跑前检查');
+  lines.push('');
+  if (proj.preflight === null) {
+    lines.push('—');
+  } else {
+    for (const c of proj.preflight) {
+      const status = c.ok ? 'ok' : 'FAIL';
+      const detail = c.detail !== null ? `: ${c.detail}` : '';
+      lines.push(`${status}   ${c.name}${detail}`);
+    }
+  }
+  lines.push('');
+
+  // §3: batch runs table
+  lines.push('## 实际经过');
+  lines.push('');
+  lines.push(
+    '| 顺序 | 批次 | 运行 | attempt | 结论 | 规则 | 用时 | worker 花费 | reviewer 花费 | 合计 | worker 轮数 | head_sha | audit |',
+  );
+  lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  for (const r of proj.batchRows) {
+    const costFmt = (v: number | null) => (v !== null ? `$${v.toFixed(COST_DECIMALS)}` : '—');
+    lines.push(
+      `| ${String(r.seq)} | ${r.batchId} | ${r.runId} | ${String(r.attempt)} | ${dash(r.verdict)} | ${dash(r.rule)} | ${formatDuration(r.durationMs)} | ${costFmt(r.workerCost)} | ${costFmt(r.reviewerCost)} | ${costFmt(r.totalCost)} | ${dash(r.workerTurns)} | ${dash(r.headSha)} | ${dash(r.auditOutcome)} |`,
+    );
+  }
+  if (proj.batchRows.length === 0) {
+    lines.push('| — | — | — | — | — | — | — | — | — | — | — | — | — |');
+  }
+  lines.push('');
+
+  // §4: gate & disturbance
+  lines.push('## 放行与打扰');
+  lines.push('');
+  lines.push(`queue.gate_passed: ${String(proj.gatePassedCount)}`);
+  for (const p of proj.pausedEntries) {
+    lines.push(`queue.paused: ${dash(p.batchId)} reasons=${p.reasons.join(', ')}`);
+  }
+  lines.push(`BLOCK: ${String(proj.blockCount)}`);
+  for (const r of proj.retriedEntries) {
+    const detail = r.rule !== null ? `rule=${String(r.rule)}` : `cause=${dash(r.cause)}`;
+    lines.push(`batch.retried: ${dash(r.batchId)} ${detail}`);
+  }
+  lines.push(`打扰：${String(proj.disturbCount)}`);
+  lines.push('');
+
+  // §5: per-batch why
+  lines.push('## 每个批次');
+  lines.push('');
+  for (const bid of proj.batchIds) {
+    const whyText = whyTexts.get(bid);
+    if (whyText !== undefined) {
+      lines.push(`### ${bid}`);
+      lines.push('');
+      lines.push('```');
+      lines.push(whyText.trimEnd());
+      lines.push('```');
+      lines.push('');
+    }
+  }
+  if (proj.batchIds.length === 0) {
+    lines.push('—');
+    lines.push('');
+  }
+
+  // §6: queue journal
+  lines.push('## 队列 journal');
+  lines.push('');
+  lines.push('```');
+  lines.push(showQueueText.trimEnd());
+  lines.push('```');
+  lines.push('');
+
+  // §7: queue remaining
+  lines.push('## 队列剩余');
+  lines.push('');
+  lines.push(queueRemainingText.trimEnd());
+  lines.push('');
+
+  return lines.join('\n');
+}
+
 /** Formats version summary as human-readable text with the fixed footer. */
 export function formatVersionSummary(summaries: readonly VersionSummary[]): string {
   const lines: string[] = [];
