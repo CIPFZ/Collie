@@ -1240,4 +1240,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b08 · r-20261116154308 · FIX
+
+- 时间：2026-11-16T16:26:01.458Z
+- 裁定：规则 4，reviewer reported 1 claim mismatch(es)
+- 提交：`7bf4a6d` `572836a`
+- 验收命令：9/10 通过
+  - `npm run lint` → exit 1，Checking formatting...
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1119 passed, 0 failed
+  - `npm test -- test/follow.test.ts` → exit 0，30 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/follow.test.ts | grep -qE "^(2[8-9]|[3-9][0-9])$"` → exit 0，exit 0
+  - `d=$(mktemp -d) && TMPDIR=$d npm test -- test/follow.test.ts && ! ls -d "$d"/collie-r2-* >/dev/null 2>&1` → exit 0，30 passed, 0 failed
+  - `grep -vE "^\s*(//|\*|/\*)" src/follow.ts | grep -qE "rebase" && grep -qE "rebase" test/follow.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/follow.ts | grep -qE "pendingReport" && grep -qE "pendingReport" test/follow.test.ts` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/follow.ts | grep -qE "pendingPush"` → exit 0，exit 0
+  - `grep -qE "pendingPush" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：failure，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43905851964
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
