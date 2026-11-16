@@ -9,9 +9,11 @@
 > 条目要求展示某个值时，写明它取自哪个事件的哪个字段，并核对 R2 确实写了它；只读命令的测试至少有一组夹具来自 fake runner 跑出的真实运行。
 > R1 签发自查（v045-b04 后，SPEC 14.8）：条目里有「只做一次」「重试」「退避」这类跨多圈才看得出的行为，写明「连续 N 圈之后是什么样」并要求测试真的走 N 圈；
 > 要求「数据来自真实运行」时点名是哪几条断言；一个批次不要既改 R2 又加新命令（v045-b01 因此用满了 200 轮）。
+> R1 签发自查（v045-b05 / b06 后，SPEC 14.11）：多圈行为的情形要一直写到「恢复之后」为止（失败几圈、恢复、再走几圈之后是什么样）；
+> 改 R2 的条目单独成批，不和投影、多个测试文件的改动放在一起（v045-b06 用了 168 轮）。
 
 更新时间：2026-11-16
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b04 已通过，队列从 v045-b05 起，固定版本 `f901a8f`
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b07 已通过，队列从 v045-b08 起，固定版本 `7a50daa`
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -73,6 +75,8 @@
 | 51 | v045-b05 | collie follow 加固：已处理落在仓库里、失败只通知一次并退避、通知不带路径、子进程与汇报附录 | v045-b04 | passed |
 | 52 | v045-b06 | collie report 与 why 补齐：开始与墙钟、合计、轮数上限、tool.denied、批次状态、CI 链接 | v045-b02 | passed |
 | 53 | v045-b07 | 变异检查：删掉规则、放行条件或受保护路径里的任意一处，测试必须变红 | v04-b17 | passed |
+| 54 | v045-b08 | collie follow 的推送与收尾：每圈先同步、分叉时 rebase、汇报上了远端才通知、完整输出、npm ci 失败清目录 | v045-b05 | pending |
+| 55 | v045-b09 | 变异检查判定收紧：基线含类型检查、caught 看测试结果不看退出码、超时不算 invalid | v045-b07 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -2143,6 +2147,91 @@ R1 在 `6cc1bd5` 上逐个删掉仲裁规则、放行条件、受保护清单里
 额外禁止：
 - 改动任何受保护路径；改动 `.github/` 下任何文件
 - 改动 `src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`（本批次只加测试与检查脚本）
+- 为了让测试过而删除或跳过任何测试；为了让变异检查通过而从清单里去掉某一项、或把超时与编译不过算成被发现
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 把变异检查并进 `npm test`；让它改动工作区里的文件；新增依赖
+
+## v045-b08 collie follow 的推送与收尾：每圈先同步、分叉时 rebase、汇报上了远端才通知、完整输出、npm ci 失败清目录
+
+优先级：54　依赖：v045-b05
+
+v045-b05 修好了三处，但还剩一处会让 `follow` 交不出汇报：推送失败一次之后，汇报提交永远不会再推（操作员实跑发现，R1 复测属实）；远端在队列期间多一个提交时本地会分叉，之后推送与拉取都一直失败。
+R1 另外读出：汇报正文取自只留末 200 行的子进程输出，队列一长就会被截掉开头；`follow` 的拉取靠上游配置，测试沙箱没有上游，所以测试里拉取从来没成功过。规格见 SPEC 14.12（读这一节；现状与实测在 14.11，原设计在 14.4 与 14.9）。
+
+条目：
+1. 每圈先同步、通知等汇报上了远端才发（SPEC 14.12 第 1、2 条）：每圈在读 next.md 之前 `git fetch`，按「不领先 / 领先 / 分叉」三种情况处理，`fetch` / `pull` / `push` 都写明 `origin` 与 `main`、不依赖上游配置；分叉时只有本地多出来的全是 `ops: report queue` 提交才 `pull --rebase`，
+   冲突就 `rebase --abort`；「队列结束」通知记进 `follow.json` 的 `pendingReport`，本地不再领先时才发、只发一次；删掉 `pendingPush`。
+   **推送失败 3 圈 → 恢复远端 → 再走 3 圈之后：远端有汇报提交，本地不领先，`run --continue` 一共只起 1 次，「队列结束」通知只有 1 条、且出现在恢复之后；**
+   **队列期间远端多了一个提交时：下一圈之后远端同时有那个提交与汇报提交，本地不领先也不落后，不发 `diverged` 通知**
+2. 完整输出、固定版本目录、子进程起不来（SPEC 14.12 第 3、4 条）：注入的子进程函数多一个参数说明要完整输出还是只留末尾，留哪些行的逻辑写成不起子进程的函数；`report`、`report --json`、`preflight --json` 用完整输出；
+   `npm ci` 退出码不是 0 时删掉固定版本目录、按 `pinned:<固定版本>` 通知一次并退避，下一次尝试重新建目录；缺省的子进程实现在程序不存在时返回退出码 127，不抛出
+3. 小处与测试（SPEC 14.12 第 5 条与末段）：退避状态随基准提交清零；附录里写 `preflight：ok`。`test/follow.test.ts` 补齐：条目 1 两处加粗的情形各一条；
+   本地有一个不是汇报的未推送提交且远端前进 → 不 rebase，3 圈只通知 1 条 `diverged`；rebase 冲突 → 放弃、仓库回到 rebase 之前、通知 1 条；留行的函数喂 500 行：完整模式 500 行都在、末尾模式只剩末 200 行；注入的子进程函数收到的模式：`report` / `report --json` / `preflight --json` 是完整，`run --continue` / `npm ci` 是末尾；
+   远端有新提交而本地不领先 → 一圈之后本地 `HEAD` 等于远端、没有 `pull` 通知；
+   `npm ci` 失败后目录不存在、之后成功能接着跑；用一个不存在的程序名调缺省的子进程实现（不会起任何进程）得到退出码 127；换了基准提交后不沿用上一个基准的退避。
+   **每条多圈的用例都要断言实际走了几圈**（例如数注入的 `sleep` 被调了几次）。`test/invariants.test.ts` 加「`src/follow.ts` 不含 `pendingPush`」
+
+本批次不改 `src/handoff.ts`、`src/run.ts`、`src/view.ts`、`src/preflight.ts`。不应改动 `test/invariants.test.ts` 已有的任何数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| follow 专项测试通过 | `npm test -- test/follow.test.ts` | exit 0 |
+| 专项测试不少于 28 个 | `grep -cE "^\s+it\(" test/follow.test.ts \| grep -qE "^(2[8-9]\|[3-9][0-9])$"` | exit 0 |
+| 专项测试不在系统临时目录留下固定版本目录 | `d=$(mktemp -d) && TMPDIR=$d npm test -- test/follow.test.ts && ! ls -d "$d"/collie-r2-* >/dev/null 2>&1` | exit 0 |
+| 分叉时会 rebase，且有测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/follow.ts \| grep -qE "rebase" && grep -qE "rebase" test/follow.test.ts` | exit 0 |
+| 通知等汇报上了远端才发（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/follow.ts \| grep -qE "pendingReport" && grep -qE "pendingReport" test/follow.test.ts` | exit 0 |
+| 不再用的状态已删掉（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" src/follow.ts \| grep -qE "pendingPush"` | exit 0 |
+| 不变量同步 | `grep -qE "pendingPush" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `.collie/collie.toml`）；改动 `templates/collie.toml`、`eslint.config.js`、`vitest.config.ts`
+- 为了让测试过而删除或跳过任何测试（改写 `test/follow.test.ts` 里与新行为冲突的旧用例不算）
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner、真实的 `npx` / `npm` 子进程或真实网络请求；自己在工作区里运行不带 `--dry-run` 的 `collie follow`
+- 让 `follow` rebase 或改写汇报提交之外的任何提交；让它写 `docs/ops/queue-*.md` 之外的仓库文件；改动 `handoff.ts`、`run.ts`、`gate.ts`、`arbiter.ts`；新增依赖
+
+## v045-b09 变异检查判定收紧：基线含类型检查、caught 看测试结果不看退出码、超时不算 invalid
+
+优先级：55　依赖：v045-b07
+
+变异检查（v045-b07）在两台机器上都是 44 项全部被发现，但它的判定比规格宽：测试进程只要非零退出就算被发现；基线不跑类型检查，工作区本身类型不过时每一项都报成 `invalid`（R1 实际碰到了）。
+它之后可能成为每批必过的检查，先把判定收紧。规格见 SPEC 15.5（读这一节；原设计在 15.1，R1 碰到的情况在 14.11）。
+
+条目：
+1. 基线与判定（SPEC 15.5 前两条；`scripts/mutation.ts` 的 `runBaseline`、`runMutation`、`judgeExecResult`）：基线先跑整项目类型检查再跑相关测试，任何一步不过、或一个测试都没执行，立刻退出码 1 并在末行写 `mutation: baseline failed (<原因>)`；
+   每一项用 vitest 的 JSON 报告判定：执行了测试且至少一个用例失败才是 `caught`，测试进程非零退出却没有用例失败算 `invalid`。判定写成不起子进程的纯函数，输入是 JSON 报告与退出信息。
+   JSON 报告用 `--outputFile` 写到系统临时目录、读完删掉；不带它时 vitest 会在当前目录建 `.vitest/`，基线是在工作区里跑的，不能把工作区弄脏
+2. 超时与末行（SPEC 15.5 后两条）：类型检查超时记 `timeout`；类型检查限 120 秒、测试进程限 180 秒；末行固定为 `mutation: caught <n> survived <n> invalid <n> timeout <n> stale <n>`，全部 `caught` 才退出码 0。
+   清单的 44 项不动
+3. `test/mutation.test.ts` 补齐（仍然**不在测试里跑变异**，只喂 JSON 报告样例）：有用例失败 → `caught`；全过 → `survived`；非零退出但失败用例数为 0 → `invalid`；执行的用例数为 0 → `invalid`；
+   类型检查超时 → `timeout`；基线三种不过各一条；末行格式。`test/invariants.test.ts` 加「`scripts/mutation.ts` 含 `numFailedTests`」。
+   顺带：`test/preflight.test.ts` 里「本地落后远端」那条用例建的 `collie-clone-*` 目录，用完删掉
+
+本批次只改 `scripts/mutation.ts`、`test/mutation.test.ts`、`test/invariants.test.ts`、`test/preflight.test.ts`。不应改动 `test/invariants.test.ts` 已有的任何数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 判定函数的专项测试通过 | `npm test -- test/mutation.test.ts` | exit 0 |
+| 专项测试不少于 18 个 | `grep -cE "^\s+it\(" test/mutation.test.ts \| grep -qE "^(1[8-9]\|[2-9][0-9])$"` | exit 0 |
+| 判定看测试结果（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" scripts/mutation.ts \| grep -qE "numFailedTests" && grep -qE "numFailedTests" test/mutation.test.ts` | exit 0 |
+| 变异检查全部被发现、末行是固定格式、工作区里没有留下报告 | `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" \| tail -n 1 \| grep -qE "^mutation: caught [0-9]+ survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` | exit 0 |
+| preflight 的测试不在系统临时目录留下克隆目录 | `d=$(mktemp -d) && TMPDIR=$d npm test -- test/preflight.test.ts && ! ls -d "$d"/collie-clone-* >/dev/null 2>&1` | exit 0 |
+| 清单仍不少于 44 项 | `npx tsx scripts/mutation.ts --list \| grep -c . \| grep -qE "^(4[4-9]\|[5-9][0-9]\|[1-9][0-9][0-9])$"` | exit 0 |
+| 不变量同步 | `grep -qE "numFailedTests" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/` 下任何文件
 - 为了让测试过而删除或跳过任何测试；为了让变异检查通过而从清单里去掉某一项、或把超时与编译不过算成被发现
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 把变异检查并进 `npm test`；让它改动工作区里的文件；新增依赖
