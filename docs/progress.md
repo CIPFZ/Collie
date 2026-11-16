@@ -1218,4 +1218,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b07 · r-20261116112632 · PASS
+
+- 时间：2026-11-16T12:13:41.226Z
+- 裁定：规则 10，All 10 acceptance commands pass. 44/44 mutations caught. Three task items fully implemented: evidence tests cover all 9 PROTECTED_PATHS, arbiter tests add rule 6 single-sided and rule 9 CI-only cases, mutation script with correct list/structure/tmpdir/cleanup, vitest timeouts raised to 120s, invariants updated. No protected files modified, no forbidden source files modified, no new dependencies, no scope creep. CI 以 R2 取证为准。
+- 提交：`e21779d` `a25ba9e`
+- 验收命令：10/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1104 passed, 0 failed
+  - `npm run test:mutation` → exit 0，> tsx scripts/mutation.ts
+  - `npx tsx scripts/mutation.ts --list | grep -c . | grep -qE "^(4[4-9]|[5-9][0-9]|[1-9][0-9][0-9])$"` → exit 0，exit 0
+  - `npx tsx scripts/mutation.ts --list | grep -cE "^protected:" | grep -qE "^(9|[1-9][0-9])$"` → exit 0，exit 0
+  - `npx tsx scripts/mutation.ts --only rule6-failed-count-half,rule6-passed-count-half,rule9-ci-third` → exit 0，All mutations caught ✓
+  - `npm test -- test/mutation.test.ts` → exit 0，11 passed, 0 failed
+  - `grep -cE "(test|hook)Timeout: 120_000" vitest.config.ts | grep -qE "^2$"` → exit 0，exit 0
+  - `grep -qE "test:mutation" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43862169565
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
