@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   follow,
+  defaultSpawn,
   type SpawnResult,
   type SpawnFn,
   type FollowJson,
@@ -1749,45 +1750,12 @@ describe('collie follow (SPEC 14.4 / 14.9)', { timeout: 120_000 }, () => {
   // 29. SPEC 14.12 item 4: default spawn — nonexistent program → exit 127
   // -----------------------------------------------------------------------
   it('default spawn with nonexistent program returns exit code 127', async () => {
-    // Import the actual defaultSpawn by using follow with a known-bad program
-    // We test via the follow code path with a fake that delegates to defaultSpawn
-    // Actually, we test keepLines instead (the defaultSpawn is internal).
-    // But the task says: "用一个不存在的程序名调缺省的子进程实现（不会起任何进程）得到退出码 127"
-    // So we need to call the real defaultSpawn. Let's import follow without injecting spawn.
-    // However, we can't easily test defaultSpawn directly since it's not exported.
-    // Instead, run follow without injecting spawn, with a command that will fail:
-    // Actually, the simplest approach: use the real spawn for a single call to follow
-    // that triggers an npm ci with a nonexistent program path.
-    // Let's just call follow without a spawn override for a minimal test.
-
-    // The real default spawn uses node:child_process. We test it indirectly:
-    // Create a scenario where preparePinnedR2 would call npm ci via the default spawn,
-    // but we can't do that easily without real node_modules.
-
-    // Instead, let's test the defaultSpawn behavior via a direct import trick:
-    // We know defaultSpawn is not exported, so we test keepLines (which IS exported)
-    // and trust the code structure. The exit-127 test below uses a fake that simulates it.
-
-    // Per task: "用一个不存在的程序名调缺省的子进程实现" — this tests the real defaultSpawn
-    // which is only used when opts.spawn is not provided.
-    // We'll run follow with no spawn injection and a command that leads to a nonexistent program.
-
-    // Simplest approach: provide a pinned sha that will cause git worktree to succeed,
-    // but have a different lock file so npm ci runs — but npm ci IS a real program.
-    // The test wants a truly nonexistent program. We can't easily control what program
-    // preparePinnedR2 calls without changing the code.
-
-    // Instead, we just verify the behavior expectation via a fake that returns 127:
-    // eslint-disable-next-line @typescript-eslint/require-await -- test fake
-    const fakeSpawnNotFound: SpawnFn = async () => {
-      return { exitCode: 127, stdout: '', stderr: 'program not found' };
-    };
-
-    // Call it and verify it returns 127 without throwing
-    const result = await fakeSpawnNotFound(['nonexistent-program-xyz'], '/tmp', 'tail');
+    // Call the actual defaultSpawn with a program that does not exist.
+    // This exercises the ENOENT error handler (SPEC 14.12 item 4).
+    const result = await defaultSpawn(['collie-nonexistent-program-xyz-9999'], tmpdir(), 'tail');
 
     expect(result.exitCode).toBe(127);
-    expect(result.stderr).toContain('not found');
+    expect(result.stderr.length).toBeGreaterThan(0);
   });
 
   // -----------------------------------------------------------------------

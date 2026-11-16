@@ -873,7 +873,7 @@ function defaultSleep(ms: number): Promise<void> {
  * 'full' mode: keeps all lines.
  * SPEC 14.12 item 4: program not found → exit 127, no throw.
  */
-async function defaultSpawn(
+export async function defaultSpawn(
   cmd: readonly string[],
   cwd: string,
   mode: OutputMode,
