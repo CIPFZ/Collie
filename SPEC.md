@@ -372,11 +372,13 @@ type EventType =
   | 'batch.selected' | 'batch.task_written'
   | 'batch.skipped'      // v0.3：依赖未满足；字段 batch_id / missing（依赖清单）
   | 'batch.status'       // v0.3：R2 改写 backlog 状态列；字段 batch_id / from / to
-  | 'queue.finished'     // v0.3：--continue 结束；字段 reason（exhausted / blocked / escalated / fix_max / limit / paused / evidence_unavailable）/ batches（本次跑过的）/ paused_count
+  | 'queue.finished'     // v0.3：--continue 结束；字段 reason（exhausted / blocked / escalated / fix_max / limit / paused / evidence_unavailable / preflight_failed）/ batches（本次跑过的）/ paused_count
   | 'queue.paused'       // v0.3（12.3）：PASS 但触发停表清单；字段 batch_id / reasons（数组）
   | 'batch.retried'      // v0.3（12.3）：BLOCK 后自动重跑一次；字段 batch_id，规则 1 时带 rule（固定 1），中断续跑（13.14）时带 cause（固定 interrupted）/ stop_reason
   | 'queue.batch_started' // v0.3（12.2）：队列拉起一次批次运行；字段 batch_run_id（v04-b07 前叫 run_id，见 13.10）/ batch_id / attempt / why（new / fix_retry / rule1_retry / interrupt_retry）
   | 'queue.gate_passed'  // v0.4（13.14）：PASS 后放行判定通过；字段 batch_id / batch_run_id
+  | 'queue.preflight'    // 14.1：队列开头的开跑前检查；字段 ok / checks（数组，元素 name / ok / detail）
+  | 'audit.result'       // 14.1：reviewer 结束后核对它的工具清单，记在批次 journal；字段 result（match / mismatch / no_init）/ extra / missing
   | 'worker.started' | 'worker.finished' | 'worker.crashed'
   | 'reviewer.started' | 'reviewer.verdict'
   | 'reviewer.finished'   // v0.4（13.1）：reviewer 运行返回后、解析 verdict 之前记；字段 exit_code 与运行级字段
@@ -939,6 +941,7 @@ b04 与后续批次的汇报改成每批一个 `docs/ops/` 文件（见 AGENT_KI
 停表清单（任何裁决下都停）：
 - 规则 9 降级（`verdict.downgraded` rule=9）在**连续两个批次**出现 → `queue.paused` reason `rule9_twice`（即使第二个批次最终 PASS）。
 - 同一批次第 2 次 BLOCK → 停（现有行为，BLOCK 本来就停）。
+- reviewer 的工具清单与白名单不符（`audit.result` 为 `mismatch`，14.1，v045-b01）→ `queue.paused` reason `audit_mismatch`。
 
 规则 1 的特殊处理：reviewer 输出格式错（规则 1）导致的 BLOCK，同批次**第一次**自动重跑一次，记 `batch.retried`（rule 1），**不计入** `fix_max`；
 第二次仍是规则 1 → 停，退出码 20。理由：v02-b04-tests、v02-b04-fix4 都是代码良好、reviewer 格式错，重跑一次就过，不值得叫人。
@@ -956,6 +959,7 @@ b04 与后续批次的汇报改成每批一个 `docs/ops/` 文件（见 AGENT_KI
 所有者 2026-11-13 的两条裁定记在 13.16 末段：v0.3 记为收口；report 里的 sha 解析不了改判为 FIX，规格是 13.21（v04-b16，改 R2）。
 第四次队列运行（2026-11-13）之后：裁定见 13.22；追加 13.23 `why` / `timeline` 补齐 journal 里已有的数据（v04-b17）。
 第五次队列运行（2026-11-13）之后：裁定见 13.24；没有新批次。v0.4 是否收口待所有者裁定。
+所有者 2026-11-16：下一步先做「收掉操作员」（第 14 章），排在 v0.5 之前。v0.4 是否记为收口，所有者这一次没有答复，仍待裁定。
 
 ### 13.1 观测数据补齐（v04-b01）
 
@@ -1358,3 +1362,107 @@ v0.4 的验证（13.7、ROADMAP 第 6 节）：
 
 固定版本前移到 `60e9017`（v04-b17 的裁定提交，与 HEAD 的 `src/`、`test/` 完全相同）。backlog 里没有 pending 的批次。
 v0.4 是否记为收口、下一步做什么，提请所有者裁定；`docs/ops/next.md` 的状态是「等所有者裁定」。
+
+## 14. 收掉操作员（自举第 3 步）
+
+所有者 2026-11-16 选定。ROADMAP 里没有这一版，它排在 v0.4 与 v0.5 之间，批次前缀 `v045-`。
+到 v0.4 为止，队列每跑一次都要一个「操作员」（一个按 `AGENT_KICKOFF.md` 行事的 agent）做四件机械的事：开跑前检查、敲 `run --continue`、跑 `audit`、抄事件写汇报；
+还要所有者每轮对它说一次「拉」。本章把这四件事做进 Collie：做完之后操作员那一侧只剩一条常驻命令 `collie follow`，所有者不用再说「拉」。
+所有者对 R1 说的那一声「看」本章去不掉：R1 只在所有者说话时才能行动，要去掉它得把 R1 也做成命令（ROADMAP v0.7）。
+规则 1~10 与放行判定的六项不变；停表清单加一条（14.1）。四个批次：14.1 开跑前检查与 audit，14.2 `collie report`，14.3 通知与交接协议，14.4 `collie follow`。
+
+### 14.1 开跑前检查与 audit 并进队列（v045-b01，改 R2）
+
+**`collie preflight [--smoke] [--json]`。** 逐项检查，每项一行（`ok   <name>` 或 `FAIL <name>: <detail>`），末行 `preflight: ok` 或 `preflight: failed (<失败项>)`；全过退出码 0，否则 1。检查项：
+- `worktree_clean`：`git status --porcelain` 为空。例外：`.collie/heartbeat.json` 存在时（上一次被杀，11.3 / 11.4 的孤儿救援会处理脏工作区）这一项记 ok，detail 写 `orphaned run present`。
+- `remote_in_sync`：`git fetch <remote>` 成功，且 `<remote>/<expected_branch>` 是 `HEAD` 的祖先或等于 `HEAD`（本地不落后、没有分叉）。
+- `ci_token`：沿用 13.9 的检查（配了 `token_file` 而读不到就失败；没配记 ok，detail 写 `not configured`）。
+- `disk_free`：仓库所在文件系统的可用空间不少于 `limits.min_free_mb`（新的可选配置项，缺省 1024）。取数函数要能注入。
+- `--smoke` 时再做现有 `collie smoke` 的两步（调一次 runner、带 token 查一次 CI），各记一项 `runner`、`ci_query`。不带 `--smoke` 时不调 runner、不查 CI。
+
+**队列开头自动检查。** `collie run --continue` 在选第一个批次之前做一次不带 `--smoke` 的检查，结果记进队列 journal：`queue.preflight`（字段 ok / checks）。
+没过：stderr 打印失败项，记 `queue.finished`（reason `preflight_failed`），不签发 task、不拉起 worker，退出码 1。单批次模式不自动检查（自救与孤儿恢复要能照常启动）。
+
+**audit 并进运行。** reviewer 运行结束后，R2 用 `collie audit` 同一套逻辑核对 reviewer 事件流里的工具清单与白名单，记 `audit.result`（记在批次 journal，两种模式都记）：
+`match` / `mismatch`（带 `extra` / `missing`）/ `no_init`（事件流里没有 init 消息）；没有 reviewer 的运行不记。`collie audit <run_id>` 的输出与退出码不变，两处共用一个函数。
+`--continue` 下 `mismatch` → 不论裁决是什么都停：记 `queue.paused`（reasons 含 `audit_mismatch`），`queue.finished` reason `paused`，退出码 30；裁定提交与 backlog 状态照常，不因此改结论。
+理由：reviewer 拿到了白名单之外的工具，「干净上下文、只读取证」的前提不成立，它的结论要人看过才能接着跑（此前这条靠操作员事后跑 `audit` 执行，见 `AGENT_KICKOFF.md`）。
+
+### 14.2 `collie report`（v045-b02）
+
+`collie report [--queue <q_run_id>] [--json]`：把一次队列运行写成 Markdown，打印到标准输出；缺省取最近一次队列运行。只读 journal 与 backlog（13.2 的边界），不写文件、不调模型。
+退出码：0 有数据；2 本机没有这次（或任何）队列运行的 journal。章节固定，顺序如下，取不到的写 `—`：
+1. `# 队列运行 <q_run_id>`：开始与结束时间、墙钟、结束原因与对应的退出码（`limit` / `exhausted` → 0；`blocked` / `fix_max` / `escalated` / `evidence_unavailable` → 20；`paused` → 30；`preflight_failed` → 1）。
+2. `## 开跑前检查`：`queue.preflight` 的每一项；旧 journal 没有这条事件时写 `—`。
+3. `## 实际经过`：一张表，每次批次运行一行：顺序、批次、运行、attempt、结论、规则、用时、worker 花费、reviewer 花费、合计、worker 轮数、`head_sha`、audit 结果。口径与 `why` / `timeline` 相同（13.13、13.23）。
+4. `## 放行与打扰`：`queue.gate_passed` 次数；每条 `queue.paused`（批次与 reasons）；BLOCK 次数；每条 `batch.retried`；最后一行 `打扰：<queue.paused 次数 + BLOCK 次数>`。
+5. `## 每个批次`：对本次队列跑过的每个批次，原样放 `why <batch>` 的文本输出（代码块）。
+6. `## 队列 journal`：与 `show --queue` 相同的逐行输出（代码块）。
+7. `## 队列剩余`：pending 与 blocked 的批次号（与 `status` 的队列段相同）。
+
+汇报里需要人判断的部分（每次打扰该不该、Collie 本身的问题）不在其中：那是 R1 读汇报时做的事。`.collie/runs/` 不进仓库，R1 看不到 journal 原文，所以第 5、6 节放原样输出。
+
+### 14.3 通知与交接协议（v045-b03）
+
+**通知。** 新的可选配置 `[notify] webhook_file`（企业微信群机器人的地址所在文件，`~` 展开，规则同 `ci.token_file`）。`src/notify.ts` 提供一个函数：
+没配或文件不存在 → `skipped`；POST `{"msgtype":"text","text":{"content":<文本>}}`，HTTP 2xx → `sent`，否则 `failed`（带状态码或错误类别）。它从不抛错；
+地址不得出现在返回值、报错、日志与任何输出里。`collie notify <文本>`：打印 `sent` / `skipped (no webhook)` / `failed: <原因>`，前两种退出码 0，第三种 1。
+通知文本只写批次号、队列号、结论和「到对话里看」，不写路径、token 与日志原文。
+
+**交接协议。** `docs/ops/next.md` 里第一个 `## ` 标题之前的「键：值」行（全角冒号）是机器读的部分，其余是给人看的：
+
+| 键 | 值 | 何时必填 |
+|---|---|---|
+| `状态` | `开跑` / `等所有者裁定` / `收工` | 总是 |
+| `基准提交` | 7~40 位 sha | 总是 |
+| `固定版本` | 7~40 位 sha，跑这一轮的 R2 版本（13.6） | 开跑 |
+| `批次上限` | 正整数，即 `--max` | 开跑 |
+| `裁定事项` | 一行文字 | 等所有者裁定 |
+| `摘要` | 一行文字 | 收工 |
+
+同一个键出现两次、必填的键缺失、值的格式不对，都算格式错。`src/handoff.ts` 是纯函数（不读文件、不读时钟、不起子进程）：
+`parseNext(text)` 解析上表；`decide(next, state)` 给出下一步动作。`state` 是 `collie follow` 落在 `.collie/follow.json`（不进仓库）里的两个值：`handledBase`（已经跑完并交了汇报的基准提交）与 `notified`（已经发过的通知键）。
+
+| next.md | 条件 | 动作 |
+|---|---|---|
+| 格式错 | 通知键 `invalid:<内容哈希>` 没发过 | 通知一次，然后等 |
+| `开跑` | `基准提交` 等于 `handledBase` | 等 |
+| `开跑` | 其余 | 跑一轮（14.4） |
+| `等所有者裁定` | 通知键 `owner:<基准提交>` 没发过 | 通知一次（文本取 `裁定事项`），然后等 |
+| `收工` | — | 通知一次（文本取 `摘要`），结束 |
+
+### 14.4 `collie follow`（v045-b04）
+
+`collie follow [--once] [--dry-run] [--interval <秒>] [--timeout <秒>]`：常驻循环，每圈 `git pull --ff-only`、读 `docs/ops/next.md`、按 14.3 决定动作并执行，然后睡 `--interval`（缺省 60 秒）。
+`--once` 只走一圈；`--dry-run` 只打印一行 `action: <动作> …`，不 pull、不起子进程、不写文件、不发通知。时钟、睡眠、起子进程、发通知都要能注入。
+
+「跑一轮」的步骤：
+1. `基准提交` 必须是 `HEAD` 的祖先，否则按格式错处理。
+2. 准备固定版本的 R2：目录是 `<系统临时目录>/collie-r2-<项目名>-<sha 前 12 位>`，一个 sha 一个目录，已存在就直接用，不在原地切换版本（`follow` 自己可能正从其中一个目录运行）。
+   不存在时 `git worktree add --detach <目录> <sha>`；该 sha 的 `package-lock.json` 与工作区 `HEAD` 的相同就把工作区的 `node_modules` 链接进去，不同就在目录里 `npm ci`。旧目录不清理。
+3. 用固定版本的 `cli.ts` 起子进程 `preflight --smoke`。没过：通知一次（键 `preflight:<基准提交>`，文本列失败项），**不**记为已处理，下一圈重试（环境修好后自己接上）。
+4. 用固定版本的 `cli.ts` 起子进程 `run --continue --max <批次上限>`，cwd 是工作区根，记下退出码。
+5. 找到这次新出现的 `q-` 运行目录，用**工作区** `HEAD` 的 `cli.ts` 起子进程 `report --queue <q_run_id>`（只读命令，用最新的投影代码），标准输出写进 `docs/ops/queue-<q_run_id>.md`。
+   `report` 失败时写一份最小的汇报：队列号、`run` 的退出码、标准输出与标准错误的末 50 行。
+6. 只提交这一个文件，提交信息 `ops: report queue <q_run_id>`，推送。推送失败：通知一次，下一圈先重试推送。
+7. 通知：`[Collie] 队列 <q_run_id> 结束：<reason>，退出码 <n>。到对话里说「看」`。队列正常跑完也通知，因为 R1 要所有者说话才会来审。
+8. 把 `基准提交` 记为 `handledBase`。
+
+### 14.5 角色与边界
+
+`collie follow` 接替的是操作员，权限也只有操作员那一份：仓库里只写 `docs/ops/queue-*.md`，只用 `ops:` 前缀提交（11.7 已把这个前缀排除在 worker 的取证范围之外）。
+它不改 backlog、不改任何手册与配置、不签发 task、不改结论；`docs/ops/next.md` 仍只有 R1 写。ROLES 第 6 节同步两行。
+操作员原来做、`follow` 不做的：读代码找 Collie 本身的问题（v04 的四轮里，「放行判定第 6 项取值」「`queue.batch_started` 落错目录」这类问题都是操作员读出来的）。
+这部分暂时落到 R1 读汇报与复核代码上，根治要等体检角色（ROADMAP v0.6）。
+
+### 14.6 验证
+
+四个批次用固定版本 `60e9017` 由操作员照旧手工跑（第六次队列）。跑完后固定版本前移，R1 改写 `AGENT_KICKOFF.md` 的操作员一节；
+下一次队列由操作员只起一条 `collie follow`，R1 推一份新的 next.md，数：从 R1 推送到汇报出现在仓库，中间有没有人动过手；`collie report` 生成的汇报够不够 R1 做裁定，不够的每一处记为缺口。
+
+### 14.7 明确不做
+
+- 把 R1 做成命令（ROADMAP v0.7）；所有者对 R1 说的「看」。
+- `follow` 的并发保护、旧固定版本目录的清理、通知的重试与去重之外的任何投递保证。
+- 企业微信之外的通知渠道；通知进 journal。
+- 让 `report` 判断「该不该打扰」或给出建议。

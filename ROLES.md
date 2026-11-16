@@ -182,6 +182,8 @@
   docs/decisions/ADR-*.md      R1 写 · 用户批准
   docs/progress.md             R2 写 · 依据实测证据 · 全员只读
   docs/reports/                R2 与 R5 写 · 验收与体检报告
+  docs/ops/next.md             R1 写 · 给 `collie follow`（原操作员）的交接指令（SPEC 14.3）
+  docs/ops/queue-*.md          `collie follow` 写（原操作员）· 队列汇报，只用 `ops:` 前缀提交（SPEC 14.5）
   .collie/
     collie.toml                R1 写 · 配置 · 所有阈值在此 · 禁止裸写 · worker 只读
     batches/<id>/task.md       R2 写 · R3 读

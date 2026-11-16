@@ -9,7 +9,7 @@
 > 条目要求展示某个值时，写明它取自哪个事件的哪个字段，并核对 R2 确实写了它；只读命令的测试至少有一组夹具来自 fake runner 跑出的真实运行。
 
 更新时间：2026-11-16
-当前版本：v0.4（v0.3 已于 2026-11-13 记为收口；见 SPEC 第 13 章；v04-b05 到 v04-b17 已通过，队列为空，固定版本 `60e9017`；v0.4 是否收口待所有者裁定，见 SPEC 13.24）
+当前版本：v0.4（v0.3 已于 2026-11-13 记为收口；见 SPEC 第 13 章；v04-b05 到 v04-b17 已通过；v0.4 是否收口待所有者裁定，见 SPEC 13.24；所有者 2026-11-16 选定先做 SPEC 第 14 章「收掉操作员」，队列从 v045-b01 起，固定版本 `60e9017`）
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -64,6 +64,10 @@
 | 44 | v04-b15 | collie why 的结论行：规则号从降级事件推，推不出显示「规则 —」 | v04-b09 | passed |
 | 45 | v04-b16 | report 里的 sha 解析不了改判为声称不符：FIX 并自动重跑 | v04-b13 | passed |
 | 46 | v04-b17 | why / timeline 补齐 journal 里已有的数据：reviewer 花费、模型、用时、token、head_sha、裁定提交 CI | v04-b16 | passed |
+| 47 | v045-b01 | 开跑前检查与 audit 并进队列：collie preflight、queue.preflight、audit 不符停表 | v04-b17 | pending |
+| 48 | v045-b02 | collie report：把一次队列运行写成 Markdown 汇报 | v045-b01 | pending |
+| 49 | v045-b03 | 通知与交接协议：notify 模块、next.md 的键值行、下一步动作的判定 | v045-b02 | pending |
+| 50 | v045-b04 | collie follow：常驻循环，按 next.md 开跑、交汇报、发通知 | v045-b03 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -1869,3 +1873,148 @@ v04-b13 已把这项检查拆成三步，本批次只改第 1 步的去向。
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 新增事件或字段；读取 `stream.ndjson` 或 `report.md`；让四个命令写任何文件
 - `run.ts` 除条目 3 那一处外的任何改动；改动规则 1~10、放行判定、各项阈值；新增依赖
+
+## v045-b01 开跑前检查与 audit 并进队列：collie preflight、queue.preflight、audit 不符停表
+
+优先级：47　依赖：v04-b17
+
+SPEC 第 14 章「收掉操作员」的第一批：把操作员每轮手工做的开跑前检查和 `audit` 做进 R2。规格见 SPEC 14.1（读这一节；停表的现有写法在 12.3，事件字段表在 3.6）。改的是 R2，要等固定版本前移才生效。
+
+条目：
+1. `collie preflight [--smoke] [--json]`（SPEC 14.1 第一段）：新建 `src/preflight.ts`，检查项 `worktree_clean` / `remote_in_sync` / `ci_token` / `disk_free`，`--smoke` 时加 `runner` / `ci_query`（复用现有 `smoke` 的两步，不要另写一套）；`ci_token` 复用 `run.ts` 的 `readCiTokenChecked`（现有不变量：只有 `run.ts` 与 `evidence.ts` 访问 `.token_file`，不要为此放宽它）；
+   `limits.min_free_mb` 进配置 schema（可选，缺省 1024；**不要改** `.collie/collie.toml` 与 `templates/collie.toml`，它们是受保护路径 / 由 R1 同步）；可用空间的取数函数经 `CliDeps` 注入。`cli.ts` 只做接线
+2. 队列与 audit（SPEC 14.1 后两段）：`run --continue` 在选第一个批次之前做不带 `--smoke` 的检查，记 `queue.preflight`，没过记 `queue.finished`（reason `preflight_failed`）、退出码 1、不签发 task；单批次模式不自动检查。
+   把 `cli.ts` 里 `audit` 的核对逻辑抽成两处共用的函数，reviewer 结束后记 `audit.result`（批次 journal）；`--continue` 下 `mismatch` 记 `queue.paused`（reasons 含 `audit_mismatch`）并停，退出码 30。`collie audit` 的输出与退出码不变
+3. 测试：新建 `test/preflight.test.ts`（每个检查项的通过与失败、心跳存在时脏工作区不算失败、本地落后于远端、`--smoke` 两项、`--json`、队列开头没过时没有 `batch.task_written` 且退出码 1、单批次模式不检查）与
+   `test/queue-audit.test.ts`（`match` 放行、`mismatch` 在 PASS 与 FIX 两种裁决下都停且退出码 30、`no_init` 不停、没有 reviewer 的运行不记）。用 `test/support/sandbox.ts` 的 `Sandbox`，不得依赖真实 home 目录与真实磁盘余量。
+   现有 `--continue` 测试若因工作区不干净而失败，改它的准备步骤（先提交），不得为此放宽检查。`test/invariants.test.ts` 加「`src/run.ts` 含 `queue.preflight`」「`src/schema/index.ts` 含 `audit.result`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 两个专项测试通过 | `npm test -- test/preflight.test.ts test/queue-audit.test.ts` | exit 0 |
+| preflight 测试不少于 8 个 | `grep -cE "^\s+it\(" test/preflight.test.ts \| grep -qE "^([8-9]\|[1-9][0-9])$"` | exit 0 |
+| audit 入队列测试不少于 4 个 | `grep -cE "^\s+it\(" test/queue-audit.test.ts \| grep -qE "^([4-9]\|[1-9][0-9])$"` | exit 0 |
+| 命令已接线并列出检查项 | `npx tsx src/cli.ts preflight 2>&1 \| grep -qE "worktree_clean"` | exit 0 |
+| 队列开头记检查结果（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "queue\.preflight" && grep -qE "queue\.preflight" src/schema/index.ts` | exit 0 |
+| audit 不符会停表（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "audit_mismatch" && grep -qE "audit_mismatch" test/queue-audit.test.ts` | exit 0 |
+| 磁盘阈值进配置 schema | `grep -qE "min_free_mb" src/schema/index.ts` | exit 0 |
+| 不变量同步 | `grep -qE "queue\.preflight" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `.collie/collie.toml`）；改动 `templates/collie.toml`
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动规则 1~10 与放行判定的六项；让 audit 的结果改变任何结论或 backlog 状态；改动单批次模式的启动条件；新增依赖
+
+## v045-b02 collie report：把一次队列运行写成 Markdown 汇报
+
+优先级：48　依赖：v045-b01
+
+操作员每轮手写的队列汇报，改由命令从 journal 生成。规格见 SPEC 14.2（读这一节；取值口径在 13.13 与 13.23）。只读命令，不改 R2。
+
+条目：
+1. `src/view.ts` 加 `projectReport` 与 `formatReport`（SPEC 14.2）：七节固定、顺序固定，取不到的写 `—`；第 3 节的 attempt、用时、花费复用现有的推算函数，不另写一套；第 5 节复用 `projectWhy` / `formatWhy`，第 6 节复用 `show --queue` 的逐行格式，第 7 节复用 `status` 的队列段
+2. `collie report [--queue <q_run_id>] [--json]`（SPEC 14.2）：缺省取最近一次队列运行；退出码 0 有数据 / 2 本机没有队列运行的 journal 或指定的队列号不存在。`cli.ts` 只做接线；不写任何文件
+3. 新建 `test/report.test.ts`：至少两组数据用 `Sandbox` 让 fake runner 跑真实的 `collie run --continue`（一组两个批次连续 PASS，一组先 FIX 后 PASS；fake runner 的 `result` 能脚本化花费与轮数），
+   断言七个标题都在且顺序对、「实际经过」表的行数与 attempt / 结论 / 合计花费对、`打扰：` 那一行的数字对；另测：没有 `queue.preflight` 的旧 journal 第 2 节写 `—`、两个退出码、`--json` 是合法 JSON。
+   `test/invariants.test.ts` 加「`src/view.ts` 含 `projectReport`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| report 专项测试通过 | `npm test -- test/report.test.ts` | exit 0 |
+| 专项测试不少于 6 个 | `grep -cE "^\s+it\(" test/report.test.ts \| grep -qE "^([6-9]\|[1-9][0-9])$"` | exit 0 |
+| 专项测试含真实运行的夹具 | `grep -qE "Sandbox\.create" test/report.test.ts` | exit 0 |
+| 没有队列数据时退出码 2 | `npx tsx src/cli.ts report; test $? -eq 2` | exit 0 |
+| 投影函数进代码与测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/view.ts \| grep -qE "projectReport" && grep -qE "projectReport" test/report.test.ts` | exit 0 |
+| 投影模块仍然不写文件（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" src/view.ts \| grep -qE "writeFileSync\|appendFileSync"` | exit 0 |
+| 不变量同步 | `grep -qE "projectReport" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 改动 `run.ts`、`gate.ts`、`arbiter.ts`；改动 `status`、`timeline`、`why`、`watch`、`show` 的输出；读取 `stream.ndjson` 或 `report.md`；让 `report` 写任何文件；新增依赖
+
+## v045-b03 通知与交接协议：notify 模块、next.md 的键值行、下一步动作的判定
+
+优先级：49　依赖：v045-b02
+
+`collie follow`（下一批）要用的两块：发通知，以及读懂 `docs/ops/next.md`。规格见 SPEC 14.3（读这一节）。本批次不写循环、不起子进程。
+
+条目：
+1. 通知（SPEC 14.3 第一段）：配置 schema 加可选的 `[notify] webhook_file`（**不要改** `.collie/collie.toml` 与 `templates/collie.toml`）；新建 `src/notify.ts`，`fetch` 由调用方传入；`collie notify <文本>`，`cli.ts` 只做接线。
+   地址不得出现在返回值、报错、日志与任何输出里
+2. 交接协议（SPEC 14.3 第二段的两张表）：新建 `src/handoff.ts`，`parseNext(text)` 与 `decide(next, state)`，纯函数：不 import `node:fs` / `node:child_process`，不读时钟，不用定时器
+3. 新建 `test/notify.test.ts`（没配、文件不存在、2xx、非 2xx、`fetch` 抛错各一条，并断言任何返回值与输出都不含地址）与 `test/handoff.test.ts`
+   （三种状态各自的必填键、重复的键、sha 格式不对、`批次上限` 不是正整数、键值行出现在第一个 `## ` 之后不算、SPEC 14.3 判定表的每一行）。
+   `test/invariants.test.ts` 加「`src/handoff.ts` 不 import `node:fs` / `node:child_process`」「`src/notify.ts` 存在」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 两个专项测试通过 | `npm test -- test/notify.test.ts test/handoff.test.ts` | exit 0 |
+| 协议测试不少于 10 个 | `grep -cE "^\s+it\(" test/handoff.test.ts \| grep -qE "^[1-9][0-9]$"` | exit 0 |
+| 通知测试不少于 5 个 | `grep -cE "^\s+it\(" test/notify.test.ts \| grep -qE "^([5-9]\|[1-9][0-9])$"` | exit 0 |
+| 协议模块是纯函数（不看注释行） | `test -f src/handoff.ts && ! grep -vE "^\s*(//\|\*\|/\*)" src/handoff.ts \| grep -qE "node:fs\|node:child_process\|setTimeout\|setInterval\|Date\.now"` | exit 0 |
+| 有测试断言地址不外泄 | `grep -qE "not\.toContain" test/notify.test.ts` | exit 0 |
+| 没配置时跳过而不是报错 | `HOME=$(mktemp -d) npx tsx src/cli.ts notify "acceptance" 2>&1 \| grep -qE "skipped"` | exit 0 |
+| 通知配置进 schema | `grep -qE "webhook_file" src/schema/index.ts` | exit 0 |
+| 不变量同步 | `grep -qE "handoff" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `.collie/collie.toml`）；改动 `templates/collie.toml`
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里向真实网络发请求；让通知地址出现在任何输出、事件或报错里；改动 `run.ts`、`gate.ts`、`arbiter.ts`；新增依赖
+
+## v045-b04 collie follow：常驻循环，按 next.md 开跑、交汇报、发通知
+
+优先级：50　依赖：v045-b03
+
+操作员那一侧最后剩下的常驻命令。规格见 SPEC 14.4 与 14.5（读这两节；协议与判定表在 14.3，已由 v045-b03 实现为 `src/handoff.ts`）。
+
+条目：
+1. 新建 `src/follow.ts`（SPEC 14.4）：循环与 `--once` / `--dry-run` / `--interval` / `--timeout`；每圈 pull、读 `docs/ops/next.md`、用 `handoff.ts` 判定、执行动作；状态落在 `.collie/follow.json`。
+   时钟、睡眠、起子进程（一个 `(参数, cwd) → 退出码与输出` 的函数）、发通知都由参数注入，缺省实现才用真实的。`--dry-run` 只打印 `action: …`，不 pull、不起子进程、不写文件、不发通知
+2. 「跑一轮」的八步（SPEC 14.4）与边界（SPEC 14.5）：固定版本目录按 sha 一个一个建、不在原地切换；`preflight --smoke` 没过不记为已处理；汇报只提交 `docs/ops/queue-<q_run_id>.md` 这一个文件、提交信息 `ops: report queue <q_run_id>`；
+   `report` 失败时写最小汇报；推送失败下一圈先重试。`collie follow` 接线进 `cli.ts`；`.collie/follow.json` 加进 `.gitignore` 与 `collie init` 的忽略清单
+3. 新建 `test/follow.test.ts`，用 `Sandbox`，起子进程一律用注入的假函数（可以在进程内调用 `box.cli`），时钟与睡眠用注入的，不用真实定时器：`开跑` → 依次起 `preflight`、`run`、`report`，仓库里出现汇报文件与 `ops:` 提交且已推送、
+   发了「队列结束」通知、`handledBase` 已记；同一个 `基准提交` 第二圈不再跑；preflight 没过 → 只通知一次、下一圈重试；`等所有者裁定` 只通知一次；`收工` 通知后退出；格式错只通知一次；
+   `基准提交` 不是 `HEAD` 的祖先不跑；`--dry-run` 什么副作用都没有；`report` 失败时有最小汇报。`test/invariants.test.ts` 加「`src/follow.ts` 存在且用了 `handoff.ts`」
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| follow 专项测试通过 | `npm test -- test/follow.test.ts` | exit 0 |
+| 专项测试不少于 9 个 | `grep -cE "^\s+it\(" test/follow.test.ts \| grep -qE "^(9\|[1-9][0-9])$"` | exit 0 |
+| 专项测试用 Sandbox | `grep -qE "Sandbox\.create" test/follow.test.ts` | exit 0 |
+| 专项测试不用真实定时器 | `test -f test/follow.test.ts && ! grep -qE "setInterval\|setTimeout\(" test/follow.test.ts` | exit 0 |
+| 命令已接线且有 dry-run | `npx tsx src/cli.ts follow --help 2>&1 \| grep -qE "dry-run"` | exit 0 |
+| 汇报用 ops 前缀提交（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/follow.ts \| grep -qE "ops: report queue"` | exit 0 |
+| 状态文件不进仓库 | `grep -qE "follow\.json" .gitignore` | exit 0 |
+| 不变量同步 | `grep -qE "follow\.ts" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径
+- 为了让测试过而删除或跳过任何测试
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner、真实的 `npx` 子进程或真实网络请求；自己在工作区里运行不带 `--dry-run` 的 `collie follow`（它会按 next.md 再起一个队列）
+- 让 `follow` 写 `docs/ops/queue-*.md` 之外的仓库文件、改 backlog、改结论；改动 `run.ts`、`gate.ts`、`arbiter.ts`；新增依赖
