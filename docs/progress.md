@@ -1262,4 +1262,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b08 · r-20261116162606 · PASS
+
+- 时间：2026-11-16T16:39:58.870Z
+- 裁定：规则 10，All 10 acceptance commands pass. All structural and behavioral requirements from items 1-3 verified in source and tests. Protected file change (docs/progress.md +22 lines) is from R2 operational commit 097fbda, not worker. No new dependencies, no scope creep, no forbidden paths modified. Previous FIX gaps (Prettier format, defaultSpawn tautological test) both resolved. CI conclusion unknown — CI 以 R2 取证为准。
+- 提交：`7bf4a6d` `572836a` `daec258` `0dfe9d4`
+- 验收命令：10/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1119 passed, 0 failed
+  - `npm test -- test/follow.test.ts` → exit 0，30 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/follow.test.ts | grep -qE "^(2[8-9]|[3-9][0-9])$"` → exit 0，exit 0
+  - `d=$(mktemp -d) && TMPDIR=$d npm test -- test/follow.test.ts && ! ls -d "$d"/collie-r2-* >/dev/null 2>&1` → exit 0，30 passed, 0 failed
+  - `grep -vE "^\s*(//|\*|/\*)" src/follow.ts | grep -qE "rebase" && grep -qE "rebase" test/follow.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/follow.ts | grep -qE "pendingReport" && grep -qE "pendingReport" test/follow.test.ts` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/follow.ts | grep -qE "pendingPush"` → exit 0，exit 0
+  - `grep -qE "pendingPush" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43908287156
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
