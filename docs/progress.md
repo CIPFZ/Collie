@@ -1127,4 +1127,27 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b03 · r-20261116081338 · PASS
+
+- 时间：2026-11-16T08:36:25.512Z
+- 裁定：规则 10，All 11 acceptance commands pass. notify module correctly injects fetch, scrubs addresses, and handles all code paths. handoff module is pure (only imports node:crypto), implements parseNext and decide per SPEC 14.3 decision table. Tests are comprehensive (7 notify + 21 handoff). Two invariants added. No protected files modified, no deps added. CI以R2取证为准。
+- 提交：`f5ad8e1`
+- 验收命令：11/11 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1048 passed, 0 failed
+  - `npm test -- test/notify.test.ts test/handoff.test.ts` → exit 0，28 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/handoff.test.ts | grep -qE "^[1-9][0-9]$"` → exit 0，exit 0
+  - `grep -cE "^\s+it\(" test/notify.test.ts | grep -qE "^([5-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `test -f src/handoff.ts && ! grep -vE "^\s*(//|\*|/\*)" src/handoff.ts | grep -qE "node:fs|node:child_process|setTimeout|setInterval|Date\.now"` → exit 0，exit 0
+  - `grep -qE "not\.toContain" test/notify.test.ts` → exit 0，exit 0
+  - `HOME=$(mktemp -d) npx tsx src/cli.ts notify "acceptance" 2>&1 | grep -qE "skipped"` → exit 0，exit 0
+  - `grep -qE "webhook_file" src/schema/index.ts` → exit 0，exit 0
+  - `grep -qE "handoff" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43831463655
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
