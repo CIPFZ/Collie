@@ -1196,4 +1196,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b06 · r-20261116104902 · PASS
+
+- 时间：2026-11-16T11:26:27.635Z
+- 裁定：规则 10，All 10 acceptance commands pass. run.ts changes limited to exactly the two max_turns additions. view.ts correctly implements start time (first queue event), wallclock, totals row, turns/max formatting with 到上限, tool.denied count, batch.status entries, CI polls= and run_url. All four test files have new cases and pass. Report tests use Sandbox for start/wallclock/totals assertions. Invariants updated. No protected files, no deps, no forbidden file access. CI 以 R2 取证为准。
+- 提交：`cb01b5d`
+- 验收命令：10/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1085 passed, 0 failed
+  - `npm test -- test/report.test.ts test/why.test.ts test/timeline.test.ts test/journal-fields.test.ts` → exit 0，69 passed, 0 failed
+  - `! grep -A3 -E "run_id: 'q-" test/report.test.ts | grep -qE "run\.started"` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "max_turns" && grep -qE "max_turns" test/journal-fields.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/view.ts | grep -qE "到上限" && grep -qE "到上限" test/why.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/view.ts | grep -qE "polls=" && grep -qE "polls=" test/why.test.ts` → exit 0，exit 0
+  - `grep -qE "queue_start" test/timeline.test.ts && grep -qE "Sandbox\.create" test/timeline.test.ts` → exit 0，exit 0
+  - `grep -qE "max_turns" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43856713476
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
