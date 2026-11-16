@@ -413,4 +413,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/schema/index.ts'), 'utf8');
     expect(content).toContain('audit.result');
   });
+
+  it('src/view.ts contains projectReport (v045-b02)', () => {
+    const content = readFileSync(join(ROOT, 'src/view.ts'), 'utf8');
+    expect(content).toContain('projectReport');
+  });
 });
