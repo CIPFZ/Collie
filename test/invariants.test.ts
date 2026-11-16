@@ -90,6 +90,14 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(run).toContain('ci.resolved');
   });
 
+  it('worker.started and reviewer.started record max_turns in run.ts (SPEC 14.10)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    // Both agent start events carry the configured turn limit.
+    expect(content).toContain("rec.record('worker.started'");
+    expect(content).toContain("rec.record('reviewer.started'");
+    expect(content).toContain('max_turns');
+  });
+
   it('RULE_DEFAULT = 10 in arbiter.ts (v02-b05-fix)', () => {
     const content = readFileSync(join(ROOT, 'src/arbiter.ts'), 'utf8');
     expect(content).toMatch(/RULE_DEFAULT = 10/);

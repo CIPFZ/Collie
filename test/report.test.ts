@@ -244,11 +244,15 @@ describe('collie report: two batches consecutive PASS', { timeout: 60_000 }, () 
   });
 
   it('实际经过 table has two data rows matching both batches', () => {
-    // Two data rows (not counting header + separator).
+    // Two data rows (not counting header + separator + totals).
     const tableLines = reportOutput
       .split('\n')
       .filter(
-        (line) => line.startsWith('| ') && !line.startsWith('|---') && !line.includes('顺序'),
+        (line) =>
+          line.startsWith('| ') &&
+          !line.startsWith('|---') &&
+          !line.includes('顺序') &&
+          !line.includes('合计'),
       );
     expect(tableLines).toHaveLength(2);
     expect(tableLines[0]).toContain('v99-a01');
@@ -285,13 +289,55 @@ describe('collie report: two batches consecutive PASS', { timeout: 60_000 }, () 
     const tableLines = reportOutput
       .split('\n')
       .filter(
-        (line) => line.startsWith('| ') && !line.startsWith('|---') && !line.includes('顺序'),
+        (line) =>
+          line.startsWith('| ') &&
+          !line.startsWith('|---') &&
+          !line.includes('顺序') &&
+          !line.includes('合计'),
       );
     for (const line of tableLines) {
       expect(line).toContain('$5.00');
       expect(line).toContain('$1.00');
       expect(line).toContain('$6.00');
     }
+  });
+
+  it('实际经过 table has a totals row summing the two batches', () => {
+    const totalsLine = reportOutput.split('\n').find((line) => line.startsWith('| 合计')) ?? '';
+    expect(totalsLine).not.toBe('');
+    // Two batches: worker 5.00×2, reviewer 1.00×2, combined 6.00×2.
+    expect(totalsLine).toContain('$10.00');
+    expect(totalsLine).toContain('$2.00');
+    expect(totalsLine).toContain('$12.00');
+  });
+
+  it('开始 / 墙钟 come from the queue journal itself, not a hand-written run.started', () => {
+    // The sandbox clock ticks one second per run: the queue journal's first
+    // event (queue.preflight) and queue.finished bound the wallclock.
+    const started = /开始：(\S+)/.exec(reportOutput)?.[1] ?? '';
+    const finished = /结束：(\S+)/.exec(reportOutput)?.[1] ?? '';
+    expect(started).not.toBe('—');
+    expect(finished).not.toBe('—');
+    expect(reportOutput).not.toContain('墙钟：—');
+    // The queue journal's first event is queue.preflight — never run.started.
+    const queueJournal = box
+      .events()
+      .filter((e) => e.run_id.startsWith('q-'))
+      .map((e) => e.event);
+    expect(queueJournal[0]).toBe('queue.preflight');
+    expect(queueJournal).not.toContain('run.started');
+    // The report's start is the first journal event's timestamp.
+    const first = box.events().find((e) => e.run_id.startsWith('q-'));
+    expect(started).toBe(first?.ts);
+  });
+
+  it('放行与打扰 lists tool.denied and each batch.status transition', () => {
+    const section = reportOutput.split('## 放行与打扰')[1]?.split('## 每个批次')[0] ?? '';
+    expect(section).toMatch(/tool\.denied：\d+/);
+    // Every batch that started got a status transition recorded.
+    expect(section).toContain('batch.status: v99-a01');
+    expect(section).toContain('batch.status: v99-a02');
+    expect(section).toContain('→');
   });
 });
 
@@ -354,7 +400,11 @@ describe('collie report: FIX then PASS in same queue', { timeout: 60_000 }, () =
     const tableLines = reportOutput
       .split('\n')
       .filter(
-        (line) => line.startsWith('| ') && !line.startsWith('|---') && !line.includes('顺序'),
+        (line) =>
+          line.startsWith('| ') &&
+          !line.startsWith('|---') &&
+          !line.includes('顺序') &&
+          !line.includes('合计'),
       );
     expect(tableLines).toHaveLength(2);
     // First row: FIX.
@@ -379,7 +429,11 @@ describe('collie report: FIX then PASS in same queue', { timeout: 60_000 }, () =
     const tableLines = reportOutput
       .split('\n')
       .filter(
-        (line) => line.startsWith('| ') && !line.startsWith('|---') && !line.includes('顺序'),
+        (line) =>
+          line.startsWith('| ') &&
+          !line.startsWith('|---') &&
+          !line.includes('顺序') &&
+          !line.includes('合计'),
       );
     // Both rows should have worker $5.00 and total $6.00 (or $5.50 for the FIX with $0.50 reviewer).
     // FIX row: worker $5.00 + reviewer $0.50 = $5.50.
@@ -454,12 +508,14 @@ describe('collie report: edge cases', { timeout: 60_000 }, () => {
     // events (no queue.preflight).
     const { projectReport } = await import('../src/view.js');
 
-    // Minimal events: just run.started and queue.finished.
+    // Minimal events: just queue.batch_started and queue.finished
+    // (no queue.preflight to simulate an old journal).
     const fakeEvents = [
       {
         ts: '2026-10-19T12:00:00.000Z',
         run_id: 'q-20261019120000',
-        event: 'run.started' as const,
+        event: 'queue.batch_started' as const,
+        batch_id: 'v01-b01',
       },
       {
         ts: '2026-10-19T12:10:00.000Z',

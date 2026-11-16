@@ -1360,7 +1360,10 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     }
 
     // E3/E4: the worker, bounded by the wall clock (SPEC 3.3).
-    rec.record('worker.started', { model: config.agent.worker.model });
+    rec.record('worker.started', {
+      model: config.agent.worker.model,
+      max_turns: config.agent.worker.max_turns,
+    });
 
     // Liveness detection and signal ladder state (SPEC 11.5, 11.6).
     let workerHandle: RunHandle | undefined;
@@ -1754,6 +1757,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       rec.record('reviewer.started', {
         head_sha: report.head_sha,
         model: config.agent.reviewer.model,
+        max_turns: config.agent.reviewer.max_turns,
       });
       // SPEC 12.1: reviewer event stream falls to reviewer.stream.ndjson with redaction.
       const reviewerOnEvent = (event: unknown): void => {

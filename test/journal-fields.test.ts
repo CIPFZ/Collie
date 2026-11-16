@@ -59,6 +59,13 @@ describe('journal-fields: runner provides usage data (SPEC 13.1)', () => {
     expect((e?.model as string).length).toBeGreaterThan(0);
   });
 
+  it('worker.started carries max_turns from config (SPEC 14.10)', () => {
+    const e = events.find((ev) => ev.event === 'worker.started');
+    expect(e).toBeDefined();
+    expect(e?.max_turns).toBeTypeOf('number');
+    expect(e?.max_turns as number).toBeGreaterThan(0);
+  });
+
   it('worker.finished carries num_turns, cost_usd, duration_ms, and usage', () => {
     const e = events.find((ev) => ev.event === 'worker.finished');
     expect(e).toBeDefined();
@@ -79,6 +86,13 @@ describe('journal-fields: runner provides usage data (SPEC 13.1)', () => {
     expect(e).toBeDefined();
     expect(e?.model).toBeTypeOf('string');
     expect((e?.model as string).length).toBeGreaterThan(0);
+  });
+
+  it('reviewer.started carries max_turns from config (SPEC 14.10)', () => {
+    const e = events.find((ev) => ev.event === 'reviewer.started');
+    expect(e).toBeDefined();
+    expect(e?.max_turns).toBeTypeOf('number');
+    expect(e?.max_turns as number).toBeGreaterThan(0);
   });
 
   it('reviewer.finished exists with exit_code and running-level fields', () => {

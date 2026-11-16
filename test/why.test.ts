@@ -884,6 +884,7 @@ describe('why — hand-written fixtures (SPEC 13.4)', () => {
         event: 'worker.started',
         batch_id: 'v99-b01',
         model: 'claude-sonnet-4-20250514',
+        max_turns: 200,
       }),
       makeEvent({
         run_id: RUN,
@@ -907,6 +908,7 @@ describe('why — hand-written fixtures (SPEC 13.4)', () => {
         batch_id: 'v99-b01',
         head_sha: 'abc1234567890abc1234567890abc1234567890a',
         model: 'claude-opus-4-20250514',
+        max_turns: 60,
       }),
       makeEvent({
         run_id: RUN,
@@ -933,11 +935,23 @@ describe('why — hand-written fixtures (SPEC 13.4)', () => {
       }),
       makeEvent({
         run_id: RUN,
+        event: 'ci.resolved',
+        batch_id: 'v99-b01',
+        head_sha: 'abc1234567890abc1234567890abc1234567890a',
+        conclusion: 'success',
+        branch_matched: true,
+        run_url: 'https://github.com/example/test/actions/runs/42',
+        waited_secs: 30,
+        polls: 3,
+      }),
+      makeEvent({
+        run_id: RUN,
         event: 'ci.verdict_commit',
         batch_id: 'v99-b01',
         sha: 'deadbeef1234',
         conclusion: 'success',
         when: 'startup',
+        run_url: 'https://github.com/example/test/actions/runs/99',
       }),
       makeEvent({
         run_id: RUN,
@@ -979,6 +993,17 @@ describe('why — hand-written fixtures (SPEC 13.4)', () => {
     expect(a.verdictCommitCi[0]?.sha).toBe('deadbeef1234');
     expect(a.verdictCommitCi[0]?.conclusion).toBe('success');
     expect(a.verdictCommitCi[0]?.when).toBe('startup');
+    // SPEC 14.10: run_url on ci.verdict_commit.
+    expect(a.verdictCommitCi[0]?.runUrl).toBe('https://github.com/example/test/actions/runs/99');
+
+    // SPEC 14.10: ci.resolved.polls and run_url.
+    expect(a.ciResolved).not.toBeNull();
+    expect(a.ciResolved?.polls).toBe(3);
+    expect(a.ciResolved?.runUrl).toBe('https://github.com/example/test/actions/runs/42');
+
+    // SPEC 14.10: worker/reviewer max_turns.
+    expect(a.worker?.maxTurns).toBe(200);
+    expect(a.reviewer?.maxTurns).toBe(60);
 
     // Cost breakdown (SPEC 13.23).
     expect(a.cost.worker).toBe(3.5);
@@ -993,6 +1018,14 @@ describe('why — hand-written fixtures (SPEC 13.4)', () => {
     expect(text).toContain('ci.verdict_commit');
     expect(text).toContain('head_sha: abc1234567890abc1234567890abc1234567890a');
     expect(text).toContain('cost: worker=$3.50 reviewer=$1.20 total=$4.70');
+    // SPEC 14.10: turns/<max> formatting.
+    expect(text).toContain('turns=12/200');
+    expect(text).toContain('turns=5/60');
+    // SPEC 14.10: polls= and run_url in ci: line.
+    expect(text).toContain('polls=3');
+    expect(text).toContain('run_url=https://github.com/example/test/actions/runs/42');
+    // SPEC 14.10: run_url on ci.verdict_commit line.
+    expect(text).toContain('run_url=https://github.com/example/test/actions/runs/99');
 
     // --json fields.
     const json = JSON.parse(JSON.stringify(proj)) as {
@@ -1017,6 +1050,110 @@ describe('why — hand-written fixtures (SPEC 13.4)', () => {
     expect(json.attempts[0]?.cost.worker).toBe(3.5);
     expect(json.attempts[0]?.cost.reviewer).toBe(1.2);
     expect(json.attempts[0]?.cost.total).toBeCloseTo(4.7);
+  });
+
+  it('turns equal to max_turns gets （到上限） (SPEC 14.10)', () => {
+    const RUN = 'r-20261110-233000';
+    const events: Event[] = [
+      makeEvent({ run_id: RUN, event: 'run.started', batch_id: 'v99-b01' }),
+      makeEvent({
+        run_id: RUN,
+        event: 'worker.started',
+        batch_id: 'v99-b01',
+        model: 'claude-sonnet-4-20250514',
+        max_turns: 200,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'worker.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T23:35:00Z',
+        exit_code: 0,
+        num_turns: 200,
+        cost_usd: 3.5,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'reviewer.started',
+        batch_id: 'v99-b01',
+        model: 'claude-opus-4-20250514',
+        max_turns: 60,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'reviewer.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T23:36:00Z',
+        exit_code: 0,
+        num_turns: 60,
+        cost_usd: 1.2,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'reviewer.verdict',
+        batch_id: 'v99-b01',
+        verdict: 'PASS',
+        gaps: [],
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'run.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T23:37:00Z',
+        verdict: 'PASS',
+        exit_code: 0,
+        rule: 10,
+        reason: 'ok',
+      }),
+    ];
+    writeJournal(root, RUN, events);
+    const runs = loadRuns(root);
+    const proj = projectWhy(runs, 'v99-b01');
+    expect(proj).not.toBeNull();
+    const text = formatWhy(proj!); // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(text).toContain('turns=200/200（到上限）');
+    expect(text).toContain('turns=60/60（到上限）');
+  });
+
+  it('old journal without max_turns shows turns only (SPEC 14.10)', () => {
+    const RUN = 'r-20261110-234000';
+    const events: Event[] = [
+      makeEvent({ run_id: RUN, event: 'run.started', batch_id: 'v99-b01' }),
+      makeEvent({
+        run_id: RUN,
+        event: 'worker.started',
+        batch_id: 'v99-b01',
+        model: 'claude-sonnet-4-20250514',
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'worker.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T23:45:00Z',
+        exit_code: 0,
+        num_turns: 12,
+        cost_usd: 3.5,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'run.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-10T23:47:00Z',
+        verdict: 'PASS',
+        exit_code: 0,
+        rule: 10,
+        reason: 'ok',
+      }),
+    ];
+    writeJournal(root, RUN, events);
+    const runs = loadRuns(root);
+    const proj = projectWhy(runs, 'v99-b01');
+    expect(proj).not.toBeNull();
+    const a = proj!.attempts[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(a.worker?.maxTurns).toBeNull();
+    const text = formatWhy(proj!); // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(text).toContain('turns=12 ');
+    expect(text).not.toContain('到上限');
   });
 });
 

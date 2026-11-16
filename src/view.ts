@@ -475,7 +475,7 @@ export interface VersionSummary {
  *   - batch_start: first time a batch's run.started is seen
  *   - run_end: each run.finished (verdict, attempt, duration)
  *   - batch_status: batch.status change
- *   - queue_start: queue run run.started
+ *   - queue_start: first event of the queue journal (SPEC 14.10)
  *   - queue_paused: queue.paused
  *   - queue_end: queue.finished
  */
@@ -487,7 +487,7 @@ export function projectTimeline(runDataList: readonly RunData[]): TimelineNode[]
     if (rd.status !== 'ok') continue;
     const isQueue = rd.runId.startsWith('q-');
 
-    for (const e of rd.events) {
+    for (const [eventIndex, e] of rd.events.entries()) {
       // Batch first start: the first run.started we see for a given batch_id.
       if (e.event === 'run.started' && !isQueue) {
         const bid = asString(e.batch_id);
@@ -541,13 +541,13 @@ export function projectTimeline(runDataList: readonly RunData[]): TimelineNode[]
         });
       }
 
-      // Queue run start.
-      if (e.event === 'run.started' && isQueue) {
+      // Queue run start: SPEC 14.10: queue_start = first event in the queue journal.
+      if (isQueue && eventIndex === 0) {
         nodes.push({
           ts: e.ts,
           kind: 'queue_start',
           batchId: null,
-          runId: e.run_id,
+          runId: rd.events[0]?.run_id ?? e.run_id,
           detail: {},
         });
       }
@@ -831,6 +831,7 @@ export interface WhyAttempt {
     exitCode: number | null;
     stopReason: string | null;
     turns: number | null;
+    maxTurns: number | null;
     costUsd: number | null;
     /** SPEC 13.23: worker.started.model. */
     model: string | null;
@@ -859,6 +860,8 @@ export interface WhyAttempt {
     model: string | null;
     /** SPEC 13.23: reviewer.finished.num_turns. */
     turns: number | null;
+    /** SPEC 14.10: reviewer.started.max_turns. */
+    maxTurns: number | null;
     /** SPEC 13.23: reviewer.finished.cost_usd. */
     costUsd: number | null;
     /** SPEC 13.23: reviewer.finished.duration_ms. */
@@ -871,6 +874,8 @@ export interface WhyAttempt {
     branchMatched: boolean | null;
     waitedSecs: number | null;
     runUrl: string | null;
+    /** SPEC 14.10: ci.resolved.polls. */
+    polls: number | null;
   } | null;
   ciWaitTimeout: { waitedSecs: number | null; lastState: string | null } | null;
 
@@ -897,7 +902,7 @@ export interface WhyAttempt {
   headSha: string | null;
 
   /** SPEC 13.23: ci.verdict_commit events for this run. */
-  verdictCommitCi: { sha: string; conclusion: string; when: string }[];
+  verdictCommitCi: { sha: string; conclusion: string; when: string; runUrl: string | null }[];
 
   /** SPEC 13.23: cost breakdown per attempt. */
   cost: { worker: number | null; reviewer: number | null; total: number | null };
@@ -963,6 +968,11 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
   // SPEC 13.23: worker model from worker.started.
   const workerModel = workerStarted !== undefined ? asString(workerStarted.model) : null;
 
+  // SPEC 14.10: max_turns from worker.started and reviewer.started.
+  const workerMaxTurns = workerStarted !== undefined ? asNumber(workerStarted.max_turns) : null;
+  const reviewerMaxTurns =
+    reviewerStarted !== undefined ? asNumber(reviewerStarted.max_turns) : null;
+
   // SPEC 13.23: worker token breakdown from usage in worker.finished.
   let workerTokensIn: number | null = null;
   let workerTokensOut: number | null = null;
@@ -991,6 +1001,7 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
           exitCode: asNumber(workerFinished.exit_code),
           stopReason: asString(workerFinished.stop_reason),
           turns: asNumber(workerFinished.num_turns),
+          maxTurns: workerMaxTurns,
           costUsd: asNumber(workerFinished.cost_usd),
           model: workerModel,
           durationMs: asNumber(workerFinished.duration_ms),
@@ -1034,6 +1045,8 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
           model: reviewerStarted !== undefined ? asString(reviewerStarted.model) : null,
           // SPEC 13.23: reviewer.finished fields.
           turns: reviewerFinished !== undefined ? asNumber(reviewerFinished.num_turns) : null,
+          // SPEC 14.10: reviewer.started.max_turns.
+          maxTurns: reviewerMaxTurns,
           costUsd: reviewerFinished !== undefined ? asNumber(reviewerFinished.cost_usd) : null,
           durationMs:
             reviewerFinished !== undefined ? asNumber(reviewerFinished.duration_ms) : null,
@@ -1052,6 +1065,7 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
               : null,
           waitedSecs: asNumber(ciResolvedEvent.waited_secs),
           runUrl: asString(ciResolvedEvent.run_url),
+          polls: asNumber(ciResolvedEvent.polls),
         }
       : null;
 
@@ -1113,6 +1127,7 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
       sha: asString(e.sha) ?? '—',
       conclusion: asString(e.conclusion) ?? '—',
       when: asString(e.when) ?? 'startup',
+      runUrl: asString(e.run_url),
     }));
 
   // SPEC 13.23: cost breakdown = worker + reviewer; both missing = null.
@@ -1275,6 +1290,14 @@ function conclusionLine(a: WhyAttempt): string {
   return `结论：${a.verdict}，${ruleDisplay}${reasonPart}`;
 }
 
+/** SPEC 14.10: formats `<轮数>/<上限>`, adding `（到上限）` when turns equals the max. */
+function formatTurns(turns: number | null, maxTurns: number | null): string {
+  if (turns === null) return '—';
+  if (maxTurns === null) return String(turns);
+  if (turns === maxTurns) return `${String(turns)}/${String(maxTurns)}（到上限）`;
+  return `${String(turns)}/${String(maxTurns)}`;
+}
+
 /** Formats why as human-readable text (SPEC 13.4). */
 export function formatWhy(proj: WhyProjection): string {
   const lines: string[] = [];
@@ -1288,7 +1311,7 @@ export function formatWhy(proj: WhyProjection): string {
       const parts = [
         `exit_code=${dash(w.exitCode)}`,
         `stop_reason=${dash(w.stopReason)}`,
-        `turns=${dash(w.turns)}`,
+        `turns=${formatTurns(w.turns, w.maxTurns)}`,
         `cost=${w.costUsd !== null ? `$${w.costUsd.toFixed(COST_DECIMALS)}` : '—'}`,
         `model=${dash(w.model)}`,
         `duration=${formatDuration(w.durationMs)}`,
@@ -1336,7 +1359,7 @@ export function formatWhy(proj: WhyProjection): string {
       const gapStr = a.reviewer.gaps.length > 0 ? `, gaps: ${JSON.stringify(a.reviewer.gaps)}` : '';
       const revParts = [
         `model=${dash(a.reviewer.model)}`,
-        `turns=${dash(a.reviewer.turns)}`,
+        `turns=${formatTurns(a.reviewer.turns, a.reviewer.maxTurns)}`,
         `cost=${a.reviewer.costUsd !== null ? `$${a.reviewer.costUsd.toFixed(COST_DECIMALS)}` : '—'}`,
         `duration=${formatDuration(a.reviewer.durationMs)}`,
       ];
@@ -1350,6 +1373,9 @@ export function formatWhy(proj: WhyProjection): string {
       const ci = a.ciResolved;
       const parts = [dash(ci.conclusion), `branch_matched=${dash(ci.branchMatched)}`];
       if (ci.waitedSecs !== null) parts.push(`waited ${String(ci.waitedSecs)}s`);
+      // SPEC 14.10: polls=<n> and run_url.
+      if (ci.polls !== null) parts.push(`polls=${String(ci.polls)}`);
+      if (ci.runUrl !== null) parts.push(`run_url=${ci.runUrl}`);
       lines.push(`ci: ${parts.join(' ')}`);
     } else if (a.ciWaitTimeout !== null) {
       lines.push(
@@ -1364,7 +1390,9 @@ export function formatWhy(proj: WhyProjection): string {
 
     // SPEC 13.23: ci.verdict_commit entries.
     for (const vc of a.verdictCommitCi) {
-      lines.push(`ci.verdict_commit: ${vc.sha} ${vc.conclusion} when=${vc.when}`);
+      // SPEC 14.10: append run_url when present.
+      const urlPart = vc.runUrl !== null ? ` run_url=${vc.runUrl}` : '';
+      lines.push(`ci.verdict_commit: ${vc.sha} ${vc.conclusion} when=${vc.when}${urlPart}`);
     }
 
     // 7. Downgraded / escalated.
@@ -1467,8 +1495,17 @@ export interface ReportBatchRow {
   reviewerCost: number | null;
   totalCost: number | null;
   workerTurns: number | null;
+  /** SPEC 14.10: worker.started.max_turns, null when the journal predates the field. */
+  workerMaxTurns: number | null;
   headSha: string | null;
   auditOutcome: string | null;
+}
+
+/** A batch.status entry in the 放行与打扰 section (SPEC 14.10). */
+export interface ReportBatchStatus {
+  batchId: string | null;
+  from: string | null;
+  to: string | null;
 }
 
 /** A preflight check item (SPEC 14.2 §2). */
@@ -1508,6 +1545,10 @@ export interface ReportProjection {
   pausedEntries: ReportPaused[];
   blockCount: number;
   retriedEntries: ReportRetried[];
+  /** SPEC 14.10: total tool.denied events across this queue's runs. */
+  toolDeniedCount: number;
+  /** SPEC 14.10: every batch.status event, with its from → to transition. */
+  batchStatusEntries: ReportBatchStatus[];
   disturbCount: number;
 
   /** Batch IDs that had runs in this queue (for §5). */
@@ -1523,10 +1564,11 @@ export function projectReport(
   queueEvents: readonly Event[],
   queueRunId: string,
 ): ReportProjection {
-  const started = findEvent(queueEvents, 'run.started');
+  // SPEC 14.10: 开始 = 队列 journal 第一条事件的时间 (queue.preflight or queue.batch_started).
+  const firstEvent = queueEvents[0];
   const finished = findLastEvent(queueEvents, 'queue.finished');
 
-  const startedTs = started?.ts ?? null;
+  const startedTs = firstEvent?.ts ?? null;
   const finishedTs = finished?.ts ?? null;
   let wallclockMs: number | null = null;
   if (startedTs !== null && finishedTs !== null) {
@@ -1558,6 +1600,11 @@ export function projectReport(
   const batchStartedEvents = queueEvents.filter((e) => e.event === 'queue.batch_started');
   const batchRows: ReportBatchRow[] = [];
   const batchIds: string[] = [];
+  // SPEC 14.10: tool.denied totals across this queue's runs.
+  let toolDeniedCount = 0;
+  // SPEC 14.10: batch.status events live in the batch journals (normal PASS/BLOCK)
+  // and, for queue-level escalations, in the queue journal too. Collect both.
+  const batchStatusEntries: ReportBatchStatus[] = [];
 
   for (let i = 0; i < batchStartedEvents.length; i++) {
     const bs = batchStartedEvents[i];
@@ -1570,6 +1617,17 @@ export function projectReport(
     // Find the batch run's events in allRunData.
     const batchRunData = allRunData.find((rd) => rd.status === 'ok' && rd.runId === batchRunId);
     const batchEvents = batchRunData?.status === 'ok' ? batchRunData.events : [];
+    toolDeniedCount += batchEvents.filter((ev) => ev.event === 'tool.denied').length;
+    // Collect batch.status from batch run journal.
+    for (const ev of batchEvents) {
+      if (ev.event === 'batch.status') {
+        batchStatusEntries.push({
+          batchId: asString(ev.batch_id),
+          from: asString(ev.from),
+          to: asString(ev.to),
+        });
+      }
+    }
 
     // attempt via computeAttempt
     const attempt = computeAttempt(allRunData, batchRunId, batchId);
@@ -1596,8 +1654,10 @@ export function projectReport(
       totalCost = (workerCost ?? 0) + (reviewerCost ?? 0);
     }
 
-    // worker turns
+    // worker turns (and SPEC 14.10: the configured upper bound, absent in old journals)
     const workerTurns = wf !== undefined ? asNumber(wf.num_turns) : null;
+    const workerStarted = findEvent(batchEvents, 'worker.started');
+    const workerMaxTurns = workerStarted !== undefined ? asNumber(workerStarted.max_turns) : null;
 
     // head_sha: from reviewer.started or ci.resolved (SPEC 13.23)
     const reviewerStarted = findEvent(batchEvents, 'reviewer.started');
@@ -1626,15 +1686,17 @@ export function projectReport(
       reviewerCost,
       totalCost,
       workerTurns,
+      workerMaxTurns,
       headSha,
       auditOutcome,
     });
   }
 
-  // §4: gate_passed, paused, BLOCK, retried
+  // §4: gate_passed, paused, BLOCK, retried, batch.status
   let gatePassedCount = 0;
   const pausedEntries: ReportPaused[] = [];
   const retriedEntries: ReportRetried[] = [];
+  toolDeniedCount += queueEvents.filter((e) => e.event === 'tool.denied').length;
 
   for (const e of queueEvents) {
     if ((e.event as string) === 'queue.gate_passed') {
@@ -1651,6 +1713,13 @@ export function projectReport(
         batchId: asString(e.batch_id),
         rule: asNumber(e.rule),
         cause: asString(e.cause),
+      });
+    }
+    if (e.event === 'batch.status') {
+      batchStatusEntries.push({
+        batchId: asString(e.batch_id),
+        from: asString(e.from),
+        to: asString(e.to),
       });
     }
   }
@@ -1673,6 +1742,8 @@ export function projectReport(
     pausedEntries,
     blockCount,
     retriedEntries,
+    toolDeniedCount,
+    batchStatusEntries,
     disturbCount,
     batchIds,
   };
@@ -1725,11 +1796,30 @@ export function formatReport(
   for (const r of proj.batchRows) {
     const costFmt = (v: number | null) => (v !== null ? `$${v.toFixed(COST_DECIMALS)}` : '—');
     lines.push(
-      `| ${String(r.seq)} | ${r.batchId} | ${r.runId} | ${String(r.attempt)} | ${dash(r.verdict)} | ${dash(r.rule)} | ${formatDuration(r.durationMs)} | ${costFmt(r.workerCost)} | ${costFmt(r.reviewerCost)} | ${costFmt(r.totalCost)} | ${dash(r.workerTurns)} | ${dash(r.headSha)} | ${dash(r.auditOutcome)} |`,
+      `| ${String(r.seq)} | ${r.batchId} | ${r.runId} | ${String(r.attempt)} | ${dash(r.verdict)} | ${dash(r.rule)} | ${formatDuration(r.durationMs)} | ${costFmt(r.workerCost)} | ${costFmt(r.reviewerCost)} | ${costFmt(r.totalCost)} | ${formatTurns(r.workerTurns, r.workerMaxTurns)} | ${dash(r.headSha)} | ${dash(r.auditOutcome)} |`,
     );
   }
   if (proj.batchRows.length === 0) {
     lines.push('| — | — | — | — | — | — | — | — | — | — | — | — | — |');
+  }
+  // SPEC 14.10: totals row (duration, worker cost, reviewer cost, combined cost).
+  {
+    const sum = (pick: (r: ReportBatchRow) => number | null): number | null => {
+      let total = 0;
+      let seen = false;
+      for (const r of proj.batchRows) {
+        const v = pick(r);
+        if (v !== null) {
+          total += v;
+          seen = true;
+        }
+      }
+      return seen ? total : null;
+    };
+    const costFmt = (v: number | null) => (v !== null ? `$${v.toFixed(COST_DECIMALS)}` : '—');
+    lines.push(
+      `| 合计 | | | | | | ${formatDuration(sum((r) => r.durationMs))} | ${costFmt(sum((r) => r.workerCost))} | ${costFmt(sum((r) => r.reviewerCost))} | ${costFmt(sum((r) => r.totalCost))} | | | |`,
+    );
   }
   lines.push('');
 
@@ -1744,6 +1834,11 @@ export function formatReport(
   for (const r of proj.retriedEntries) {
     const detail = r.rule !== null ? `rule=${String(r.rule)}` : `cause=${dash(r.cause)}`;
     lines.push(`batch.retried: ${dash(r.batchId)} ${detail}`);
+  }
+  // SPEC 14.10: tool.denied total and every batch.status transition.
+  lines.push(`tool.denied：${String(proj.toolDeniedCount)}`);
+  for (const s of proj.batchStatusEntries) {
+    lines.push(`batch.status: ${dash(s.batchId)} ${dash(s.from)} → ${dash(s.to)}`);
   }
   lines.push(`打扰：${String(proj.disturbCount)}`);
   lines.push('');
