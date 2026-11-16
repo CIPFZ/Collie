@@ -484,4 +484,18 @@ describe('structural invariants (SPEC 3.2)', () => {
     };
     expect(pkg.scripts).toHaveProperty('test:mutation');
   });
+
+  it('src/follow.ts does not contain pendingPush (v045-b08)', () => {
+    const lines = readFileSync(join(ROOT, 'src/follow.ts'), 'utf8').split('\n');
+    // SPEC 14.12: pendingPush removed, replaced by pendingReport.
+    // Only check non-comment code lines (铁律 26).
+    const codeLines = lines.filter(
+      (l) =>
+        !l.trimStart().startsWith('//') &&
+        !l.trimStart().startsWith('*') &&
+        !l.trimStart().startsWith('/*'),
+    );
+    const hasPendingPush = codeLines.some((l) => l.includes('pendingPush'));
+    expect(hasPendingPush, 'pendingPush should not appear in non-comment code').toBe(false);
+  });
 });
