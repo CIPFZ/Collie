@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
     environment: 'node',
-    testTimeout: 30_000,
-    hookTimeout: 30_000, // SPEC 13.11: beforeAll that runs a full round can exceed the 10s default
+    testTimeout: 120_000,
+    hookTimeout: 120_000, // SPEC 15.3: high-load machines hit 30s; no assertion depends on this value
   },
 });

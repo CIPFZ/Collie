@@ -13,6 +13,7 @@
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "test": "vitest run",
+    "test:mutation": "tsx scripts/mutation.ts",
     "collie": "tsx src/cli.ts"
   },
   "dependencies": {

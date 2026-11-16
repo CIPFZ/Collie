@@ -82,9 +82,9 @@ export default tseslint.config(
     },
   },
   {
-    // Tests assert SPEC default values verbatim, so they are not under
-    // the no-magic-numbers rule (SPEC 2.3).
-    files: ['test/**/*.ts', 'vitest.config.ts'],
+    // Tests and scripts assert/use SPEC default values verbatim, so they are
+    // not under the no-magic-numbers rule (SPEC 2.3).
+    files: ['test/**/*.ts', 'vitest.config.ts', 'scripts/**/*.ts'],
     rules: {
       '@typescript-eslint/no-magic-numbers': 'off',
       'no-restricted-syntax': 'off',

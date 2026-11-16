@@ -121,9 +121,11 @@ describe('structural invariants (SPEC 3.2)', () => {
   });
 
   it('only src/run.ts and src/evidence.ts access .token_file (v02-e-drill)', () => {
+    // SPEC 15.3: only check non-comment lines so that explanatory comments
+    // mentioning token_file do not cause false positives (铁律 26).
     let output: string;
     try {
-      output = execSync('grep -rlE "\\.token_file" src --include="*.ts"', {
+      output = execSync('grep -rnE "\\.token_file" src --include="*.ts"', {
         cwd: ROOT,
         encoding: 'utf8',
       }).trim();
@@ -131,12 +133,21 @@ describe('structural invariants (SPEC 3.2)', () => {
       // grep exit 1 = no matches: pass (nothing accesses token_file).
       return;
     }
-    const files = output.split('\n').filter(Boolean);
     const allowed = new Set(['src/run.ts', 'src/evidence.ts']);
-    const leaked = files.filter((f) => !allowed.has(f));
-    expect(leaked, `token_file accessed outside allowed files: ${leaked.join(', ')}`).toHaveLength(
-      0,
-    );
+    const leaked = output
+      .split('\n')
+      .filter(Boolean)
+      .filter((line) => {
+        const content = line.replace(/^[^:]+:\d+:/, '');
+        return !content.trimStart().startsWith('//');
+      })
+      .map((line) => line.replace(/:\d+:.*/, ''))
+      .filter((f) => !allowed.has(f));
+    const unique = [...new Set(leaked)];
+    expect(
+      unique,
+      `token_file accessed outside allowed files (non-comment): ${unique.join(', ')}`,
+    ).toHaveLength(0);
   });
 
   it('rescue_sha cross-run lookup and 请先核实 are in run.ts and worker.ts (v02-e-fix2)', () => {
@@ -465,5 +476,12 @@ describe('structural invariants (SPEC 3.2)', () => {
     );
     const hasExecFileSync = codeLines.some((l) => l.includes('execFileSync'));
     expect(hasExecFileSync, 'execFileSync should not appear in non-comment code').toBe(false);
+  });
+
+  it('package.json has test:mutation script (v045-b07)', () => {
+    const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+    expect(pkg.scripts).toHaveProperty('test:mutation');
   });
 });

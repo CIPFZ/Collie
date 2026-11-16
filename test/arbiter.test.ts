@@ -257,6 +257,32 @@ describe('arbiter: rule 6, test counts', () => {
     );
     expect(decision).toMatchObject({ final: 'FIX', rule: 10, downgraded: false });
   });
+
+  it('forces FIX when only the passed count differs (SPEC 15.2)', () => {
+    const decision = arbitrate(
+      input({
+        claims: { tests_passed: 47, tests_failed: 0 },
+        evidence: {
+          verify_results: [{ cmd: TEST_CMD, exit_code: 0, summary: '50 passed, 0 failed' }],
+        },
+      }),
+    );
+    expect(decision).toMatchObject({ final: 'FIX', rule: 6, downgraded: true });
+  });
+
+  it('forces FIX when only the failed count differs (SPEC 15.2)', () => {
+    // exit_code 0 so the third check in testsMatch (zero-failed-needs-exit0)
+    // does not independently catch the mismatch: only the failed-count half does.
+    const decision = arbitrate(
+      input({
+        claims: { tests_passed: 47, tests_failed: 0 },
+        evidence: {
+          verify_results: [{ cmd: TEST_CMD, exit_code: 0, summary: '47 passed, 2 failed' }],
+        },
+      }),
+    );
+    expect(decision).toMatchObject({ final: 'FIX', rule: 6, downgraded: true });
+  });
 });
 
 describe('arbiter: rule 7, CI claim', () => {
@@ -369,6 +395,29 @@ describe('arbiter: rule 9, evidence missing (SPEC 4.3 v02-b05)', () => {
       mismatches: [],
     });
     expect(decision.reason).toContain('ci_branch_matched=false');
+  });
+
+  it('downgrades PASS to FIX when only CI conclusion is not success (SPEC 15.2)', () => {
+    // Pushed, branch matched, but CI did not succeed — only the CI third fires.
+    const decision = arbitrate(
+      input({
+        claims: { pushed: true, ci_passed: false },
+        evidence: {
+          remote_has_head: true,
+          ci_conclusion: 'failure',
+          ci_branch_matched: true,
+        },
+      }),
+    );
+    expect(decision).toMatchObject({
+      final: 'FIX',
+      original: 'PASS',
+      rule: 9,
+      downgraded: true,
+    });
+    expect(decision.reason).toContain('ci_conclusion=failure');
+    expect(decision.reason).not.toContain('remote_has_head');
+    expect(decision.reason).not.toContain('ci_branch_matched');
   });
 
   it('does not change an original FIX verdict', () => {

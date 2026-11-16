@@ -152,6 +152,21 @@ describe('evidence: protected files and dependencies', () => {
     },
   );
 
+  it.each(['ROADMAP.md', 'ROLES.md', 'docs/progress.md'])(
+    'counts %s as protected (SPEC 15.2)',
+    async (path) => {
+      write(path, 'changed\n');
+      const head = await commitAll('tamper');
+      expect((await collect(head)).evidence.spec_diff_lines).toBe(1);
+    },
+  );
+
+  it('counts docs/decisions as protected (SPEC 15.2)', async () => {
+    write('docs/decisions/ADR-999.md', 'new decision\n');
+    const head = await commitAll('tamper');
+    expect((await collect(head)).evidence.spec_diff_lines).toBe(1);
+  });
+
   it('ignores ordinary source changes and the report envelope', async () => {
     write('src.ts', 'x\n');
     write('.collie/batches/v99/report.md', 'r\n');
