@@ -65,7 +65,7 @@
 | 45 | v04-b16 | report 里的 sha 解析不了改判为声称不符：FIX 并自动重跑 | v04-b13 | passed |
 | 46 | v04-b17 | why / timeline 补齐 journal 里已有的数据：reviewer 花费、模型、用时、token、head_sha、裁定提交 CI | v04-b16 | passed |
 | 47 | v045-b01 | 开跑前检查与 audit 并进队列：collie preflight、queue.preflight、audit 不符停表 | v04-b17 | passed |
-| 48 | v045-b02 | collie report：把一次队列运行写成 Markdown 汇报 | v045-b01 | pending |
+| 48 | v045-b02 | collie report：把一次队列运行写成 Markdown 汇报 | v045-b01 | passed |
 | 49 | v045-b03 | 通知与交接协议：notify 模块、next.md 的键值行、下一步动作的判定 | v045-b02 | pending |
 | 50 | v045-b04 | collie follow：常驻循环，按 next.md 开跑、交汇报、发通知 | v045-b03 | pending |
 
