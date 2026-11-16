@@ -1173,4 +1173,27 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b05 · r-20261116102240 · PASS
+
+- 时间：2026-11-16T10:48:57.434Z
+- 裁定：规则 10，All 11 acceptance commands pass (exit 0). 20 follow tests pass including multi-cycle behavioral tests for push-failure dedup (#11) and preflight-backoff (#12). No protected/prohibited files modified, no new dependencies. Commits on remote. CI 以 R2 取证为准。
+- 提交：`68038df`
+- 验收命令：11/11 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1076 passed, 0 failed
+  - `npm test -- test/follow.test.ts` → exit 0，20 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/follow.test.ts | grep -qE "^(1[6-9]|[2-9][0-9])$"` → exit 0，exit 0
+  - `d=$(mktemp -d) && TMPDIR=$d npm test -- test/follow.test.ts && ! ls -d "$d"/collie-r2-* >/dev/null 2>&1` → exit 0，20 passed, 0 failed
+  - `grep -vE "^\s*(//|\*|/\*)" src/follow.ts | grep -qE "notBefore" && grep -qE "notBefore" test/follow.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/follow.ts | grep -qE "\(base " && grep -vE "^\s*(//|\*|/\*)" src/follow.ts | grep -qE "follow 记录"` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/follow.ts | grep -qE "execFileSync"` → exit 0，exit 0
+  - `grep -qE "webhook_file" test/support/sandbox.ts` → exit 0，exit 0
+  - `grep -qE "execFileSync" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/43850783792
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
