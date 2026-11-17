@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-run_id: r-20261117141835
+run_id: r-20261117143927
 batch_id: v046-b04
 base_sha: b7a901ea1777bad08cf903cf9a54d57a7802b3bc
-created_at: 2026-11-17T14:18:36.763Z
-attempt: 1
+created_at: 2026-11-17T14:39:28.551Z
+attempt: 2
 interrupted_at: null
 issued_by: collie
 ---
@@ -64,3 +64,16 @@ issued_by: collie
 完成后写 `.collie/batches/v046-b04/report.md`：固定四段（做了什么 / 测试结果 / 偏离或疑问 / 下一步建议）
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v046-b04` 为提交信息单独提交并推送该文件。
+
+## 上一轮判 FIX
+
+### Gaps
+
+- 改写了条目 3 未点名的第 5 处现有用例 `includes output directory and the three file names`（test/tester.test.ts）：重命名并删除 expect(prompt).toContain('keep.test.ts')。任务要求只许改写 4 处，发现冲突应停下报告，不应自行修改。同时违反额外禁止「改写条目 3 点名之外的任何已有断言」。应恢复原测试并在偏离或疑问中报告冲突，转 R1 扩充允许列表。
+- test/backlog-reject.test.ts 的 6 条拒绝测试中，后 3 条（rejects 情形 label with zero scenarios / rejects scenarios with no [新] kind / rejects duplicate 情形 section）未断言 err.line。条目 3 要求「都断言报错里的行号」。需为这 3 条补上 expect(err.line).toBe(...) 断言。
+
+### 上一轮代码提交
+
+- `f081e4347c2600b93030a9344cf51e3a6276227c`
+
+这些提交已在审核范围内，只补缺口，不要重做。
