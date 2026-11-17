@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-run_id: r-20261117054815
+run_id: r-20261117060404
 batch_id: v045-b11
 base_sha: cf4e02bc517ea8b16ce79fdde87fd9dbe23a74ea
-created_at: 2026-11-17T05:48:16.168Z
-attempt: 2
+created_at: 2026-11-17T06:04:05.233Z
+attempt: 3
 interrupted_at: null
 issued_by: collie
 ---
@@ -60,14 +60,14 @@ issued_by: collie
 
 ## 上一轮判 FIX
 
-### Gaps
+### 降级原因
 
-- src/follow.ts:898-904 的 updated FollowJson 对象缺少 syncFailures 字段。run action 保存状态时覆写 follow.json，丢弃了同一圈内 sync 阶段设置的 syncFailures 计数。导致「远端不可达 + 有队列待处理」场景中通知延迟 1 圈（第 4 圈而非 SPEC 要求的第 3 圈）。修复：在 updated 对象中加 syncFailures: stateJson.syncFailures。
+- 规则 4：reviewer reported 1 claim mismatch(es)
 
 ### 上一轮代码提交
 
-- `53e5dcfa07e2e36d6fc7e12fe13cb54aaa1303a5`
 - `47dac0748998c4804c87f555a36e5dd561fa08ee`
 - `613b95cb7684f5e1ddaf4362813b7cc8f7b32367`
+- `658a0700f2abc4ee34d4527c3dbb943453cbc1d8`
 
 这些提交已在审核范围内，只补缺口，不要重做。
