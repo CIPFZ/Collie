@@ -577,6 +577,12 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(content).toContain('--outputFile');
   });
 
+  it('src/redcheck.ts has staticCommands (v046-b05)', () => {
+    const content = readFileSync(join(ROOT, 'src/redcheck.ts'), 'utf8');
+    // SPEC 16.11: red check accepts optional static commands to run after test files.
+    expect(content).toContain('staticCommands');
+  });
+
   it('src/roles/tester.ts non-comment lines do not contain items (v046-b04)', () => {
     const lines = readFileSync(join(ROOT, 'src/roles/tester.ts'), 'utf8').split('\n');
     // SPEC 16.11: TesterInput uses scenarios/interfaces, not items.

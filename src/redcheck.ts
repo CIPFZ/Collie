@@ -34,7 +34,7 @@ export interface VitestJsonReport {
 }
 
 export interface RedCheckProblem {
-  file: 'new' | 'keep';
+  file: 'new' | 'keep' | 'static';
   testName: string;
   reason: string;
 }
@@ -143,6 +143,12 @@ export interface RunRedCheckOpts {
   timeoutMs: number;
   /** Function to spawn a child process — allows injection for tests. */
   spawn: ExecFileFn;
+  /**
+   * Optional shell commands to run after test files complete (SPEC 16.11).
+   * Each is executed via `sh -c <cmd>` in the tree directory, using the same
+   * timeoutMs. Exit code !== 0 or timeout records a problem with file='static'.
+   */
+  staticCommands?: string[];
 }
 
 export interface RunRedCheckResult extends RedCheckJudgment {
@@ -211,6 +217,57 @@ async function runOneFile(
   });
 }
 
+// ---------------------------------------------------------------------------
+// runStaticCommand — runs a single shell command, returns problem or null
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line no-restricted-syntax -- SPEC 16.11 fixed output format, not a tunable threshold
+const STATIC_OUTPUT_TAIL_LINES = 20;
+
+/**
+ * Runs a single static command (`sh -c <cmd>`) in `tree`.
+ * Returns a RedCheckProblem if the command fails or times out, null otherwise.
+ */
+async function runStaticCommand(
+  cmd: string,
+  tree: string,
+  opts: RunRedCheckOpts,
+): Promise<RedCheckProblem | null> {
+  return new Promise((resolve) => {
+    const child = opts.spawn(
+      'sh',
+      ['-c', cmd],
+      { cwd: tree, timeout: opts.timeoutMs, stdio: 'pipe' } as ExecFileOptions,
+      (error: Error | null, stdout?: string | Buffer, stderr?: string | Buffer) => {
+        if (error === null) {
+          resolve(null);
+          return;
+        }
+        const e = error as NodeJS.ErrnoException & { killed?: boolean; code?: number | string };
+        const timedOut = e.killed === true;
+        if (timedOut) {
+          resolve({
+            file: 'static',
+            testName: cmd,
+            reason: 'timeout',
+          });
+          return;
+        }
+        const exitCode = typeof e.code === 'number' ? e.code : 1;
+        const combined = `${String(stdout ?? '')}${String(stderr ?? '')}`;
+        const lines = combined.split('\n');
+        const tail = lines.slice(-STATIC_OUTPUT_TAIL_LINES).join('\n');
+        resolve({
+          file: 'static',
+          testName: cmd,
+          reason: `exit code ${String(exitCode)}\n${tail}`,
+        });
+      },
+    );
+    child.unref();
+  });
+}
+
 /**
  * Runs the red check on `<outDir>/new.test.ts` and (if it exists)
  * `<outDir>/keep.test.ts` inside directory `tree`.
@@ -218,6 +275,9 @@ async function runOneFile(
  * JSON reports are written to a system temp directory (prefix `collie-redcheck-`),
  * read, and deleted (SPEC 15.5). If new.test.ts does not exist, the check fails.
  * Timeout is treated as failure with a clear reason.
+ *
+ * After both test files complete, runs optional `staticCommands` (SPEC 16.11)
+ * in the same tree. If any test file timed out, static commands are skipped.
  */
 export async function runRedCheck(
   tree: string,
@@ -252,8 +312,9 @@ export async function runRedCheck(
     }
 
     // Run keep.test.ts if it exists
+    const keepExists = existsSync(join(tree, keepFile));
     let keepResult: { report: VitestJsonReport | null; timedOut: boolean } | undefined;
-    if (existsSync(join(tree, keepFile))) {
+    if (keepExists) {
       keepResult = await runOneFile(keepFile, tree, reportDir, opts);
       if (keepResult.timedOut) {
         return {
@@ -265,14 +326,37 @@ export async function runRedCheck(
       }
     }
 
+    // Condition 2: keep.test.ts exists but vitest produced no report (SPEC 16.11)
+    const problems: RedCheckProblem[] = [];
+    if (keepExists && keepResult?.report === null) {
+      problems.push({
+        file: 'keep',
+        testName: '(file)',
+        reason: 'no report produced',
+      });
+    }
+
     // Delegate to pure judge function
     const judgment = judgeRedCheck({
       newReport: newResult.report,
-      keepReport: keepResult?.report ?? null,
+      keepReport: keepExists ? (keepResult?.report ?? null) : null,
     });
 
+    // Merge problems from missing-report check with judgment problems
+    problems.push(...judgment.problems);
+
+    // Run static commands if provided (SPEC 16.11)
+    const cmds = opts.staticCommands ?? [];
+    for (const cmd of cmds) {
+      const problem = await runStaticCommand(cmd, tree, opts);
+      if (problem !== null) {
+        problems.push(problem);
+      }
+    }
+
     return {
-      ...judgment,
+      ok: problems.length === 0,
+      problems,
       newTestCount: newResult.report?.numTotalTests ?? 0,
       keepTestCount: keepResult?.report?.numTotalTests ?? 0,
     };

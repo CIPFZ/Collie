@@ -426,3 +426,269 @@ describe('new', () => { it('fails', () => { expect(1).toBe(2); }); });
     rmSync(tree, { recursive: true, force: true });
   });
 });
+
+// ---------------------------------------------------------------------------
+// runRedCheck: static commands and missing reports (SPEC 16.11, v046-b05)
+// ---------------------------------------------------------------------------
+
+describe('runRedCheck: static commands and missing reports', () => {
+  it('static command with exit 0 passes alongside failing new tests', async () => {
+    const tree = createTestTree();
+    const outDir = 'acceptance';
+    writeTestFile(
+      tree,
+      `${outDir}/new.test.ts`,
+      `import { describe, expect, it } from 'vitest';
+describe('new', () => {
+  it('fails A', () => { expect(1).toBe(2); });
+  it('fails B', () => { expect(3).toBe(4); });
+});
+`,
+    );
+
+    const result = await runRedCheck(tree, outDir, {
+      timeoutMs: 60_000,
+      spawn: execFile,
+      staticCommands: ['exit 0'],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.problems).toHaveLength(0);
+
+    rmSync(tree, { recursive: true, force: true });
+  });
+
+  it('static command with non-zero exit fails, records exit code and output', async () => {
+    const tree = createTestTree();
+    const outDir = 'acceptance';
+    writeTestFile(
+      tree,
+      `${outDir}/new.test.ts`,
+      `import { describe, expect, it } from 'vitest';
+describe('new', () => {
+  it('fails A', () => { expect(1).toBe(2); });
+  it('fails B', () => { expect(3).toBe(4); });
+});
+`,
+    );
+
+    const cmdText = 'echo boom && exit 3';
+    const result = await runRedCheck(tree, outDir, {
+      timeoutMs: 60_000,
+      spawn: execFile,
+      staticCommands: [cmdText],
+    });
+    expect(result.ok).toBe(false);
+    const p = result.problems.find((x) => x.file === 'static');
+    expect(p).toBeDefined();
+    expect(p?.testName).toBe(cmdText);
+    expect(p?.reason).toContain('3');
+    expect(p?.reason).toContain('boom');
+
+    rmSync(tree, { recursive: true, force: true });
+  });
+
+  it('two static commands, first passes second fails — only second problem recorded', async () => {
+    const tree = createTestTree();
+    const outDir = 'acceptance';
+    writeTestFile(
+      tree,
+      `${outDir}/new.test.ts`,
+      `import { describe, expect, it } from 'vitest';
+describe('new', () => {
+  it('fails A', () => { expect(1).toBe(2); });
+});
+`,
+    );
+
+    const result = await runRedCheck(tree, outDir, {
+      timeoutMs: 60_000,
+      spawn: execFile,
+      staticCommands: ['exit 0', 'echo oops && exit 1'],
+    });
+    expect(result.ok).toBe(false);
+    const staticProblems = result.problems.filter((x) => x.file === 'static');
+    expect(staticProblems).toHaveLength(1);
+    expect(staticProblems[0]?.testName).toBe('echo oops && exit 1');
+
+    rmSync(tree, { recursive: true, force: true });
+  });
+
+  it('test problems and static problems coexist in the result', async () => {
+    const tree = createTestTree();
+    const outDir = 'acceptance';
+    // new.test.ts has one pass (a test problem) + a failing static command
+    writeTestFile(
+      tree,
+      `${outDir}/new.test.ts`,
+      `import { describe, expect, it } from 'vitest';
+describe('new', () => {
+  it('passes unexpectedly', () => { expect(1).toBe(1); });
+});
+`,
+    );
+
+    const result = await runRedCheck(tree, outDir, {
+      timeoutMs: 60_000,
+      spawn: execFile,
+      staticCommands: ['exit 7'],
+    });
+    expect(result.ok).toBe(false);
+    const testProblems = result.problems.filter((x) => x.file === 'new');
+    const staticProblems = result.problems.filter((x) => x.file === 'static');
+    expect(testProblems.length).toBeGreaterThanOrEqual(1);
+    expect(staticProblems.length).toBeGreaterThanOrEqual(1);
+
+    rmSync(tree, { recursive: true, force: true });
+  });
+
+  it('static command timeout records timeout problem', async () => {
+    const tree = createTestTree();
+    const outDir = 'acceptance';
+    writeTestFile(
+      tree,
+      `${outDir}/new.test.ts`,
+      `import { describe, expect, it } from 'vitest';
+describe('new', () => {
+  it('fails', () => { expect(1).toBe(2); });
+});
+`,
+    );
+
+    // Fake spawn that simulates vitest (first two calls) then a static timeout (third call).
+    let callCount = 0;
+    const fakeSpawn = (
+      file: string,
+      args: readonly string[],
+      options: unknown,
+      callback: (error: Error | null, stdout?: string | Buffer, stderr?: string | Buffer) => void,
+    ) => {
+      callCount++;
+      if (file === 'sh') {
+        // Static command invocation — simulate timeout
+        const err = Object.assign(new Error('timed out'), { killed: true, code: null });
+        setTimeout(() => {
+          callback(err);
+        }, 10);
+      } else {
+        // vitest invocation — delegate to real execFile
+        return execFile(file, args as string[], options as Record<string, unknown>, callback);
+      }
+      return {
+        unref: () => {
+          /* noop */
+        },
+      };
+    };
+
+    const result = await runRedCheck(tree, outDir, {
+      timeoutMs: 60_000,
+      spawn: fakeSpawn as unknown as typeof execFile,
+      staticCommands: ['sleep 999'],
+    });
+    expect(result.ok).toBe(false);
+    const staticProblems = result.problems.filter((x) => x.file === 'static');
+    expect(staticProblems).toHaveLength(1);
+    expect(staticProblems[0]?.reason).toContain('timeout');
+    expect(callCount).toBeGreaterThanOrEqual(2); // at least vitest + static
+
+    rmSync(tree, { recursive: true, force: true });
+  });
+
+  it('no staticCommands means no static commands are executed', async () => {
+    const tree = createTestTree();
+    const outDir = 'acceptance';
+    writeTestFile(
+      tree,
+      `${outDir}/new.test.ts`,
+      `import { describe, expect, it } from 'vitest';
+describe('new', () => {
+  it('fails', () => { expect(1).toBe(2); });
+});
+`,
+    );
+
+    // Count spawn calls
+    let spawnCalls = 0;
+    const countingSpawn = (
+      file: string,
+      args: readonly string[],
+      options: unknown,
+      callback: (error: Error | null, stdout?: string | Buffer, stderr?: string | Buffer) => void,
+    ) => {
+      spawnCalls++;
+      return execFile(file, args as string[], options as Record<string, unknown>, callback);
+    };
+
+    const result = await runRedCheck(tree, outDir, {
+      timeoutMs: 60_000,
+      spawn: countingSpawn as unknown as typeof execFile,
+      // no staticCommands
+    });
+    expect(result.ok).toBe(true);
+    // Only 1 spawn call: new.test.ts. No static commands.
+    expect(spawnCalls).toBe(1);
+
+    rmSync(tree, { recursive: true, force: true });
+  });
+
+  it('keep.test.ts exists but no report produced — not ok with reason', async () => {
+    const tree = createTestTree();
+    const outDir = 'acceptance';
+    writeTestFile(
+      tree,
+      `${outDir}/new.test.ts`,
+      `import { describe, expect, it } from 'vitest';
+describe('new', () => {
+  it('fails', () => { expect(1).toBe(2); });
+});
+`,
+    );
+    writeTestFile(
+      tree,
+      `${outDir}/keep.test.ts`,
+      `import { describe, expect, it } from 'vitest';
+describe('keep', () => {
+  it('passes', () => { expect(1).toBe(1); });
+});
+`,
+    );
+
+    // Fake spawn: real for new.test.ts (first call), no-report for keep.test.ts (second call)
+    let callIdx = 0;
+    const fakeSpawn = (
+      file: string,
+      args: readonly string[],
+      options: unknown,
+      callback: (error: Error | null, stdout?: string | Buffer, stderr?: string | Buffer) => void,
+    ) => {
+      callIdx++;
+      if (callIdx === 1) {
+        // First call: new.test.ts — run real vitest
+        return execFile(file, args as string[], options as Record<string, unknown>, callback);
+      }
+      // Second call: keep.test.ts — simulate vitest that produces no report file
+      setTimeout(() => {
+        // vitest exits non-zero but writes no report
+        const err = Object.assign(new Error('segfault'), { code: 1 });
+        callback(err);
+      }, 10);
+      return {
+        unref: () => {
+          /* noop */
+        },
+      };
+    };
+
+    const result = await runRedCheck(tree, outDir, {
+      timeoutMs: 60_000,
+      spawn: fakeSpawn as unknown as typeof execFile,
+    });
+    expect(result.ok).toBe(false);
+    const keepProblem = result.problems.find(
+      (p) => p.file === 'keep' && p.reason.includes('no report produced'),
+    );
+    expect(keepProblem).toBeDefined();
+
+    rmSync(tree, { recursive: true, force: true });
+  });
+});
