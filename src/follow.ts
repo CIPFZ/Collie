@@ -64,6 +64,8 @@ export interface FollowJson {
   retry?: RetryState;
   /** Base commit the current retry belongs to; clears on change (SPEC 14.12 item 5). */
   retryBase?: string;
+  /** Consecutive sync failure count (SPEC 14.15 item 1). */
+  syncFailures?: number;
 }
 
 /** Options for the follow loop (SPEC 14.4/14.9). */
@@ -114,6 +116,9 @@ const BACKOFF_MAX_MS = 60 * 60 * MS_PER_SEC;
 
 // eslint-disable-next-line no-restricted-syntax -- SPEC 14.9 item 4: max tail lines kept in memory for default spawn
 const SPAWN_TAIL_LINES = 200;
+
+// eslint-disable-next-line no-restricted-syntax -- SPEC 14.15: consecutive sync failure threshold before notification
+const SYNC_FAILURE_THRESHOLD = 3;
 
 const FOLLOW_STATE_PATH = '.collie/follow.json';
 const NEXT_MD_PATH = 'docs/ops/next.md';
@@ -554,12 +559,37 @@ async function executeRun(opts: ExecuteRunOpts): Promise<ExecuteRunResult> {
     // Commit may fail if file unchanged; continue
   }
 
-  // SPEC 14.12 item 2: defer queue-end notification until report is on remote
+  // SPEC 14.12 item 2 / 14.15 item 2: check commit result and defer queue-end notification
   const journalReason = extractQueueReason(reportJsonStdout);
   const reason = journalReason ?? `exit ${String(runExitCode)}`;
-  const pendingReportEntry: PendingReport = { qRunId, reason, exitCode: runExitCode };
+
+  // SPEC 14.15 item 2: check if report commit succeeded
+  let reportCommitted = true;
+  try {
+    const statusOutput = (await git(root, ['status', '--porcelain', '--', reportFile])).trim();
+    if (statusOutput.length > 0) {
+      reportCommitted = false;
+    }
+  } catch {
+    // Can't determine status; assume committed
+  }
 
   out(`action: run baseSha=${baseSha} qRunId=${qRunId} exitCode=${String(runExitCode)}\n`);
+
+  // SPEC 14.15 item 2: commit failed → notify immediately, don't record pendingReport
+  if (!reportCommitted) {
+    const commitKey = `commit:${qRunId}`;
+    if (!notifiedSet.has(commitKey)) {
+      await sendNotify(
+        `[Collie] 队列 ${qRunId} 结束：${reason}，退出码 ${String(runExitCode)}；汇报没能提交，留在操作员机器的 docs/ops/ 下`,
+      );
+      newNotified.push(commitKey);
+    }
+    // Base still marked as handled, queue not re-run (SPEC 14.15)
+    return { handled: true, newNotified, retryState: undefined };
+  }
+
+  const pendingReportEntry: PendingReport = { qRunId, reason, exitCode: runExitCode };
 
   // Step 8: always mark handled (SPEC 14.9 item 1)
   return { handled: true, newNotified, retryState: undefined, pendingReport: pendingReportEntry };
@@ -572,6 +602,8 @@ async function executeRun(opts: ExecuteRunOpts): Promise<ExecuteRunResult> {
 interface SyncResult {
   localAhead: boolean;
   newNotified: string[];
+  /** SPEC 14.15 item 1: true when fetch failed or needed pull failed. */
+  syncFailed: boolean;
 }
 
 async function syncWithRemote(
@@ -581,11 +613,15 @@ async function syncWithRemote(
 ): Promise<SyncResult> {
   const newNotified: string[] = [];
 
+  // SPEC 14.15 item 1: track fetch failure as sync failure
+  let syncFailed = false;
+
   // Step 1: git fetch origin main (best-effort)
   try {
     await git(root, ['fetch', '--quiet', 'origin', 'main']);
   } catch {
-    // Fetch failure — continue with stale origin/main
+    // Fetch failure — sync failed for this round
+    syncFailed = true;
   }
 
   let localHead: string;
@@ -595,11 +631,11 @@ async function syncWithRemote(
     remoteHead = (await git(root, ['rev-parse', 'origin/main'])).trim();
   } catch {
     // Can't determine state — skip sync
-    return { localAhead: false, newNotified };
+    return { localAhead: false, newNotified, syncFailed };
   }
 
   if (localHead === remoteHead) {
-    return { localAhead: false, newNotified };
+    return { localAhead: false, newNotified, syncFailed };
   }
 
   // Check relative positions
@@ -621,16 +657,17 @@ async function syncWithRemote(
     try {
       await git(root, ['pull', '--ff-only', '--quiet', 'origin', 'main']);
     } catch {
-      // pull failed — not ahead, just can't update
+      // SPEC 14.15 item 1: pull needed and failed → sync failure
+      return { localAhead: false, newNotified, syncFailed: true };
     }
-    return { localAhead: false, newNotified };
+    return { localAhead: false, newNotified, syncFailed };
   }
 
   // Case 2: local is ahead, remote has no new commits → push
   if (remoteIsAncOfLocal) {
     try {
       await push(root, 'origin', 'main');
-      return { localAhead: false, newNotified };
+      return { localAhead: false, newNotified, syncFailed };
     } catch {
       const shaPrefix = localHead.slice(0, SHA_PREFIX_LEN);
       const key = `push:${shaPrefix}`;
@@ -638,7 +675,7 @@ async function syncWithRemote(
         await sendNotify('[Collie] 队列汇报推送失败，会继续重试');
         newNotified.push(key);
       }
-      return { localAhead: true, newNotified };
+      return { localAhead: true, newNotified, syncFailed };
     }
   }
 
@@ -669,7 +706,7 @@ async function syncWithRemote(
       // Rebase succeeded, now push
       try {
         await push(root, 'origin', 'main');
-        return { localAhead: false, newNotified };
+        return { localAhead: false, newNotified, syncFailed };
       } catch {
         const newHead = (await git(root, ['rev-parse', 'HEAD'])).trim();
         const shaPrefix = newHead.slice(0, SHA_PREFIX_LEN);
@@ -678,7 +715,7 @@ async function syncWithRemote(
           await sendNotify('[Collie] 队列汇报推送失败，会继续重试');
           newNotified.push(key);
         }
-        return { localAhead: true, newNotified };
+        return { localAhead: true, newNotified, syncFailed };
       }
     } catch {
       // Rebase conflict → abort
@@ -698,7 +735,7 @@ async function syncWithRemote(
     await sendNotify(`[Collie] 仓库分叉，本地 HEAD ${shaPrefix}`);
     newNotified.push(key);
   }
-  return { localAhead: true, newNotified };
+  return { localAhead: true, newNotified, syncFailed };
 }
 
 // ---------------------------------------------------------------------------
@@ -753,6 +790,26 @@ export async function follow(opts: FollowOpts): Promise<number> {
       if (syncResult.newNotified.length > 0) {
         stateJson.notified = [...stateJson.notified, ...syncResult.newNotified];
         saveFollowState(root, stateJson);
+      }
+
+      // SPEC 14.15 item 1: track consecutive sync failures
+      if (syncResult.syncFailed) {
+        stateJson.syncFailures = (stateJson.syncFailures ?? 0) + 1;
+        if (
+          stateJson.syncFailures >= SYNC_FAILURE_THRESHOLD &&
+          !new Set(stateJson.notified).has('pull')
+        ) {
+          await sendNotify('[Collie] git pull 连续失败');
+          stateJson.notified = [...stateJson.notified, 'pull'];
+        }
+        saveFollowState(root, stateJson);
+      } else {
+        // Sync succeeded: clear syncFailures and remove pull from notified
+        if ((stateJson.syncFailures ?? 0) > 0 || stateJson.notified.includes('pull')) {
+          stateJson.syncFailures = 0;
+          stateJson.notified = stateJson.notified.filter((k) => k !== 'pull');
+          saveFollowState(root, stateJson);
+        }
       }
 
       // SPEC 14.12 item 2: send pending queue-end notification when local is no longer ahead
