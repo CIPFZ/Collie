@@ -540,4 +540,27 @@ describe('structural invariants (SPEC 3.2)', () => {
       'claim_mismatches should not appear in non-comment code lines of arbiter.ts (v045-b13)',
     ).toBe(false);
   });
+
+  it('test/ files that load config from repo root: only test/config.test.ts (v046-b01)', () => {
+    // SPEC 16.9: tests must use templateConfig() so changing .collie/collie.toml
+    // thresholds never breaks the test suite.
+    let output: string;
+    try {
+      output = execSync(
+        'grep -lE "loadConfig\\((repoRoot|ROOT|join\\(import\\.meta\\.dirname)" test/*.test.ts',
+        { cwd: ROOT, encoding: 'utf8' },
+      ).trim();
+    } catch {
+      // grep exit 1 = no matches: unexpected, since config.test.ts should still have one.
+      throw new Error('expected at least test/config.test.ts to load config from repo root');
+    }
+    const files = output.split('\n').filter(Boolean);
+    // invariants.test.ts itself may match the grep pattern in this test's string literal;
+    // exclude it from the check.
+    const filtered = files.filter((f) => f !== 'test/invariants.test.ts');
+    expect(
+      filtered,
+      `Only test/config.test.ts should load config from repo root, got: ${filtered.join(', ')}`,
+    ).toEqual(['test/config.test.ts']);
+  });
 });

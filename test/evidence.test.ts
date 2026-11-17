@@ -3,11 +3,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FetchLike } from '../src/ci.js';
-import { loadConfig, parseConfig } from '../src/config.js';
+import { parseConfig } from '../src/config.js';
 import { collectEvidence } from '../src/evidence.js';
 import { git, revParse } from '../src/git.js';
+import { templateConfig } from './support/template-config.js';
 
-const config = loadConfig(join(import.meta.dirname, '..'));
+const config = templateConfig();
 const savedEnv = { ...process.env };
 let configDir: string;
 

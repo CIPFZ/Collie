@@ -2,7 +2,6 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { loadConfig } from '../src/config.js';
 import {
   readVerdict,
   runReviewer,
@@ -13,9 +12,10 @@ import {
 import { FakeRunner } from '../src/runner/fake.js';
 import { lastJsonBlock } from '../src/schema/envelope.js';
 import { VerdictSchema, type Verdict } from '../src/schema/index.js';
+import { templateConfig } from './support/template-config.js';
 
 const repoRoot = join(import.meta.dirname, '..');
-const config = loadConfig(repoRoot);
+const config = templateConfig();
 const FENCE = '```';
 
 const input: ReviewerInput = {
@@ -86,7 +86,7 @@ describe('reviewer: runReviewer', () => {
     expect(runner.calls[0]).toMatchObject({
       role: 'reviewer',
       cwd: root,
-      maxTurns: 60,
+      maxTurns: config.agent.reviewer.max_turns,
       hasSignal: false,
     });
   });

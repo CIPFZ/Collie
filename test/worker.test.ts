@@ -11,7 +11,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadBacklog } from '../src/backlog.js';
-import { loadConfig } from '../src/config.js';
 import {
   buildTask,
   readReport,
@@ -24,9 +23,10 @@ import {
 } from '../src/roles/worker.js';
 import { FakeRunner } from '../src/runner/fake.js';
 import type { Batch, Report } from '../src/schema/index.js';
+import { templateConfig } from './support/template-config.js';
 
 const repoRoot = join(import.meta.dirname, '..');
-const config = loadConfig(repoRoot);
+const config = templateConfig();
 const manual = readFileSync(join(repoRoot, 'AGENT-worker.md'), 'utf8');
 const FENCE = '```';
 const HEAD = 'e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3';

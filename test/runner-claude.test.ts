@@ -3,7 +3,6 @@
 // builds, which is where the role config, abort wiring and event forwarding live.
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { loadConfig } from '../src/config.js';
 import {
   CLAUDE_SDK_PACKAGE,
   ClaudeRunner,
@@ -14,8 +13,9 @@ import {
   type SpawnOptions,
 } from '../src/runner/claude.js';
 import type { RunHandle, RunOptions } from '../src/runner/index.js';
+import { templateConfig } from './support/template-config.js';
 
-const config = loadConfig(join(import.meta.dirname, '..'));
+const config = templateConfig();
 
 function opts(overrides: Partial<RunOptions> = {}): RunOptions {
   return {

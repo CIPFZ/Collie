@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConfigError, loadConfig, parseConfig } from '../src/config.js';
+import { templateConfig } from './support/template-config.js';
 
 const repoRoot = join(import.meta.dirname, '..');
 
@@ -11,8 +12,8 @@ const VALID_TOML = `
 schema_version = 1
 
 [project]
-name = "collie"
-repo = "https://github.com/CIPFZ/Collie"
+name = "test-project"
+repo = "https://github.com/test-org/test-project"
 
 [agent.worker]
 model = "claude-opus-4-6"
@@ -62,12 +63,24 @@ function replaceLine(text: string, from: string, to: string): string {
 }
 
 describe('config: the repository .collie/collie.toml', () => {
+  it('loads and passes schema validation', () => {
+    const config = loadConfig(repoRoot);
+    expect(config.schema_version).toBe(1);
+    expect(config.project.name).toBeTypeOf('string');
+    expect(config.project.repo).toBeTypeOf('string');
+  });
+});
+
+describe('config: template config (SPEC 3.1 values)', () => {
   // Every value below is copied from SPEC 3.1.
-  const config = loadConfig(repoRoot);
+  const config = templateConfig();
 
   it('has schema_version 1 and the project section', () => {
     expect(config.schema_version).toBe(1);
-    expect(config.project).toEqual({ name: 'collie', repo: 'https://github.com/CIPFZ/Collie' });
+    expect(config.project).toEqual({
+      name: 'test-project',
+      repo: 'https://github.com/test-org/test-project',
+    });
   });
 
   it('has the worker agent of SPEC 3.1', () => {

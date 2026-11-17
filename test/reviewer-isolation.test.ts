@@ -6,7 +6,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ESLint } from 'eslint';
 import { afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
-import { loadConfig } from '../src/config.js';
 import {
   buildReviewerPrompt,
   ReviewerError,
@@ -14,9 +13,10 @@ import {
   type ReviewerInput,
 } from '../src/roles/reviewer.js';
 import { FakeRunner } from '../src/runner/fake.js';
+import { templateConfig } from './support/template-config.js';
 
 const repoRoot = join(import.meta.dirname, '..');
-const config = loadConfig(repoRoot);
+const config = templateConfig();
 const SECRET = 'SECRET-REPORT-BODY-7f3a';
 const WORKER_SESSION = 'worker-session-SECRET-91c2';
 

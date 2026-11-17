@@ -421,7 +421,7 @@ function runMutation(item: MutationItem, repoRoot: string): Result {
       'src',
       'test',
       'scripts',
-      '.collie',
+      'templates',
       'tsconfig.json',
       'tsconfig.build.json',
       'vitest.config.ts',
