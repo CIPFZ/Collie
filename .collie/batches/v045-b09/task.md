@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-run_id: r-20261117035500
+run_id: r-20261117043400
 batch_id: v045-b09
 base_sha: 998319a9a1aa778e9d7141b2ab30fcd9eeb6b846
-created_at: 2026-11-17T03:55:01.738Z
-attempt: 1
+created_at: 2026-11-17T04:34:00.811Z
+attempt: 2
 interrupted_at: null
 issued_by: collie
 ---
@@ -55,3 +55,20 @@ issued_by: collie
 完成后写 `.collie/batches/v045-b09/report.md`：固定四段（做了什么 / 测试结果 / 偏离或疑问 / 下一步建议）
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v045-b09` 为提交信息单独提交并推送该文件。
+
+## 上一轮判 FIX
+
+### Gaps
+
+- 验收 #7 失败：9 个 protected:* 变异返回 invalid（expected invalid 0）。runMutation() 的 toCopy 列表（scripts/mutation.ts:432-439）不包含 .collie/，导致 test/evidence.test.ts 在临时目录加载 .collie/collie.toml 时崩溃、0 个测试执行。需在 toCopy 中加入 '.collie'。
+
+### 未通过的验收命令
+
+- `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" | tail -n 1 | grep -qE "^mutation: caught [0-9]+ survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` → exit 1
+
+### 上一轮代码提交
+
+- `f062e0abd62619d0b958bbf2363379682fd5e578`
+- `fa89a597d0b619f65daba0726449cddf72262cb1`
+
+这些提交已在审核范围内，只补缺口，不要重做。
