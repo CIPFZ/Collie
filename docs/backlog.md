@@ -17,7 +17,7 @@
 > 对照没做过的结论不写进规格（「变异检查 44 项全部被发现」里有 9 项是测试文件加载失败）。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b14 已通过（SPEC 14.19）；队列从 v045-b15 起，固定版本 `839843e`。分工改造（SPEC 第 16 章）第 1 步是 v046-b01
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b17 与 v046-b01 已通过（SPEC 14.19、14.21）；队列从 v045-b18 起，固定版本 `1cf7bb1`。分工改造（SPEC 第 16 章）第 3 步的前两块是 v046-b02、b03
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -90,6 +90,9 @@
 | 62 | v045-b16 | reviewer 的工作目录里，本批次的信封只留 task.md | v045-b12 | passed |
 | 63 | v045-b17 | 测试：去掉低于全局值的局部超时 | v045-b07 | passed |
 | 64 | v046-b01 | 配置解耦：测试不再盯着本仓库 .collie/collie.toml 里的数值 | v045-b13 | passed |
+| 65 | v045-b18 | 运行器：失败的返回值一定带结束原因 | v045-b15 | pending |
+| 66 | v046-b02 | 测试 agent 的角色模块：角色、配置段、提示词（不接进队列） | v046-b01 | pending |
+| 67 | v046-b03 | 红检查：验收测试在没有实现时，新行为的全部失败、要保持的全部通过（不接进队列） | v046-b01 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -2604,3 +2607,133 @@ R1 的机器上两次全量测试的 4 处失败全是它们，没有一条断�
 - 删除或跳过任何测试；改写条目 3 点名之外的任何已有断言；把点名用例里断言的数值删掉或放宽；从变异清单里去掉任何一项
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v045-b18 运行器：失败的返回值一定带结束原因
+
+优先级：65　依赖：v045-b15
+
+v045-b15 之后，只有一条结果消息时返回值有 3 处和以前不同（操作员实测，R1 读代码确认，SPEC 14.21）。其中一处自相矛盾：成功的结果消息之后 SDK 抛错，退出码非 0 却没有结束原因。
+规格见 SPEC 14.22（读这一节；三处的来历在 14.21）。
+
+条目：
+1. `src/runner/claude.ts` 的 `run`：SDK 抛错的分支里，汇总出来没有结束原因的，记 `error`（被软停的仍是 `stopped`，有 `error_max_turns` 的仍是 `turns_exhausted`）。
+   另外两处是 v045-b15 带来、现在定为正确的行为，不改代码，只补测试：一条 `subtype: success` 但 `is_error: true` → 结束原因 `error`；成功但文本为空 → 不带 `finalText`。
+   **做完之后：`run` 的任何返回值，只要退出码不是 0，就带结束原因**
+2. `test/runner-claude.test.ts` 新加一组 `describe('runner-claude: failed runs always carry a stop reason', …)`，用文件里已有的假 SDK 写法：
+   一条成功的结果消息之后抛错 → 退出码非 0、结束原因 `error`、花费与轮数照常带回、没有 `finalText`；
+   两条成功的结果消息之后抛错 → 同上，轮数是合计；
+   一条 `success` 但 `is_error: true` → 退出码非 0、结束原因 `error`、没有 `finalText`；
+   一条成功、文本是空串 → 退出码 0、返回值里没有 `finalText` 这个键。
+   已有用例一条都不改。R1 查过：现有用例里断言「没有结束原因」的只有两条，都是成功的情形（`two successful results…`、`three successful results…`），与本条不冲突；
+   `two results then SDK throws…` 那一条没有断言结束原因。你发现还有别的用例与本条冲突，停下，在「偏离或疑问」里写明是哪一条，不要自己改。
+
+本批次只改 `src/runner/claude.ts` 与 `test/runner-claude.test.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 运行器的测试通过 | `npm test -- test/runner-claude.test.ts` | exit 0 |
+| 新的一组测试在 | `grep -qF "failed runs always carry a stop reason" test/runner-claude.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/run.ts`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/view.ts`、`src/follow.ts`；改动传给 SDK 的参数
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v046-b02 测试 agent 的角色模块：角色、配置段、提示词（不接进队列）
+
+优先级：66　依赖：v046-b01
+
+分工改造第 3 步的第一块（SPEC 第 16 章）。测试 agent（角色 R6）在 worker 之前把条目里的情形写成验收测试。这一批只做它的角色模块，不动队列。
+规格见 SPEC 16.10 的「v046-b02 角色模块」一段（读 16.10；它的手册是仓库根的 `AGENT-tester.md`，整体流程在 16.2）。
+
+条目：
+1. 角色与配置：`src/runner/index.ts` 的 `AgentRole` 加 `'tester'`；`src/schema/index.ts` 的配置里 `agent.tester` 是可选的一段，结构与 reviewer 段相同（含 `bash_deny`）；
+   `templates/collie.toml` 加 `[agent.tester]`：`model = "claude-opus-4-6"`、`allowed_tools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]`、`max_turns = 100`、
+   `permission_mode = "bypassPermissions"`、`bash_deny` 与 reviewer 段的两条相同。没有这一段的配置照常能加载（本仓库的 `.collie/collie.toml` 就没有，本批次不许动它）。
+2. `src/runner/claude.ts`：角色是 `tester` 时用 `agent.tester` 的白名单与轮数；`bash_deny` 的拦截对 tester 同样生效；reviewer 专有的「禁用写工具」不套到 tester 上（它要写文件）；
+   配置里没有这一段而被要求以 tester 运行 → 抛出一个点名 `[agent.tester]` 的错误。worker 与 reviewer 的行为不变。
+   **tester 运行一条匹配 `bash_deny` 的命令（`git commit -m x`）被拦下，和 reviewer 被拦时是同一条路径；传给 SDK 的 tester 工具清单里有 `Write` 与 `Edit`**
+3. 新文件 `src/roles/tester.ts`，导出：`TESTER_MANUAL`（值是 `'AGENT-tester.md'`）；`TesterInputSchema`（严格对象，只有 `batch_id`、`items`、`spec_paths`、`out_dir` 四个字段，多一个字段就拒绝）；
+   `buildTesterPrompt(input)`（提示词里有：批次号；条目原文，一字不改；要读的 SPEC 路径；输出目录与三个文件名 `new.test.ts`、`keep.test.ts`、`MAP.md`；自检用的两条 `npx vitest run <输出目录>/…` 命令）；
+   `runTester(runner, cfg, input, cwd)`（以角色 `tester`、`agent.tester` 的工具与轮数、`cwd` 下的 `AGENT-tester.md` 作系统提示词拉起；配置里没有这一段时抛出点名 `[agent.tester]` 的错误）。
+   新文件 `test/tester.test.ts` 用 `FakeRunner` 覆盖上面每一点；`test/runner-claude.test.ts` 加条目 2 的用例；
+   `test/config.test.ts`：模板配置一组里加一条「有 tester 段」，另加一条「没有 tester 段的配置能加载」。
+   允许改写的旧用例只有一处：`test/config.test.ts` 的 `equals the inline SPEC 3.1 fixture used by the error tests` 所用的内联配置 `VALID_TOML`，要跟着模板加上 tester 段（断言本身不变）；在「偏离或疑问」里写明。
+   R1 查过：`reports an unknown agent role` 用的是 `[agent.auditor]`，仍然应当被拒绝，不要改。
+   `test/invariants.test.ts` 加「`src/roles/tester.ts` 的源码里不出现 `report.md`」（它在 worker 之前运行，和 worker 的产出无关）
+
+本批次只改 `src/runner/index.ts`、`src/schema/index.ts`、`src/runner/claude.ts`、`src/roles/tester.ts`、`templates/collie.toml`、`test/tester.test.ts`、`test/runner-claude.test.ts`、`test/config.test.ts`、`test/invariants.test.ts`。
+类型检查因为 `AgentRole` 多了一个值而要求改这之外的文件时，可以改，在「偏离或疑问」里逐个列出。不应改动 `test/invariants.test.ts` 已有的任何断言。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 角色模块、配置、运行器的测试通过 | `npm test -- test/tester.test.ts test/config.test.ts test/runner-claude.test.ts` | exit 0 |
+| 角色模块的三个导出都在 | `grep -qE "export (async )?function runTester" src/roles/tester.ts && grep -qE "export function buildTesterPrompt" src/roles/tester.ts && grep -qE "export const TesterInputSchema" src/roles/tester.ts` | exit 0 |
+| 角色模块的专项测试不少于 8 个 | `grep -cE "^\s+it(\.each)?\(" test/tester.test.ts \| grep -qE "^([8-9]\|[1-9][0-9])$"` | exit 0 |
+| 模板里有 tester 段，角色类型里有 tester | `grep -qE "^\[agent\.tester\]" templates/collie.toml && grep -qF "'tester'" src/runner/index.ts` | exit 0 |
+| 不变量同步 | `grep -qE "roles/tester" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `.collie/collie.toml` 与 `AGENT-tester.md`）；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/run.ts`、`src/roles/reviewer.ts`、`src/roles/worker.ts`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/view.ts`、`src/follow.ts`；把测试 agent 接进队列或加命令行子命令
+- 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言；改动 worker、reviewer 两个角色的任何行为
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v046-b03 红检查：验收测试在没有实现时，新行为的全部失败、要保持的全部通过（不接进队列）
+
+优先级：67　依赖：v046-b01
+
+分工改造第 3 步的第二块（SPEC 第 16 章）。测试 agent 写完验收测试之后、worker 动手之前，要确认这些测试在现有代码上「新行为的全部失败、要保持的全部通过」。
+这一批只做判定与执行两个函数，不动队列。规格见 SPEC 16.10 的「v046-b03 红检查」一段与判据那一条（读 16.10；vitest 的 JSON 报告在几种情形下的形状见 15.5）。
+
+条目：
+1. 新文件 `src/redcheck.ts`，导出 `judgeRedCheck(reports)`：输入是 `new.test.ts` 与 `keep.test.ts`（可以没有）各自的 vitest JSON 报告，输出 `{ ok, problems }`；
+   `problems` 是原因清单，每条点名是哪个文件、哪条用例、为什么。判据：
+   `new`：至少执行了一条用例，且每一条都失败；有通过的、跳过的、todo 的，或者文件加载不了（报告里一条用例都没有），都不过。
+   `keep`：可以没有这个文件；有的话至少执行了一条且全部通过。
+   它是纯函数：不起子进程、不读写文件。
+2. 同一文件导出 `runRedCheck(tree, outDir, opts)`：在目录 `tree` 里对 `<outDir>/new.test.ts` 与（存在时）`<outDir>/keep.test.ts` 各跑一次 vitest，
+   JSON 报告用 `--outputFile` 写到 `tree` 之外的系统临时目录（目录名以 `collie-redcheck-` 开头）、读完删掉（不带 `--outputFile` 时 vitest 会在当前目录建 `.vitest/`，SPEC 15.5）；
+   `new.test.ts` 不存在算不过；超时算不过并写明是超时。超时的毫秒数与起子进程的函数都由调用方经 `opts` 传入，不在 `src/` 里写死数字。
+   返回 `judgeRedCheck` 的结果，外加两个文件各执行了几条用例。
+   **在一个临时目录里放真实的测试文件、用真实的 vitest 跑：`new` 里两条都失败 → 过；`new` 里一条失败一条通过 → 不过，原因里点名通过的那一条；**
+   **`new` 一导入就报错 → 不过，原因写明文件加载失败；`new` 全失败而 `keep` 里有一条失败 → 不过，原因里点名那一条**
+3. 新文件 `test/redcheck.test.ts`：`judgeRedCheck` 的每条判据各一条用例，喂报告样例（含跳过、todo、没有 `keep`、`keep` 一条用例都没有）；
+   条目 2 加粗的四种情形各一条，必须用真实的 vitest 跑临时目录里的真实文件（临时目录建在系统临时目录下、名字以 `collie-redcheck-` 开头，把仓库的 `node_modules` 链进去，用完删掉；
+   跑完系统临时目录里不留下任何 `collie-redcheck-*`，仓库里不出现 `.vitest/`）；超时一条，用注入的假子进程。
+   `test/invariants.test.ts` 加「`src/redcheck.ts` 用了 `--outputFile`」
+
+本批次只改 `src/redcheck.ts`、`test/redcheck.test.ts`、`test/invariants.test.ts`。不应改动 `test/invariants.test.ts` 已有的任何断言。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 红检查的专项测试通过，仓库里没有留下报告 | `npm test -- test/redcheck.test.ts && ! test -e .vitest` | exit 0 |
+| 专项测试不少于 12 个 | `grep -cE "^\s+it(\.each)?\(" test/redcheck.test.ts \| grep -qE "^(1[2-9]\|[2-9][0-9])$"` | exit 0 |
+| 两个函数都导出了 | `grep -qE "export function judgeRedCheck" src/redcheck.ts && grep -qE "export (async )?function runRedCheck" src/redcheck.ts` | exit 0 |
+| 专项测试不在系统临时目录留下东西 | `d=$(mktemp -d) && TMPDIR=$d npm test -- test/redcheck.test.ts && ! ls -d "$d"/collie-redcheck-* >/dev/null 2>&1` | exit 0 |
+| 不变量同步 | `grep -qE "redcheck" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/run.ts`、`src/roles/`、`src/runner/`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/view.ts`、`src/follow.ts`；把红检查接进队列或加命令行子命令
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求（本批次的测试可以起真实的 vitest 子进程，别的不行）；新增依赖
