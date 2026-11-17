@@ -155,7 +155,6 @@ task 没有写明的放宽同时写进 `reason`，让 R1 看得到。它算不�
     "deps_diff": [],
     "spec_diff_lines": 0
   },
-  "claim_mismatches": [],
   "gaps": [],
   "reason": ""
 }
@@ -163,7 +162,7 @@ task 没有写明的放宽同时写进 `reason`，让 R1 看得到。它算不�
 ````
 
 字段说明：
-- `claim_mismatches` — 固定填 `[]`。你拿不到 worker 的声称；声称与实测的比对由 R2 做
+- 不要写 `claim_mismatches` 字段。你拿不到 worker 的声称；声称与实测的比对由 R2 做
 - `gaps` — FIX 时的具体缺口清单，每条可操作
 - `spec_diff_lines` — 受保护文件的 diff 行数，非零会触发 BLOCK
 - 你的 `verdict` 值可能被调度器的仲裁规则降级（例如你给 PASS 但

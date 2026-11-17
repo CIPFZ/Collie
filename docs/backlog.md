@@ -17,7 +17,7 @@
 > 对照没做过的结论不写进规格（「变异检查 44 项全部被发现」里有 9 项是测试文件加载失败）。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；队列从 v045-b12 起（SPEC 14.18），固定版本 `cf4e02b`。分工改造的方案在 SPEC 第 16 章，还没有签批次
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b14 已通过（SPEC 14.19）；队列从 v045-b15 起，固定版本 `839843e`。分工改造（SPEC 第 16 章）第 1 步是 v046-b01
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -86,6 +86,10 @@
 | 58 | v045-b12 | reviewer 拿不到任何一轮的汇报：工作目录里没有 report.md，取证范围排除信封目录 | v045-b10 | passed |
 | 59 | v045-b13 | 删除仲裁规则 4：reviewer 报的「声称不符」不再改裁定 | v045-b10 | passed |
 | 60 | v045-b14 | 运行器：SDK 抛错之前已收到结果消息时，花费与轮数照常带回 | v04-b17 | passed |
+| 61 | v045-b15 | 运行器：一个会话给出多条结果消息时，轮数与 token 合计，成败不被后一条盖掉 | v045-b14 | pending |
+| 62 | v045-b16 | reviewer 的工作目录里，本批次的信封只留 task.md | v045-b12 | pending |
+| 63 | v045-b17 | 测试：去掉低于全局值的局部超时 | v045-b07 | pending |
+| 64 | v046-b01 | 配置解耦：测试不再盯着本仓库 .collie/collie.toml 里的数值 | v045-b13 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -2448,5 +2452,155 @@ v045-b11 因此被拦了 4 次（SPEC 14.16）。规格见 SPEC 14.18 第一部�
 - 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
 - 改动 `src/run.ts`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/view.ts`、`src/follow.ts`；改动传给 SDK 的参数
 - 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v045-b15 运行器：一个会话给出多条结果消息时，轮数与 token 合计，成败不被后一条盖掉
+
+优先级：61　依赖：v045-b14
+
+第十次队列里，v045-b13 的 worker 会话给出了两条结果消息（66 轮结束一次，后台任务的通知又触发了 1 轮）。`src/runner/claude.ts` 只留最后一条，journal 把 67 轮记成了 1 轮（SPEC 14.19）。
+规格见 SPEC 14.20 第一部分（读这一部分；v045-b14 加的出错分支在 14.18 第三部分）。
+
+条目：
+1. `src/runner/claude.ts` 的 `run`：遍历消息时把结果消息都留下，返回值按 SPEC 14.20 第一部分汇总：轮数与 token 的各个字段取各条之和；花费取最后一条带花费的；
+   每一条都成功才算成功；结束原因：被软停的仍记 `stopped`，否则有一条是 `error_max_turns` 记 `turns_exhausted`，否则有一条失败记 `error`；
+   `finalText` 只在成功时带，取各条的文本按先后用空行连起来；会话号取最后一条的。SDK 抛错的分支（v045-b14）用同一套汇总。只有一条结果消息时，返回值和现在完全一样。
+   **两条成功的结果消息（66 轮、1 轮）：轮数 67，token 是两条之和，花费是第二条的，`finalText` 里两段文本都在、先后不变，退出码 0；**
+   **第一条是 `error_max_turns`、第二条成功：退出码非 0，结束原因 `turns_exhausted`，没有 `finalText`，轮数是两条之和**
+2. `test/runner-claude.test.ts`，用文件里已有的 `scripted` 写法，新用例放进一组 `describe('runner-claude: more than one result message', …)`：
+   条目 1 两处加粗的情形各一条；三条结果消息的合计一条；先给两条结果消息再抛错 → 花费与合计的轮数照常带回，一条。
+   另在 `claude runner: result message before the SDK throws` 一组里补一条：没有结果消息、但已经收到过带 `session_id` 的消息之后抛错 →
+   不抛出，返回退出码非 0、那个会话号、结束原因 `error`（这是现有行为，以前没有测试守着）。已有用例一条都不改。
+
+本批次只改 `src/runner/claude.ts` 与 `test/runner-claude.test.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 运行器的测试通过 | `npm test -- test/runner-claude.test.ts` | exit 0 |
+| 多条结果消息有一组测试 | `grep -qF "more than one result message" test/runner-claude.test.ts` | exit 0 |
+| 不再只留最后一条（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" src/runner/claude.ts \| grep -qE "isResultMessage\(message\)\) result = message"` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/run.ts`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/view.ts`、`src/follow.ts`；改动传给 SDK 的参数
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v045-b16 reviewer 的工作目录里，本批次的信封只留 task.md
+
+优先级：62　依赖：v045-b12
+
+v045-b12 只把 `report.md` 从 reviewer 的工作目录里拿掉了。重跑时上一轮的 `verdict.md` 还在：新的 reviewer 打开它，就看到上一位的完整判断（SPEC 14.19）。
+规格见 SPEC 14.20 第二部分（读这一部分；v045-b12 的做法在 14.18 第一部分）。
+
+条目：
+1. `src/run.ts` 准备 `head_sha` 工作目录的地方（v045-b12 加的那两行）：改为把 `.collie/batches/<本批次>/` 下除 `task.md` 之外的文件都拿掉。
+   别的批次的目录不动（有测试要读早期批次的信封）。验收命令照旧在这个目录里跑。旁边注释里的小节号 14.17 改成 14.18 与 14.20。
+   **同一个批次先 FIX 再 PASS：第 2 次运行的 `head_sha` 的树里有上一轮的 `verdict.md` 与 `report.md`（`git ls-tree` 查得到），而 reviewer 的工作目录里那个目录下只有 `task.md`**
+2. `test/reviewer-rerun.test.ts`：两次 reviewer 场景里再记下 `.collie/batches/<本批次>/` 的文件清单。加断言：
+   第 2 次的树里有 `verdict.md`（对照，没有它这条测试什么也证明不了）；两次 reviewer 的工作目录里该目录的文件清单都恰好是 `['task.md']`；
+   另一个批次目录里的文件没被拿掉（在沙箱里先提交一个 `.collie/batches/v99-other/report.md`，断言 reviewer 的工作目录里它还在）。已有的断言不改。
+
+本批次只改 `src/run.ts` 与 `test/reviewer-rerun.test.ts`。不应改动 `test/invariants.test.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 重跑隔离的专项测试通过 | `npm test -- test/reviewer-rerun.test.ts` | exit 0 |
+| 原有的隔离测试仍然通过 | `npm test -- test/reviewer-isolation.test.ts` | exit 0 |
+| 专项测试不少于 7 个 | `grep -cE "^\s+it\(" test/reviewer-rerun.test.ts \| grep -qE "^([7-9]\|[1-9][0-9])$"` | exit 0 |
+| 别的批次目录不动，有断言 | `grep -qF "v99-other" test/reviewer-rerun.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/roles/reviewer.ts`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/view.ts`、`src/follow.ts`；动别的批次的信封目录；让 reviewer 以任何方式拿到汇报或上一轮裁定的内容
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v045-b17 测试：去掉低于全局值的局部超时
+
+优先级：63　依赖：v045-b07
+
+`vitest.config.ts` 的全局超时是 120 秒（v045-b07），但 `test/` 里还有写在 `describe`、钩子、用例上的 60 秒局部超时，局部的优先。
+R1 的机器上两次全量测试的 4 处失败全是它们，没有一条断言失败（SPEC 14.19）。规格见 SPEC 14.20 第三部分。
+
+条目：
+1. `test/` 下所有写给 `describe` / `it` / `beforeAll` / `beforeEach` 的显式超时，数值小于 120 秒的，去掉，让它们用全局值。
+   现有两种写法：`{ timeout: 60_000 }`（27 处，11 个文件）与写在钩子、用例末尾的 `}, 60_000);`（5 处，3 个文件）。
+   不是超时的数字不动：夹具里的 `duration_ms: 60000`、`test/invariants.test.ts` 里的 `toBeGreaterThanOrEqual(30_000)`、`test/watch.test.ts` 里的 `advance(100_000)`。
+   120 秒及以上的不动；除此之外不改任何测试内容。
+   在「偏离或疑问」里列出每个文件改了几处；上面点名之外你还碰到别的数值的，写明是什么、动没动。
+
+本批次只改 `test/` 下的测试文件。不应改动 `test/invariants.test.ts` 已有的任何断言。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| describe 上没有 60 秒或 30 秒的局部超时 | `! grep -nE "timeout: (30\|60)_000" test/*.test.ts` | exit 0 |
+| 钩子与用例末尾没有 60 秒或 30 秒的局部超时 | `! grep -nE "^\s*\}, (30\|60)_000\);" test/*.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`；改动 `src/` 与 `scripts/` 下任何文件
+- 删除或跳过任何测试；改写任何断言；改动夹具里的数据
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 新增依赖
+
+## v046-b01 配置解耦：测试不再盯着本仓库 .collie/collie.toml 里的数值
+
+优先级：64　依赖：v045-b13
+
+分工改造的第 1 步（SPEC 第 16 章）。现在 7 个测试文件从仓库根加载 `.collie/collie.toml`，其中三处断言了它的具体数值。这个文件是受保护路径，worker 改不了，
+所以本项目的任何阈值都没法单独调整。规格见 SPEC 16.9（读这一节；背景在 16.5）。
+
+条目：
+1. 新文件 `test/support/template-config.ts`，导出 `templateConfig()`：读 `templates/collie.toml`，把 `{{name}}`、`{{repo}}` 换成固定值后解析，返回配置对象。
+   下面 7 个测试文件里从仓库自己的 `.collie/collie.toml` 取配置的地方（`loadConfig(repoRoot)` 与 `loadConfig(join(import.meta.dirname, '..'))`）都改用它：
+   `test/cli.test.ts`、`test/config.test.ts`、`test/evidence.test.ts`、`test/reviewer-isolation.test.ts`、`test/reviewer.test.ts`、`test/runner-claude.test.ts`、`test/worker.test.ts`。
+   `test/config.test.ts` 只留一条读本仓库配置的用例：它能加载、能通过校验，不断言任何数值。
+   **做完之后的样子：把 `.collie/collie.toml` 里 reviewer 的 `max_turns` 改成 61、`wallclock_secs` 改成 3601，`npm test` 仍然全过。**
+   **这一条由操作员在队列结束后在仓库副本里验证。你不要改 `.collie/collie.toml`，临时改也不行：它是受保护路径，留在工作区里会被拦停**
+2. `scripts/mutation.ts`：临时副本不再复制 `.collie/`，改为复制 `templates/`（`test/evidence.test.ts` 改读模板之后不再需要本仓库的配置）。清单的 42 项不动。
+3. 允许改写的旧用例只有下面几处，每一处都在「偏离或疑问」里列出用例名、原断言、现断言：
+   `test/config.test.ts` 的 `config: the repository .collie/collie.toml` 一组（6 条）：断言的数值原样保留，一条不删、不放宽，只把对象从本仓库配置换成模板配置，组名相应改掉；`project` 那一条按 `templateConfig()` 填的固定值断言。
+   `test/cli.test.ts` 的 `renders to exactly the SPEC 3.1 config the repository uses (no drift)`：改成「模板填上名字和仓库地址后能通过校验」，不再和本仓库配置比；`init derives the repo from an SSH origin…` 里的 `config.limits` 改成和模板配置的 `limits` 比。
+   `test/reviewer.test.ts` 的 `launches role reviewer in root with the configured turns`：`maxTurns: 60` 改成取所用配置对象里的值。
+   `test/invariants.test.ts` 加「`test/` 下的测试文件里，从仓库根加载配置的只有 `test/config.test.ts` 里的一处」。
+
+本批次只改上面点名的 7 个测试文件、`test/support/template-config.ts`、`test/invariants.test.ts`、`scripts/mutation.ts`。不应改动 `test/invariants.test.ts` 已有的任何数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 改过的 7 个测试文件通过 | `npm test -- test/cli.test.ts test/config.test.ts test/evidence.test.ts test/reviewer-isolation.test.ts test/reviewer.test.ts test/runner-claude.test.ts test/worker.test.ts` | exit 0 |
+| 取模板配置的函数存在，7 个文件都用上了 | `grep -qE "export function templateConfig" test/support/template-config.ts && grep -lE "templateConfig\(" test/*.test.ts \| grep -c . \| grep -qE "^([7-9]\|[1-9][0-9])$"` | exit 0 |
+| 从仓库根加载配置的只剩 config.test.ts 里的一处 | `grep -nE "loadConfig\((repoRoot\|ROOT\|join\(import\.meta\.dirname)" test/*.test.ts \| grep -v "^test/invariants.test.ts:" \| grep -c . \| grep -qx 1 && grep -qE "loadConfig\((repoRoot\|ROOT\|join\(import\.meta\.dirname)" test/config.test.ts` | exit 0 |
+| 变异副本复制模板，不再复制 .collie（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" scripts/mutation.ts \| grep -qF "'.collie'" && grep -qF "'templates'" scripts/mutation.ts` | exit 0 |
+| 变异检查全部被发现，工作区里没有留下报告 | `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" \| tail -n 1 \| grep -qE "^mutation: caught 42 survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` | exit 0 |
+| 不变量同步 | `grep -qE "templateConfig\|template-config" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `.collie/collie.toml`，临时改也不行）；改动 `templates/collie.toml`、`.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/` 下任何文件；改动 `test/support/sandbox.ts`
+- 删除或跳过任何测试；改写条目 3 点名之外的任何已有断言；把点名用例里断言的数值删掉或放宽；从变异清单里去掉任何一项
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；新增依赖

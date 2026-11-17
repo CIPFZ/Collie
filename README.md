@@ -6,7 +6,7 @@ Collie 把「与好模型讨论方案 → 下发工作 Agent 实现 → 审核 A
 这个循环自动化，让人只保留头（需求阐述与方案讨论）与尾（裁决），
 不再在多个 Agent 窗口之间搬运上下文。
 
-状态：v0.4 已收口（2026-11-16）；在做「收掉操作员」（SPEC 第 14 章）与变异检查（第 15 章）。待所有者裁定的事见 [docs/decisions/OPEN.md](./docs/decisions/OPEN.md)。
+状态：v0.4 已收口（2026-11-16）；在做「收掉操作员」（SPEC 第 14 章），并开始分工改造（第 16 章：验收测试由测试 agent 在 worker 之前写）。待所有者裁定的事见 [docs/decisions/OPEN.md](./docs/decisions/OPEN.md)。
 
 ## 定位
 
