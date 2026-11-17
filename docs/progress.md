@@ -1627,4 +1627,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b04 · r-20261117141835 · FIX
+
+- 时间：2026-11-17T14:39:23.200Z
+- 裁定：规则 10，全部 8 条验收命令通过，实现逻辑与代码质量好，但 (1) 改写了条目 3 允许列表之外的第 5 处现有用例，违反「只许改写这四处」与额外禁止；(2) 6 条拒绝测试中 3 条缺少 err.line 断言。CI 以 R2 取证为准。
+- 提交：`f081e43`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1259 passed, 0 failed
+  - `npm test -- test/backlog.test.ts test/backlog-reject.test.ts test/cli.test.ts test/tester.test.ts` → exit 0，91 passed, 0 failed
+  - `grep -qF "backlog: scenarios and interfaces" test/backlog.test.ts && grep -qF "backlog: rejects malformed scenarios" test/backlog-reject.test.ts` → exit 0，exit 0
+  - `grep -qF "show prints scenarios and interfaces when the batch has them" test/cli.test.ts && grep -qF "tester: scenarios in the prompt" test/tester.test.ts` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/roles/tester.ts | grep -qE "\bitems\b"` → exit 0，exit 0
+  - `grep -qE "roles/tester.*items|items.*roles/tester" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44103580071
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
