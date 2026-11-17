@@ -357,16 +357,65 @@ export function checkUnique(content: string, original: string): boolean {
   return content.indexOf(original, first + 1) < 0;
 }
 
-/** Classify a child process outcome into a mutation result. */
-export function judgeExecResult(
-  error: { killed?: boolean; status?: number | null } | null,
-): Result {
-  if (error === null) return 'survived';
-  if (error.killed === true) return 'timeout';
-  return 'caught';
+/** Vitest JSON report fields used for mutation judgment (SPEC 15.5). */
+export interface VitestJsonReport {
+  numTotalTests: number;
+  numFailedTests: number;
 }
 
-const TIMEOUT_MS = 60_000;
+/** Pure function: classify a test run into a mutation result (SPEC 15.5).
+ *  Inputs are the parsed JSON report (null if unreadable) and the process exit code. */
+export function judgeExecResult(report: VitestJsonReport | null, exitCode: number | null): Result {
+  // No report or zero tests executed → invalid
+  if (report === null || report.numTotalTests === 0) return 'invalid';
+  // At least one test failed → caught
+  if (report.numFailedTests > 0) return 'caught';
+  // All tests passed with exit 0 → survived
+  if (exitCode === 0) return 'survived';
+  // Non-zero exit but no test failures in report → invalid
+  return 'invalid';
+}
+
+/** Pure function: classify a type-check outcome (SPEC 15.5). */
+export function judgeTypecheckResult(
+  error: { killed?: boolean; status?: number | null } | null,
+): 'ok' | 'timeout' | 'invalid' {
+  if (error === null) return 'ok';
+  if (error.killed === true) return 'timeout';
+  return 'invalid';
+}
+
+/** Pure function: judge baseline results (SPEC 15.5).
+ *  Returns a failure reason string, or null when baseline is OK. */
+export function judgeBaseline(
+  tcResult: { exitCode: number; killed: boolean },
+  testResult: { exitCode: number; killed: boolean },
+  testReport: VitestJsonReport | null,
+): string | null {
+  if (tcResult.killed) return 'typecheck timeout';
+  if (tcResult.exitCode !== 0) return 'typecheck';
+  if (testResult.killed) return 'test timeout';
+  if (testReport === null || testReport.numTotalTests === 0) return 'no tests executed';
+  if (testReport.numFailedTests > 0 || testResult.exitCode !== 0) return 'tests failed';
+  return null;
+}
+
+/** Read a vitest JSON report from disk; returns null if unreadable. */
+function readJsonReport(path: string): VitestJsonReport | null {
+  try {
+    const raw = readFileSync(path, 'utf8');
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const numTotalTests = typeof data.numTotalTests === 'number' ? data.numTotalTests : 0;
+    const numFailedTests = typeof data.numFailedTests === 'number' ? data.numFailedTests : 0;
+    return { numTotalTests, numFailedTests };
+  } catch {
+    return null;
+  }
+}
+
+// SPEC 15.5: type check 120 s, test process 180 s.
+const TYPECHECK_TIMEOUT_MS = 120_000;
+const TEST_TIMEOUT_MS = 180_000;
 
 function runMutation(item: MutationItem, repoRoot: string): Result {
   const filePath = join(repoRoot, item.file);
@@ -404,68 +453,108 @@ function runMutation(item: MutationItem, repoRoot: string): Result {
     const mutated = content.replace(item.original, item.replacement);
     writeFileSync(join(tmpDir, item.file), mutated);
 
-    // Check that the mutation compiles.
+    // Type check (SPEC 15.5: 120 s; timeout → timeout, not invalid).
     try {
       execFileSync('npx', ['tsc', '--noEmit', '-p', 'tsconfig.json'], {
         cwd: tmpDir,
-        timeout: TIMEOUT_MS,
+        timeout: TYPECHECK_TIMEOUT_MS,
         stdio: 'pipe',
       });
-    } catch {
+    } catch (err: unknown) {
+      const tcErr = err as { killed?: boolean; status?: number | null };
+      const tcVerdict = judgeTypecheckResult(tcErr);
+      if (tcVerdict === 'timeout') return 'timeout';
       return 'invalid';
     }
 
-    // Run the relevant tests.
+    // Run the relevant tests with JSON reporter (SPEC 15.5).
     const testFiles = testFilesFor(item.file);
-    try {
-      execFileSync('npx', ['vitest', 'run', '--reporter=verbose', ...testFiles], {
-        cwd: tmpDir,
-        timeout: TIMEOUT_MS,
-        stdio: 'pipe',
-      });
-      // Tests all passed → mutation survived.
-      return 'survived';
-    } catch (err: unknown) {
-      const error = err as { killed?: boolean; status?: number | null };
-      if (error.killed === true) {
-        // Timed out — retry once.
-        try {
-          execFileSync('npx', ['vitest', 'run', '--reporter=verbose', ...testFiles], {
-            cwd: tmpDir,
-            timeout: TIMEOUT_MS,
-            stdio: 'pipe',
-          });
-          return 'survived';
-        } catch (err2: unknown) {
-          const error2 = err2 as { killed?: boolean };
-          if (error2.killed === true) return 'timeout';
-          return 'caught';
-        }
+    const reportPath = join(tmpdir(), `collie-mut-report-${safeName}-${String(Date.now())}.json`);
+
+    const runTests = (): { report: VitestJsonReport | null; exitCode: number; killed: boolean } => {
+      let exitCode = 0;
+      let killed = false;
+      try {
+        execFileSync(
+          'npx',
+          ['vitest', 'run', '--reporter=json', `--outputFile=${reportPath}`, ...testFiles],
+          { cwd: tmpDir, timeout: TEST_TIMEOUT_MS, stdio: 'pipe' },
+        );
+      } catch (err: unknown) {
+        const e = err as { killed?: boolean; status?: number | null };
+        killed = e.killed === true;
+        exitCode = e.status ?? 1;
       }
-      // Non-zero exit = at least one assertion failed.
-      return 'caught';
+      const report = readJsonReport(reportPath);
+      try {
+        rmSync(reportPath, { force: true });
+      } catch {
+        /* ignore cleanup errors */
+      }
+      return { report, exitCode, killed };
+    };
+
+    const first = runTests();
+    if (first.killed) {
+      // Timed out — retry once (SPEC 15.1).
+      const second = runTests();
+      if (second.killed) return 'timeout';
+      return judgeExecResult(second.report, second.exitCode);
     }
+    return judgeExecResult(first.report, first.exitCode);
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 
 // ---------------------------------------------------------------------------
-// Baseline check (SPEC 15.1): run all test files once unmodified; must pass.
+// Baseline check (SPEC 15.5): type check + tests; must all pass with tests run.
 // ---------------------------------------------------------------------------
 
-function runBaseline(repoRoot: string): boolean {
-  const allTestFiles = [...new Set(MUTATIONS.map((m) => testFilesFor(m.file)).flat())];
+function runBaseline(repoRoot: string): string | null {
+  // 1. Whole-project type check.
+  let tcExitCode = 0;
+  let tcKilled = false;
   try {
-    execFileSync('npx', ['vitest', 'run', '--reporter=verbose', ...allTestFiles], {
+    execFileSync('npx', ['tsc', '--noEmit', '-p', 'tsconfig.json'], {
       cwd: repoRoot,
-      timeout: TIMEOUT_MS * 3,
+      timeout: TYPECHECK_TIMEOUT_MS,
       stdio: 'pipe',
     });
-    return true;
-  } catch {
-    return false;
+  } catch (err: unknown) {
+    const e = err as { killed?: boolean; status?: number | null };
+    tcKilled = e.killed === true;
+    tcExitCode = e.status ?? 1;
   }
+
+  // 2. Run related tests with JSON reporter.
+  const allTestFiles = [...new Set(MUTATIONS.map((m) => testFilesFor(m.file)).flat())];
+  const reportPath = join(tmpdir(), `collie-baseline-report-${String(Date.now())}.json`);
+  let testExitCode = 0;
+  let testKilled = false;
+  try {
+    execFileSync(
+      'npx',
+      ['vitest', 'run', '--reporter=json', `--outputFile=${reportPath}`, ...allTestFiles],
+      { cwd: repoRoot, timeout: TEST_TIMEOUT_MS, stdio: 'pipe' },
+    );
+  } catch (err: unknown) {
+    const e = err as { killed?: boolean; status?: number | null };
+    testKilled = e.killed === true;
+    testExitCode = e.status ?? 1;
+  }
+  const testReport = readJsonReport(reportPath);
+  try {
+    rmSync(reportPath, { force: true });
+  } catch {
+    /* ignore */
+  }
+
+  return judgeBaseline(
+    { exitCode: tcExitCode, killed: tcKilled },
+    { exitCode: testExitCode, killed: testKilled },
+    testReport,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -499,25 +588,38 @@ if (isMainModule) {
 
   const repoRoot = join(import.meta.dirname, '..');
 
-  // Baseline check.
-  process.stderr.write('Running baseline tests…\n');
-  if (!runBaseline(repoRoot)) {
-    process.stderr.write('Baseline tests failed — cannot run mutation check\n');
+  // Baseline check (SPEC 15.5).
+  process.stderr.write('Running baseline…\n');
+  const baselineFailure = runBaseline(repoRoot);
+  if (baselineFailure !== null) {
+    process.stdout.write(`mutation: baseline failed (${baselineFailure})\n`);
     process.exit(1);
   }
   process.stderr.write('Baseline OK\n\n');
 
-  let allCaught = true;
+  // Run each mutation.
+  const counts: Record<Result, number> = {
+    caught: 0,
+    survived: 0,
+    invalid: 0,
+    timeout: 0,
+    stale: 0,
+  };
   for (const item of selected) {
     process.stderr.write(`  ${item.name} … `);
     const result = runMutation(item, repoRoot);
     process.stderr.write(`${result}\n`);
+    counts[result]++;
     if (result !== 'caught') {
-      allCaught = false;
       process.stdout.write(`${item.name}: ${result}\n`);
     }
   }
 
+  const allCaught = counts.caught === selected.length;
   process.stderr.write(allCaught ? '\nAll mutations caught ✓\n' : '\nSome mutations survived ✗\n');
+  // SPEC 15.5: fixed format last line.
+  process.stdout.write(
+    `mutation: caught ${String(counts.caught)} survived ${String(counts.survived)} invalid ${String(counts.invalid)} timeout ${String(counts.timeout)} stale ${String(counts.stale)}\n`,
+  );
   process.exit(allCaught ? 0 : 1);
 }

@@ -498,4 +498,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     const hasPendingPush = codeLines.some((l) => l.includes('pendingPush'));
     expect(hasPendingPush, 'pendingPush should not appear in non-comment code').toBe(false);
   });
+
+  it('scripts/mutation.ts contains numFailedTests (v045-b09)', () => {
+    const content = readFileSync(join(ROOT, 'scripts/mutation.ts'), 'utf8');
+    expect(content).toContain('numFailedTests');
+  });
 });

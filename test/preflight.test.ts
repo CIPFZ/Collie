@@ -64,18 +64,22 @@ describe('collie preflight', { timeout: 60_000 }, () => {
     // Push a commit from the "remote side" so local falls behind.
     const { git } = await import('../src/git.js');
     // Create a second clone, push from it.
-    const { mkdtempSync } = await import('node:fs');
+    const { mkdtempSync, rmSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const cloneDir = mkdtempSync(join(tmpdir(), 'collie-clone-'));
-    await git(cloneDir, ['clone', box.remote, 'work']);
-    const workDir = join(cloneDir, 'work');
-    // Configure git user for the clone.
-    await git(workDir, ['config', 'user.name', 'Tester']);
-    await git(workDir, ['config', 'user.email', 'test@example.invalid']);
-    writeFileSync(join(workDir, 'ahead.txt'), 'ahead');
-    await git(workDir, ['add', '-A']);
-    await git(workDir, ['commit', '-m', 'ahead']);
-    await git(workDir, ['push', 'origin', 'main']);
+    try {
+      await git(cloneDir, ['clone', box.remote, 'work']);
+      const workDir = join(cloneDir, 'work');
+      // Configure git user for the clone.
+      await git(workDir, ['config', 'user.name', 'Tester']);
+      await git(workDir, ['config', 'user.email', 'test@example.invalid']);
+      writeFileSync(join(workDir, 'ahead.txt'), 'ahead');
+      await git(workDir, ['add', '-A']);
+      await git(workDir, ['commit', '-m', 'ahead']);
+      await git(workDir, ['push', 'origin', 'main']);
+    } finally {
+      rmSync(cloneDir, { recursive: true, force: true });
+    }
 
     const code = await box.cli(['preflight'], undefined);
     expect(code).toBe(1);
