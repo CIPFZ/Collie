@@ -24,6 +24,7 @@ function validInput(overrides: Partial<TesterInput> = {}): TesterInput {
     scenarios: [
       { id: 'S1', kind: 'new', text: 'do something new' },
       { id: 'S2', kind: 'new', text: 'do another new thing' },
+      { id: 'K1', kind: 'keep', text: 'keep this behavior' },
     ],
     interfaces: ['src/feature.ts exportName'],
     spec_paths: ['SPEC.md'],
@@ -97,15 +98,24 @@ describe('tester: buildTesterPrompt', () => {
     expect(prompt).toContain('CONSTRAINTS.md');
   });
 
-  it('includes output directory and the file names', () => {
+  it('includes output directory and the three file names', () => {
     const prompt = buildTesterPrompt(validInput({ out_dir: 'test/acceptance/v099' }));
     expect(prompt).toContain('test/acceptance/v099');
     expect(prompt).toContain('new.test.ts');
+    expect(prompt).toContain('keep.test.ts');
     expect(prompt).toContain('MAP.md');
   });
 
   it('includes self-check vitest commands and lint/typecheck when only new scenarios', () => {
-    const prompt = buildTesterPrompt(validInput({ out_dir: 'test/acceptance/v099' }));
+    const prompt = buildTesterPrompt(
+      validInput({
+        out_dir: 'test/acceptance/v099',
+        scenarios: [
+          { id: 'S1', kind: 'new', text: 'new feature A' },
+          { id: 'S2', kind: 'new', text: 'new feature B' },
+        ],
+      }),
+    );
     expect(prompt).toContain('npx vitest run test/acceptance/v099/new.test.ts');
     expect(prompt).not.toContain('keep.test.ts');
     expect(prompt).toContain('npm run lint');

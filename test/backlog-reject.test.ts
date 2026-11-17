@@ -253,6 +253,7 @@ describe('backlog: rejects malformed scenarios', () => {
     const text = backlogWith('情形：\n');
     const err = backlogError(text);
     expect(err.batchId).toBe('v99-b01');
+    expect(err.line).toBe(lineOf(text, '情形：'));
     expect(err.message).toContain('has no scenarios');
   });
 
@@ -260,6 +261,7 @@ describe('backlog: rejects malformed scenarios', () => {
     const text = backlogWith('情形：\n- K1 [保持] 现有行为');
     const err = backlogError(text);
     expect(err.batchId).toBe('v99-b01');
+    expect(err.line).toBe(lineOf(text, '情形：'));
     expect(err.message).toContain('no [新] scenario');
   });
 
@@ -267,6 +269,7 @@ describe('backlog: rejects malformed scenarios', () => {
     const text = backlogWith('情形：\n- S1 [新] 功能 A\n\n情形：\n- S2 [新] 功能 B');
     const err = backlogError(text);
     expect(err.batchId).toBe('v99-b01');
+    expect(err.line).toBe(lineOf(text, '- S2 [新] 功能 B') - 1);
     expect(err.message).toContain('duplicate "情形" block');
   });
 });
