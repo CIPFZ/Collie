@@ -11,9 +11,11 @@
 > 要求「数据来自真实运行」时点名是哪几条断言；一个批次不要既改 R2 又加新命令（v045-b01 因此用满了 200 轮）。
 > R1 签发自查（v045-b05 / b06 后，SPEC 14.11）：多圈行为的情形要一直写到「恢复之后」为止（失败几圈、恢复、再走几圈之后是什么样）；
 > 改 R2 的条目单独成批，不和投影、多个测试文件的改动放在一起（v045-b06 用了 168 轮）。
+> R1 签发自查（v045-b08 后，SPEC 14.13）：改已有模块的条目，写明哪些已有行为必须原样留下，并给容易被顺手删掉的那几条各配一条验收；
+> 允许改写的旧用例要点名，不写「与新行为冲突的可以改」这种交给 worker 判断的豁免；队列参数（如 `--max`）碰到没跑过的情形之前，先用假 runner 试一遍。
 
-更新时间：2026-11-16
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b07 已通过，队列从 v045-b08 起，固定版本 `7a50daa`
+更新时间：2026-11-17
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b08 已通过，队列从 v045-b09 起，固定版本 `7a50daa`
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -77,6 +79,8 @@
 | 53 | v045-b07 | 变异检查：删掉规则、放行条件或受保护路径里的任意一处，测试必须变红 | v04-b17 | passed |
 | 54 | v045-b08 | collie follow 的推送与收尾：每圈先同步、分叉时 rebase、汇报上了远端才通知、完整输出、npm ci 失败清目录 | v045-b05 | passed |
 | 55 | v045-b09 | 变异检查判定收紧：基线含类型检查、caught 看测试结果不看退出码、超时不算 invalid | v045-b07 | pending |
+| 56 | v045-b10 | --max 只数通过的批次：FIX 重跑不占名额 | v045-b01 | pending |
+| 57 | v045-b11 | collie follow 的同步失败与汇报没提交成：补回连续失败通知、没提交成不说「看」 | v045-b08 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -2235,3 +2239,85 @@ R1 另外读出：汇报正文取自只留末 200 行的子进程输出，队列
 - 为了让测试过而删除或跳过任何测试；为了让变异检查通过而从清单里去掉某一项、或把超时与编译不过算成被发现
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 把变异检查并进 `npm test`；让它改动工作区里的文件；新增依赖
+
+## v045-b10 --max 只数通过的批次：FIX 重跑不占名额
+
+优先级：56　依赖：v045-b01
+
+SPEC 12.2 写的是「`--max N` 数的是 PASS 的批次，FIX 重跑不计」，实现数的是运行次数：第八次队列 `--max 2`，v045-b08 一次 FIX、一次 PASS 就到了上限，v045-b09 没有跑（R1 用假 runner 复现）。
+本批次只改 R2 的这一处。规格见 SPEC 14.14（读这一节；原文在 12.2，经过在 14.13）。
+
+条目：
+1. `src/run.ts` 的队列循环：到数的判断改为「本次队列里结论是 PASS 的批次数达到 N」。FIX 重跑、规则 1 重跑、中断续跑都不占名额；
+   `queue.finished.batches` 照旧列出每一次运行，`fix_max` 的计数与处理不变。
+   **`--max 2`、两个批次、第一个先 FIX 再 PASS、第二个 PASS：两个批次都通过，`queue.finished` 的 reason 是 `limit`、`batches` 有 3 项；**
+   **`--max 1`、同样的安排：第一个批次通过后停下，第二个仍是 `pending`，`batches` 有 2 项**
+2. 新文件 `test/queue-limit.test.ts`：用 `FakeRunner` 跑真实的 `run --continue --max N`（照 `test/report.test.ts` 里「FIX then PASS」那一组的做法，不手写 journal），
+   断言 backlog 的状态列、`queue.finished` 的 reason 与 `batches`、每条 `queue.batch_started` 的 why。条目 1 两处加粗的情形各一条；
+   `--max 1`、一个批次的 FIX 次数超过 `fix_max` → 退出码 20、记了 `escalated`（reason `fix_max`），不是 `limit`；不带 `--max`、两个批次都一次通过 → 退出码 0、两个都是 `passed`。
+   `test/invariants.test.ts` 加「`src/run.ts` 不含 `batchesRun.length >= ctx.max`」
+
+本批次只改 `src/run.ts`、`test/queue-limit.test.ts`、`test/invariants.test.ts`。不应改动 `test/invariants.test.ts` 已有的任何数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| --max 的专项测试通过 | `npm test -- test/queue-limit.test.ts` | exit 0 |
+| 专项测试不少于 4 个 | `grep -cE "^\s+it\(" test/queue-limit.test.ts \| grep -qE "^([4-9]\|[1-9][0-9])$"` | exit 0 |
+| 专项测试跑的是真实队列 | `grep -qE "FakeRunner" test/queue-limit.test.ts && grep -qE -e "--max" test/queue-limit.test.ts` | exit 0 |
+| 不再按运行次数到数（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "batchesRun\.length >= ctx\.max"` | exit 0 |
+| 不变量同步 | `grep -qE "batchesRun" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/follow.ts`、`src/view.ts`；改动 `fix_max` 的计数方式或 `queue.finished.batches` 的形状
+- 为了让测试过而删除或跳过任何测试；改写已有用例的断言（本批次没有点名允许改写的旧用例；确实与 SPEC 14.14 冲突的，先在「偏离或疑问」里逐条列出）
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v045-b11 collie follow 的同步失败与汇报没提交成：补回连续失败通知、没提交成不说「看」
+
+优先级：57　依赖：v045-b08
+
+v045-b08 修好了推送，但把 SPEC 14.9 的「`git pull` 连续失败 3 圈通知一次」删掉了，守它的用例被改成不再断言这件事。R1 实测：远端不可达 5 圈、或本地落后而快进被挡住 4 圈，一条通知都没有，`follow` 一直按旧的 next.md 等着。
+另一处：汇报提交失败时照样通知「队列结束，到对话里说看」，而仓库里没有汇报（R1 实测）。规格见 SPEC 14.15（读这一节；原要求在 14.9 第 2 条，同步的三种情况在 14.12 第 1 条，经过在 14.13）。
+
+条目：
+1. 同步失败要通知（SPEC 14.15 第 1 条）：一圈里 `git fetch` 失败、或需要拉取而 `git pull --ff-only` 失败，`follow.json` 的 `syncFailures` 加 1；连续 3 圈时通知一次（键 `pull`，文本 `[Collie] git pull 连续失败`）；
+   哪一圈同步成功就把 `syncFailures` 清零并去掉 `pull` 这个已通知的键。推送失败的通知不变。
+   **远端不可达 5 圈：「git pull 连续失败」只有 1 条，出现在第 3 圈；恢复远端走 1 圈后 `syncFailures` 为 0；再让远端不可达 3 圈：又通知 1 条，一共 2 条；**
+   **本地落后而快进被一个未跟踪的同名文件挡住 3 圈：「git pull 连续失败」1 条**
+2. 汇报没提交成（SPEC 14.15 第 2 条）：提交之后 `git status --porcelain -- <汇报文件>` 不为空，就不记 `pendingReport`，按键 `commit:<队列号>` 通知一次，
+   文本含「汇报没能提交」、队列号与退出码，不含「到对话里说」；基准照样记为已处理，队列不重跑。提交成功时的行为不变
+3. `test/follow.test.ts`：条目 1 两处加粗的情形各一条；条目 2 一条（用一个退出码 1 的 `pre-commit` 钩子让提交失败，走 3 圈：`run --continue` 只起 1 次，通知 1 条）。**每条都要断言实际走了几圈。**
+   允许改写的旧用例只有三种：注释是 `// 20. SPEC 14.9 item 2` 的那条，改回断言「git pull 连续失败」的条数；「队列期间远端多一个提交」那条，补上圈数的断言；
+   因为多了一条「git pull 连续失败」而通知总条数变了的断言。每一处都在「偏离或疑问」里列出用例名、原断言、现断言。
+   `test/invariants.test.ts` 加「`src/follow.ts` 含 `syncFailures`」
+
+本批次只改 `src/follow.ts`、`test/follow.test.ts`、`test/invariants.test.ts`。不应改动 `test/invariants.test.ts` 已有的任何数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| follow 专项测试通过 | `npm test -- test/follow.test.ts` | exit 0 |
+| 专项测试不少于 33 个 | `grep -cE "^\s+it\(" test/follow.test.ts \| grep -qE "^(3[3-9]\|[4-9][0-9])$"` | exit 0 |
+| 专项测试不在系统临时目录留下固定版本目录 | `d=$(mktemp -d) && TMPDIR=$d npm test -- test/follow.test.ts && ! ls -d "$d"/collie-r2-* >/dev/null 2>&1` | exit 0 |
+| 同步失败有计数，且有测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/follow.ts \| grep -qE "syncFailures" && grep -qE "syncFailures" test/follow.test.ts` | exit 0 |
+| 连续失败的通知补回来了，且有测试断言它（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/follow.ts \| grep -qE "git pull 连续失败" && grep -vE "^\s*(//\|\*\|/\*)" test/follow.test.ts \| grep -qE "git pull 连续失败"` | exit 0 |
+| 汇报没提交成有通知，且有测试（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/follow.ts \| grep -qE "汇报没能提交" && grep -vE "^\s*(//\|\*\|/\*)" test/follow.test.ts \| grep -qE "汇报没能提交"` | exit 0 |
+| 不变量同步 | `grep -qE "syncFailures" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `.collie/collie.toml`）；改动 `templates/collie.toml`、`.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner、真实的 `npx` / `npm` 子进程或真实网络请求；自己在工作区里运行不带 `--dry-run` 的 `collie follow`
+- 改动 SPEC 14.12 的推送、rebase 与「汇报上了远端才通知」的行为；改动 `src/handoff.ts`、`src/run.ts`、`src/view.ts`、`src/preflight.ts`；新增依赖
