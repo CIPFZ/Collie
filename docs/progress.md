@@ -1284,4 +1284,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b09 · r-20261117035500 · FIX
+
+- 时间：2026-11-17T04:33:56.337Z
+- 裁定：规则 10，验收命令 #7 未通过。9 个 protected path 变异因临时目录缺少 .collie/collie.toml 而无法运行 evidence 测试，被判为 invalid 而非 caught。CI 以 R2 取证为准。
+- 提交：`fa89a59`
+- 验收命令：9/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1135 passed, 0 failed
+  - `npm test -- test/mutation.test.ts` → exit 0，22 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/mutation.test.ts | grep -qE "^(1[8-9]|[2-9][0-9])$"` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" scripts/mutation.ts | grep -qE "numFailedTests" && grep -qE "numFailedTests" test/mutation.test.ts` → exit 0，exit 0
+  - `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" | tail -n 1 | grep -qE "^mutation: caught [0-9]+ survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` → exit 1，exit 1
+  - `d=$(mktemp -d) && TMPDIR=$d npm test -- test/preflight.test.ts && ! ls -d "$d"/collie-clone-* >/dev/null 2>&1` → exit 0，10 passed, 0 failed
+  - `npx tsx scripts/mutation.ts --list | grep -c . | grep -qE "^(4[4-9]|[5-9][0-9]|[1-9][0-9][0-9])$"` → exit 0，exit 0
+  - `grep -qE "numFailedTests" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44014799696
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
