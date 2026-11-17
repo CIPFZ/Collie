@@ -15,9 +15,11 @@
 > 允许改写的旧用例要点名，不写「与新行为冲突的可以改」这种交给 worker 判断的豁免；队列参数（如 `--max`）碰到没跑过的情形之前，先用假 runner 试一遍。
 > R1 复核自查（v045-b09 后，SPEC 14.16）：检查工具报「全部被发现」「全部通过」时先做一次对照——不做任何改动走一遍它的判定路径，结果应该是「没被发现」；
 > 对照没做过的结论不写进规格（「变异检查 44 项全部被发现」里有 9 项是测试文件加载失败）。
+> R1 签发自查（v045-b15 / v046-b03 后，SPEC 14.21、14.23）：签批次前先查现有测试里谁守着要改的行为，在条目里写「R1 查过」哪几条；
+> 要读的 SPEC 小节号写在条目或情形里，不写在开头的说明里（说明文字不进任何任务书）；验收不数用例个数（夹具里的 `it(` 也会被数进去），改成点名用例组的标题。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b17 与 v046-b01 已通过（SPEC 14.19、14.21）；队列从 v045-b18 起，固定版本 `1cf7bb1`。分工改造（SPEC 第 16 章）第 3 步的前两块是 v046-b02、b03
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b03 已通过（SPEC 14.19、14.21、14.23）；队列从 v046-b04 起，固定版本 `d51e5ac`。分工改造（SPEC 第 16 章）第 3 步接着做的两块是 v046-b04、b05
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -93,6 +95,8 @@
 | 65 | v045-b18 | 运行器：失败的返回值一定带结束原因 | v045-b15 | passed |
 | 66 | v046-b02 | 测试 agent 的角色模块：角色、配置段、提示词（不接进队列） | v046-b01 | passed |
 | 67 | v046-b03 | 红检查：验收测试在没有实现时，新行为的全部失败、要保持的全部通过（不接进队列） | v046-b01 | passed |
+| 68 | v046-b04 | 条目的「情形」写法：backlog 解析情形与接口，测试 agent 只拿情形（不接进队列） | v046-b02 | pending |
+| 69 | v046-b05 | 红检查加静态检查：只多了验收测试的树上 lint 与类型检查必须通过（不接进队列） | v046-b03 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -2737,3 +2741,97 @@ v045-b15 之后，只有一条结果消息时返回值有 3 处和以前不同�
 - 为了让测试过而删除或跳过任何测试；改写任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求（本批次的测试可以起真实的 vitest 子进程，别的不行）；新增依赖
+
+## v046-b04 条目的「情形」写法：backlog 解析情形与接口，测试 agent 只拿情形（不接进队列）
+
+优先级：68　依赖：v046-b02
+
+分工改造第 3 步（SPEC 第 16 章）。v046-b02 把写给 worker 的条目原文交给了测试 agent，操作员实测提示词后指出两者直接冲突。这一批定下条目里「情形」的写法，并让测试 agent 只拿情形。不动队列。
+
+条目：
+1. 读 SPEC 16.11 的「条目怎么写」一段。`src/backlog.ts` 与 `src/schema/index.ts`：批次小节里可选的两节，标签各占一行，写法与现有的 `条目` 标签相同（全角或半角冒号都认）。
+   第一节的标签是 `情形`，内容是无序列表，每条 `- <编号> [新] <文字>` 或 `- <编号> [保持] <文字>`，编号是一个大写字母加数字，缩进的续行并进同一条（与条目的续行规则相同）；
+   第二节的标签是 `接口`，内容是无序列表，自由文字。解析结果里多出 `scenarios`（每条有 `id`、`kind`（`new` 或 `keep`）、`text`）与 `interfaces`（字符串数组）。
+   没有对应小节时，解析结果里不出现这个键。拒绝并报出行号的：编号重复；类别不是这两个；条目不符合上面的格式；有 `情形` 标签而一条都没有；一条 `[新]` 都没有；同一节出现两次。
+   `collie show <批次>`：有情形时，在验收命令之后打印情形（编号、类别、文字）与接口。
+   **一个带两条 `[新]`、一条 `[保持]`、两条接口的批次：解析出 3 条情形，编号、类别、文字都对；同一份 backlog 里不带这两节的批次，解析结果与现在逐字段相同，没有多出键**
+2. 读 SPEC 16.11 的「测试 agent 拿到什么」一段。`src/roles/tester.ts`：`TesterInputSchema` 去掉 `items`，换成 `scenarios`（非空，至少一条 `new`）与 `interfaces`（可以为空数组），仍是严格对象，共五个字段。
+   `buildTesterPrompt`：「情形」一节分「新行为」「必须保持」两组列出，编号与文字一字不改；「接口」一节逐条列出，为空时写「（未指定）」；通篇不出现「条目」二字。
+   输出一节：`new.test.ts` 与 `MAP.md` 总是列出；`keep.test.ts` 与它的自检命令只在有 `keep` 情形时出现；自检命令的最后加 `npm run lint` 与 `npm run typecheck` 两行。
+   **只有 `[新]` 情形时，提示词通篇不出现 `keep.test.ts`；有 `[保持]` 情形时，它和它的自检命令都在**
+3. 测试。新用例放进点名的组里：`test/backlog.test.ts` 新加一组 `describe('backlog: scenarios and interfaces', …)`，含条目 1 加粗的情形、续行、两种冒号；
+   `test/backlog-reject.test.ts` 新加一组 `describe('backlog: rejects malformed scenarios', …)`，条目 1 列的六种拒绝各一条，都断言报错里的行号；
+   `test/cli.test.ts` 加一条 `show prints scenarios and interfaces when the batch has them`；
+   `test/tester.test.ts` 新加一组 `describe('tester: scenarios in the prompt', …)`，含条目 2 加粗的两种情形、两组的先后、接口为空时的写法、自检命令里有 lint 与 typecheck 两行。
+   R1 查过现有用例：`test/backlog.test.ts` 的 `matches the hand-written expectation including status` 用整对象比较，所以「没有小节时不出现这个键」必须成立，这一条不许改；
+   `test/tester.test.ts` 里会被碰到的只有：夹具函数 `validInput`（`items` 换成 `scenarios` 与 `interfaces`）、`accepts a valid input with exactly four fields`（改成五个字段）、
+   `includes items verbatim`（改成情形的文字一字不改）、`includes self-check vitest commands`（按有没有 `keep` 情形分开断言）。只许改写这四处，每处在「偏离或疑问」里列出原断言与现断言。
+   你发现还有别的现有用例与本批次冲突，停下，在「偏离或疑问」里写明是哪一条，不要自己改。
+   `test/invariants.test.ts` 加「`src/roles/tester.ts` 的非注释行里不出现 `items`」
+
+本批次只改 `src/backlog.ts`、`src/schema/index.ts`、`src/cli.ts`、`src/roles/tester.ts`、`test/backlog.test.ts`、`test/backlog-reject.test.ts`、`test/cli.test.ts`、`test/tester.test.ts`、`test/invariants.test.ts`。
+类型检查因为批次多了可选字段而要求改这之外的文件时，可以改，在「偏离或疑问」里逐个列出。不应改动 `test/invariants.test.ts` 已有的任何断言。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 解析、show、测试 agent 的测试通过 | `npm test -- test/backlog.test.ts test/backlog-reject.test.ts test/cli.test.ts test/tester.test.ts` | exit 0 |
+| 解析的两组新用例在 | `grep -qF "backlog: scenarios and interfaces" test/backlog.test.ts && grep -qF "backlog: rejects malformed scenarios" test/backlog-reject.test.ts` | exit 0 |
+| show 与提示词的新用例在 | `grep -qF "show prints scenarios and interfaces when the batch has them" test/cli.test.ts && grep -qF "tester: scenarios in the prompt" test/tester.test.ts` | exit 0 |
+| 测试 agent 不再拿条目（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" src/roles/tester.ts \| grep -qE "\bitems\b"` | exit 0 |
+| 不变量同步 | `grep -qE "roles/tester.*items\|items.*roles/tester" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `docs/backlog.md`、`.collie/collie.toml`、`AGENT-tester.md`）；改动 `templates/collie.toml`、`.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/run.ts`、`src/redcheck.ts`、`src/roles/worker.ts`、`src/roles/reviewer.ts`、`src/runner/`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/view.ts`、`src/follow.ts`；把测试 agent 接进队列
+- 改变不带这两节的批次的解析结果；为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v046-b05 红检查加静态检查：只多了验收测试的树上 lint 与类型检查必须通过（不接进队列）
+
+优先级：69　依赖：v046-b03
+
+分工改造第 3 步（SPEC 第 16 章）。worker 改不了验收测试；带着格式错误或 lint 错误的验收测试一旦进了主工作区，批次就永远过不了。所以红检查要在它们进去之前多查一步。不动队列。
+
+条目：
+1. 读 SPEC 16.11 的「红检查加静态检查」一段（判据原文在 16.10）。`src/redcheck.ts`：`RunRedCheckOpts` 加可选的 `staticCommands`（字符串数组，每条是一条 shell 命令）。
+   两个测试文件跑完之后，在 `tree` 里逐条执行（经注入的 `spawn`，以 `sh -c <命令>` 的形式，超时用同一个 `timeoutMs`）；退出码不是 0 的记一条问题：
+   `file` 是 `'static'`，`testName` 是命令原文，`reason` 含退出码与输出的末 20 行；超时的同样记一条，写明是超时。测试的问题与静态检查的问题一起返回，`ok` 要两边都没有问题才是 true。
+   不传 `staticCommands` 时，行为与返回值和现在完全一样。测试文件自己超时的，照旧直接返回，不再跑静态命令。
+   **`new.test.ts` 两条都失败，静态命令是一条退出码 3、输出里有 `boom` 的命令 → 不过，问题里有这条命令的原文、`3` 与 `boom`；换成退出码 0 的命令 → 过**
+2. 同一文件：`keep.test.ts` 存在而没有拿到它的报告（vitest 没有写出报告文件）时，记一条问题 `file` 为 `'keep'`、`reason` 是 `no report produced`，不再当成没有这个文件而放行。
+   `judgeRedCheck` 不改：它的「`keepReport` 为 null 即没有 keep 文件」的约定留着，这一处在 `runRedCheck` 里判断。
+3. `test/redcheck.test.ts` 新加一组 `describe('runRedCheck: static commands and missing reports', …)`：
+   条目 1 加粗的两种情形（真实的 vitest 跑真实的文件，静态命令真实执行）；两条静态命令、第一条过第二条不过 → 只有第二条的问题；
+   测试的问题与静态检查的问题同时存在 → 两类都在返回值里；静态命令超时（注入的假子进程）；不传 `staticCommands` → 一条静态命令都没执行；
+   条目 2：`keep.test.ts` 存在、注入的假子进程不写报告 → 不过，原因是 `no report produced`。
+   R1 查过现有用例：`passes when keep report is null (no keep file)` 是 `judgeRedCheck` 的用例，本批次不改 `judgeRedCheck`，它不受影响；
+   `fails on timeout with injected fake spawn` 测的是测试文件超时，行为不变。已有用例一条都不改；你发现有别的现有用例与本批次冲突，停下，在「偏离或疑问」里写明。
+   `test/invariants.test.ts` 加「`src/redcheck.ts` 里有 `staticCommands`」
+
+本批次只改 `src/redcheck.ts`、`test/redcheck.test.ts`、`test/invariants.test.ts`。不应改动 `test/invariants.test.ts` 已有的任何断言。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 红检查的测试通过，仓库里没有留下报告 | `npm test -- test/redcheck.test.ts && ! test -e .vitest` | exit 0 |
+| 新的一组用例在 | `grep -qF "runRedCheck: static commands and missing reports" test/redcheck.test.ts` | exit 0 |
+| 静态检查与缺报告两处都进了代码与测试 | `grep -qF "staticCommands" src/redcheck.ts && grep -qF "staticCommands" test/redcheck.test.ts && grep -qF "no report produced" src/redcheck.ts && grep -qF "no report produced" test/redcheck.test.ts` | exit 0 |
+| 测试不在系统临时目录留下东西 | `d=$(mktemp -d) && TMPDIR=$d npm test -- test/redcheck.test.ts && ! ls -d "$d"/collie-redcheck-* >/dev/null 2>&1` | exit 0 |
+| 不变量同步 | `grep -qF "staticCommands" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `judgeRedCheck` 的判据；改动 `src/run.ts`、`src/roles/`、`src/runner/`、`src/backlog.ts`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/view.ts`、`src/follow.ts`；把红检查接进队列
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求（本批次的测试可以起真实的 vitest 子进程与真实的 `sh`，别的不行）；新增依赖
