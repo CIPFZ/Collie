@@ -1570,4 +1570,21 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b18 · r-20261117122544 · PASS
+
+- 时间：2026-11-17T12:35:51.643Z
+- 裁定：规则 10，全部 5 条验收命令实跑通过；代码改动仅 1 行（stopReason ?? 'error'），确保所有 EXIT_FAILED 路径带结束原因；新增 4 条测试覆盖 task 要求的全部场景；无受保护文件/依赖/已有断言改动；CI 以 R2 取证为准。
+- 提交：`ced58c7`
+- 验收命令：5/5 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1196 passed, 0 failed
+  - `npm test -- test/runner-claude.test.ts` → exit 0，79 passed, 0 failed
+  - `grep -qF "failed runs always carry a stop reason" test/runner-claude.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44083652195
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
