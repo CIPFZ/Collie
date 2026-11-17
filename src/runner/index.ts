@@ -2,7 +2,7 @@
 // Agent-specific concepts (session ids, permission modes, model names,
 // stream formats) stay behind this interface: callers only see these types.
 
-export type AgentRole = 'worker' | 'reviewer';
+export type AgentRole = 'worker' | 'reviewer' | 'tester';
 
 export interface Usage {
   inputTokens: number;

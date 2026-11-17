@@ -28,6 +28,13 @@ max_turns = 60
 permission_mode = "bypassPermissions"
 bash_deny = ["^\\\\s*git\\\\s+(push|commit|add|reset|checkout|rebase|merge|cherry-pick|tag|branch\\\\s+-[dDm]|worktree|stash)(?=\\\\s|$)", "^\\\\s*gh\\\\s"]
 
+[agent.tester]
+model = "claude-opus-4-6"
+allowed_tools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
+max_turns = 100
+permission_mode = "bypassPermissions"
+bash_deny = ["^\\\\s*git\\\\s+(push|commit|add|reset|checkout|rebase|merge|cherry-pick|tag|branch\\\\s+-[dDm]|worktree|stash)(?=\\\\s|$)", "^\\\\s*gh\\\\s"]
+
 [limits]
 stall_secs = 300
 progress_secs = 1500
@@ -129,6 +136,19 @@ describe('config: template config (SPEC 3.1 values)', () => {
     });
   });
 
+  it('has the tester agent of SPEC 16.10', () => {
+    expect(config.agent.tester).toEqual({
+      model: 'claude-opus-4-6',
+      allowed_tools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
+      max_turns: 100,
+      permission_mode: 'bypassPermissions',
+      bash_deny: [
+        '^\\s*git\\s+(push|commit|add|reset|checkout|rebase|merge|cherry-pick|tag|branch\\s+-[dDm]|worktree|stash)(?=\\s|$)',
+        '^\\s*gh\\s',
+      ],
+    });
+  });
+
   it('equals the inline SPEC 3.1 fixture used by the error tests', () => {
     expect(parseConfig(VALID_TOML, 'inline.toml')).toEqual(config);
   });
@@ -219,6 +239,15 @@ describe('config: validation errors carry field paths', () => {
   it('reports a schema_version mismatch', () => {
     const err = configError(replaceLine(VALID_TOML, 'schema_version = 1', 'schema_version = 2'));
     expect(err.issues.map((i) => i.path)).toEqual(['schema_version']);
+  });
+
+  it('loads config without [agent.tester] section (tester is optional)', () => {
+    const text = VALID_TOML.replace(/\[agent\.tester\]\n(?:.*\n)*?(?=\n\[)/, '');
+    const parsed = parseConfig(text, 'inline.toml');
+    expect(parsed.agent.tester).toBeUndefined();
+    // worker and reviewer still parse fine
+    expect(parsed.agent.worker.model).toBe('claude-opus-4-6');
+    expect(parsed.agent.reviewer.model).toBe('claude-opus-4-6');
   });
 
   it('reports every issue at once, not only the first', () => {

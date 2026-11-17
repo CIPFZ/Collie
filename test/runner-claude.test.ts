@@ -1330,6 +1330,114 @@ describe('runner-claude: failed runs always carry a stop reason', () => {
   });
 });
 
+describe('runner-claude: tester role (SPEC 16.10, v046-b02)', () => {
+  it('uses agent.tester config for tester role', async () => {
+    const tester = config.agent.tester;
+    expect(tester).toBeDefined();
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(config, { query }).run(
+      opts({
+        role: 'tester',
+        allowedTools: tester?.allowed_tools ?? [],
+        maxTurns: tester?.max_turns ?? 100,
+      }),
+    );
+    expect(calls[0]?.options).toMatchObject({
+      model: tester?.model,
+      maxTurns: tester?.max_turns,
+      allowedTools: tester?.allowed_tools,
+    });
+  });
+
+  it('tester does NOT get disallowedTools (unlike reviewer)', async () => {
+    const tester = config.agent.tester;
+    expect(tester).toBeDefined();
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(config, { query }).run(
+      opts({
+        role: 'tester',
+        allowedTools: tester?.allowed_tools ?? [],
+        maxTurns: tester?.max_turns ?? 100,
+      }),
+    );
+    expect(calls[0]?.options).not.toHaveProperty('disallowedTools');
+  });
+
+  it('tester bash_deny denies git commit -m x', async () => {
+    const tester = config.agent.tester;
+    expect(tester).toBeDefined();
+    const events: unknown[] = [];
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(config, { query }).run(
+      opts({
+        role: 'tester',
+        allowedTools: tester?.allowed_tools ?? [],
+        maxTurns: tester?.max_turns ?? 100,
+        onEvent: (e) => events.push(e),
+      }),
+    );
+    // Extract the PreToolUse hook
+    const matchers = calls[0]?.options?.hooks?.PreToolUse;
+    expect(matchers).toBeDefined();
+    const hookEntry = matchers?.[0];
+    expect(hookEntry).toBeDefined();
+    const hookFn = hookEntry?.hooks[0];
+    expect(hookFn).toBeDefined();
+    const result = await (
+      hookFn as unknown as (
+        input: HookInput,
+        id: string,
+        opts: { signal: AbortSignal },
+      ) => Promise<unknown>
+    )(
+      {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'git commit -m x' },
+        tool_use_id: 'tu_tester',
+      } as unknown as HookInput,
+      'tu_tester',
+      { signal: AbortSignal.timeout(5000) },
+    );
+    const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
+      .hookSpecificOutput;
+    expect(output?.permissionDecision).toBe('deny');
+  });
+
+  it('tester Write and Edit are in its allowedTools', async () => {
+    const tester = config.agent.tester;
+    expect(tester).toBeDefined();
+    const { query, calls } = scripted([success()]);
+    await new ClaudeRunner(config, { query }).run(
+      opts({
+        role: 'tester',
+        allowedTools: tester?.allowed_tools ?? [],
+        maxTurns: tester?.max_turns ?? 100,
+      }),
+    );
+    const tools = calls[0]?.options?.tools;
+    expect(tools).toContain('Write');
+    expect(tools).toContain('Edit');
+  });
+
+  it('throws when config has no [agent.tester] and role is tester', async () => {
+    const noTester = {
+      ...config,
+      agent: { worker: config.agent.worker, reviewer: config.agent.reviewer },
+    };
+    const { query } = scripted([success()]);
+    await expect(
+      new ClaudeRunner(noTester, { query }).run(
+        opts({
+          role: 'tester',
+          allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
+          maxTurns: 100,
+        }),
+      ),
+    ).rejects.toThrow('[agent.tester]');
+  });
+});
+
 describe('runner-claude: more than one result message', () => {
   it('two successful results: turns summed, tokens summed, cost from last, finalText joined, exit 0', async () => {
     const result1: unknown = {

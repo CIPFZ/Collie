@@ -341,7 +341,23 @@ export class ClaudeRunner implements AgentRunner {
     const runStart = Date.now();
     // The model, tools and turn limit come from the role's config (ROADMAP 0.4:
     // model names do not travel through RunOptions).
-    const agent = opts.role === 'worker' ? this.config.agent.worker : this.config.agent.reviewer;
+    const agent = (() => {
+      switch (opts.role) {
+        case 'worker':
+          return this.config.agent.worker;
+        case 'reviewer':
+          return this.config.agent.reviewer;
+        case 'tester': {
+          const testerCfg = this.config.agent.tester;
+          if (testerCfg === undefined) {
+            throw new Error(
+              'tester role requires [agent.tester] in collie.toml but the section is missing',
+            );
+          }
+          return testerCfg;
+        }
+      }
+    })();
     if (opts.allowedTools.some((tool) => !agent.allowed_tools.includes(tool))) {
       throw new Error(
         `allowedTools ${opts.allowedTools.join(', ')} exceed the ${opts.role} whitelist`,
@@ -403,13 +419,18 @@ export class ClaudeRunner implements AgentRunner {
     const REVIEWER_DISALLOWED_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
 
     /**
-     * SPEC 11.2 (v03-b02): PreToolUse hook for the reviewer's Bash command deny list.
-     * Matches each Bash command against bash_deny regexes; returns 'deny' on match.
+     * SPEC 11.2 (v03-b02): PreToolUse hook for the bash command deny list.
+     * Applies to reviewer and tester (SPEC 16.10); worker has no bash_deny.
      */
-    const reviewerConfig = opts.role === 'reviewer' ? this.config.agent.reviewer : undefined;
-    const bashDeny: RegExp[] = (reviewerConfig?.bash_deny ?? []).map((p) => new RegExp(p));
+    const bashDenyConfig =
+      opts.role === 'reviewer'
+        ? this.config.agent.reviewer
+        : opts.role === 'tester' && this.config.agent.tester !== undefined
+          ? this.config.agent.tester
+          : undefined;
+    const bashDeny: RegExp[] = (bashDenyConfig?.bash_deny ?? []).map((p) => new RegExp(p));
     const hooks: ClaudeQueryOptions['hooks'] =
-      opts.role === 'reviewer' && bashDeny.length > 0
+      (opts.role === 'reviewer' || opts.role === 'tester') && bashDeny.length > 0
         ? {
             PreToolUse: [
               {

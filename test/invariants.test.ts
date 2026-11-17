@@ -563,4 +563,10 @@ describe('structural invariants (SPEC 3.2)', () => {
       `Only test/config.test.ts should load config from repo root, got: ${filtered.join(', ')}`,
     ).toEqual(['test/config.test.ts']);
   });
+
+  it('src/roles/tester.ts source does not contain report.md (v046-b02)', () => {
+    const content = readFileSync(join(ROOT, 'src/roles/tester.ts'), 'utf8');
+    // SPEC 16.10: the tester runs before the worker; it has nothing to do with reports.
+    expect(content).not.toContain('report.md');
+  });
 });

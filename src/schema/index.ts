@@ -71,28 +71,42 @@ export type AgentConfig = z.infer<typeof AgentConfigSchema>;
  * Reviewer-specific config extends the base with bash_deny (SPEC 11.2, v03-b02).
  * Each entry is a regex string; invalid regex is rejected at parse time.
  */
+/** Shared bash_deny field used by reviewer and tester (SPEC 11.2, v03-b02, 16.10). */
+const BashDenyField = z
+  .array(z.string())
+  .optional()
+  .default([])
+  .refine(
+    (patterns) => {
+      for (const p of patterns) {
+        try {
+          new RegExp(p);
+        } catch {
+          return false;
+        }
+      }
+      return true;
+    },
+    { message: 'bash_deny contains an invalid regular expression' },
+  );
+
 export const ReviewerAgentConfigSchema = z.strictObject({
   ...AgentConfigBase,
   /** SPEC 11.2: Bash command deny patterns (regex). Absent or empty = no hook. */
-  bash_deny: z
-    .array(z.string())
-    .optional()
-    .default([])
-    .refine(
-      (patterns) => {
-        for (const p of patterns) {
-          try {
-            new RegExp(p);
-          } catch {
-            return false;
-          }
-        }
-        return true;
-      },
-      { message: 'bash_deny contains an invalid regular expression' },
-    ),
+  bash_deny: BashDenyField,
 });
 export type ReviewerAgentConfig = z.infer<typeof ReviewerAgentConfigSchema>;
+
+/**
+ * Tester-specific config: same structure as reviewer (SPEC 16.10, v046-b02).
+ * The tester has write tools and bash_deny but not the reviewer's disallowedTools.
+ */
+export const TesterAgentConfigSchema = z.strictObject({
+  ...AgentConfigBase,
+  /** SPEC 16.10: Bash command deny patterns (same as reviewer). */
+  bash_deny: BashDenyField,
+});
+export type TesterAgentConfig = z.infer<typeof TesterAgentConfigSchema>;
 
 export const LimitsSchema = z.strictObject({
   stall_secs: z.number().int().positive(),
@@ -128,6 +142,8 @@ export const CollieConfigSchema = z.strictObject({
   agent: z.strictObject({
     worker: AgentConfigSchema,
     reviewer: ReviewerAgentConfigSchema,
+    /** SPEC 16.10: optional tester config; absent → tester role cannot run. */
+    tester: TesterAgentConfigSchema.optional(),
   }),
   limits: LimitsSchema,
   verify: z.strictObject({
