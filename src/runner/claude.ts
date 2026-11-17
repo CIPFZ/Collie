@@ -548,9 +548,11 @@ export class ClaudeRunner implements AgentRunner {
         // The throw means the run failed regardless of individual results.
         const agg = aggregateResults(results, lastSessionId, interrupted, durationMs);
         // Force failure: exitCode non-zero, strip finalText (destructure to omit).
+        // SPEC 14.22: failed runs always carry a stop reason; when the aggregate
+        // has none (all results were successful before the throw), record 'error'.
         // eslint-disable-next-line @typescript-eslint/no-unused-vars -- stripping finalText
         const { finalText: _stripped, ...rest } = agg;
-        return { ...rest, exitCode: EXIT_FAILED };
+        return { ...rest, exitCode: EXIT_FAILED, stopReason: rest.stopReason ?? 'error' };
       }
       // SPEC 11.2: SDK errors must still return RunResult with sessionId when possible.
       if (lastSessionId !== undefined) {

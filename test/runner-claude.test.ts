@@ -1231,6 +1231,105 @@ describe('runner-claude: bash_deny positive/negative with repo toml patterns (v0
   });
 });
 
+describe('runner-claude: failed runs always carry a stop reason', () => {
+  it('one successful result then SDK throws: exitCode non-0, stopReason error, usage and turns carried, no finalText', async () => {
+    const r1: unknown = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'partial answer',
+      session_id: 'sess-throw-1',
+      usage: { input_tokens: 500, output_tokens: 100 },
+      total_cost_usd: 0.5,
+      num_turns: 5,
+    };
+    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery requires AsyncIterable
+    const query: ClaudeQuery = async function* () {
+      yield r1;
+      throw new Error('stream crashed');
+    };
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.exitCode).toBe(1);
+    expect(result.stopReason).toBe('error');
+    expect(result.costUsd).toBe(0.5);
+    expect(result.numTurns).toBe(5);
+    expect(result.usage).toEqual({ inputTokens: 500, outputTokens: 100 });
+    expect(result.sessionId).toBe('sess-throw-1');
+    expect(result).not.toHaveProperty('finalText');
+    expect(result.durationMs).toBeTypeOf('number');
+  });
+
+  it('two successful results then SDK throws: exitCode non-0, stopReason error, turns summed', async () => {
+    const r1: unknown = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'part 1',
+      session_id: 'sess-throw-a',
+      usage: { input_tokens: 200, output_tokens: 40 },
+      total_cost_usd: 0.3,
+      num_turns: 3,
+    };
+    const r2: unknown = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'part 2',
+      session_id: 'sess-throw-b',
+      usage: { input_tokens: 300, output_tokens: 60 },
+      total_cost_usd: 0.6,
+      num_turns: 4,
+    };
+    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery requires AsyncIterable
+    const query: ClaudeQuery = async function* () {
+      yield r1;
+      yield r2;
+      throw new Error('connection dropped');
+    };
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.exitCode).toBe(1);
+    expect(result.stopReason).toBe('error');
+    expect(result.numTurns).toBe(7);
+    expect(result.usage).toEqual({ inputTokens: 500, outputTokens: 100 });
+    expect(result.costUsd).toBe(0.6);
+    expect(result.sessionId).toBe('sess-throw-b');
+    expect(result).not.toHaveProperty('finalText');
+    expect(result.durationMs).toBeTypeOf('number');
+  });
+
+  it('subtype success with is_error true: exitCode non-0, stopReason error, no finalText', async () => {
+    const { query } = scripted([
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: true,
+        result: 'partial',
+        session_id: 'sess-ie',
+      },
+    ]);
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.exitCode).toBe(1);
+    expect(result.stopReason).toBe('error');
+    expect(result).not.toHaveProperty('finalText');
+  });
+
+  it('successful result with empty text: exitCode 0, no finalText key', async () => {
+    const { query } = scripted([
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: '',
+        session_id: 'sess-empty',
+        usage: { input_tokens: 50, output_tokens: 10 },
+      },
+    ]);
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.exitCode).toBe(0);
+    expect(result).not.toHaveProperty('finalText');
+  });
+});
+
 describe('runner-claude: more than one result message', () => {
   it('two successful results: turns summed, tokens summed, cost from last, finalText joined, exit 0', async () => {
     const result1: unknown = {
