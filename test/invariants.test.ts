@@ -569,4 +569,11 @@ describe('structural invariants (SPEC 3.2)', () => {
     // SPEC 16.10: the tester runs before the worker; it has nothing to do with reports.
     expect(content).not.toContain('report.md');
   });
+
+  it('src/redcheck.ts uses --outputFile (v046-b03)', () => {
+    const content = readFileSync(join(ROOT, 'src/redcheck.ts'), 'utf8');
+    // SPEC 15.5 / 16.10: JSON reports must be written via --outputFile to a temp dir,
+    // not left as .vitest/ in the working directory.
+    expect(content).toContain('--outputFile');
+  });
 });
