@@ -55,7 +55,7 @@ export function testFilesFor(file: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Mutation list — 44 items (SPEC 15.1)
+// Mutation list — 42 items (SPEC 15.1, v045-b13: rule 4 removed)
 // ---------------------------------------------------------------------------
 
 export const MUTATIONS: MutationItem[] = [
@@ -78,12 +78,6 @@ export const MUTATIONS: MutationItem[] = [
     name: 'rule3-deps',
     file: 'src/arbiter.ts',
     original: 'if (copyleft.length > 0 || unapproved.length > 0) {',
-    replacement: 'if (false) {',
-  },
-  {
-    name: 'rule4-reviewer-mismatch',
-    file: 'src/arbiter.ts',
-    original: 'if (verdict.claim_mismatches.length > 0) {',
     replacement: 'if (false) {',
   },
   {
@@ -145,12 +139,6 @@ export const MUTATIONS: MutationItem[] = [
     original:
       'const undeclared = evidence.deps_diff.filter((d) => !claims.new_deps.includes(packageName(d)));',
     replacement: 'const undeclared: string[] = [];',
-  },
-  {
-    name: 'rule4-pass-to-fix',
-    file: 'src/arbiter.ts',
-    original: "const final = original === 'PASS' ? 'FIX' : original;",
-    replacement: 'const final = original;',
   },
   {
     name: 'rules5-7-block-not-softened',

@@ -177,6 +177,13 @@ describe('reviewer: VerdictSchema (SPEC 3.5)', () => {
     expect(JSON.stringify(result.error?.issues)).toContain('notes');
   });
 
+  it('accepts a verdict without claim_mismatches, defaulting to empty array (v045-b13)', () => {
+    const withoutMismatches = { ...verdict } as Record<string, unknown>;
+    delete withoutMismatches.claim_mismatches;
+    const parsed = VerdictSchema.parse(withoutMismatches);
+    expect(parsed.claim_mismatches).toEqual([]);
+  });
+
   it.each(['v01-b01', 'v01-b02'])(
     'documents that the historical %s verdict still fails only on free-text ci_conclusion',
     (batchId) => {

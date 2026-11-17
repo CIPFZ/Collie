@@ -57,7 +57,7 @@ export interface ArbiterDecision {
 const RULE_UNPARSEABLE = 1;
 const RULE_SPEC_TOUCHED = 2;
 const RULE_DEPENDENCIES = 3;
-const RULE_REVIEWER_MISMATCHES = 4;
+// Rule 4: deleted (v045-b13, SPEC 14.18); number kept for journal continuity.
 const RULE_PUSH = 5;
 const RULE_TESTS = 6;
 const RULE_CI = 7;
@@ -182,16 +182,7 @@ export function arbitrate(input: ArbiterInput): ArbiterDecision {
     return decide(original, 'BLOCK', RULE_DEPENDENCIES, parts.join('; '), denied);
   }
 
-  // Rule 4: the reviewer itself found claims that do not hold.
-  if (verdict.claim_mismatches.length > 0) {
-    const final = original === 'PASS' ? 'FIX' : original;
-    return decide(
-      original,
-      final,
-      RULE_REVIEWER_MISMATCHES,
-      `reviewer reported ${String(verdict.claim_mismatches.length)} claim mismatch(es)`,
-    );
-  }
+  // Rule 4: (deleted, v045-b13 / SPEC 14.18; number preserved, slot empty)
 
   // Rules 5-7 compare a claim with evidence; each hit forces FIX and records the mismatch.
   // BLOCK from the reviewer is never softened to FIX.

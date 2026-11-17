@@ -160,24 +160,43 @@ describe('arbiter: rule 3, dependencies', () => {
   });
 });
 
-describe('arbiter: rule 4, reviewer-reported mismatches', () => {
-  it('downgrades PASS to FIX', () => {
-    const decision = arbitrate(input({ verdict: { claim_mismatches: [{ field: 'x' }] } }));
+describe('arbiter: rule 4 deleted (v045-b13)', () => {
+  it('claim_mismatches non-empty with rule 3 → rule 3 still fires', () => {
+    expect(
+      arbitrate(
+        input({ verdict: { claim_mismatches: ['x'] }, evidence: { deps_diff: ['left-pad'] } }),
+      ).rule,
+    ).toBe(3);
+  });
+
+  it('claim_mismatches non-empty, pushed claim false, remote_has_head false → rule 5', () => {
+    expect(
+      arbitrate(
+        input({
+          verdict: { claim_mismatches: ['x'] },
+          claims: { pushed: true },
+          evidence: { remote_has_head: false },
+        }),
+      ).rule,
+    ).toBe(5);
+  });
+
+  it('reviewer PASS with claim_mismatches non-empty, all evidence good → PASS rule 10', () => {
+    const decision = arbitrate(input({ verdict: { claim_mismatches: ['x'] } }));
     expect(decision).toMatchObject({
-      final: 'FIX',
+      final: 'PASS',
       original: 'PASS',
-      rule: 4,
-      downgraded: true,
-      mismatches: [],
+      rule: 10,
+      downgraded: false,
     });
   });
 
-  it('keeps a BLOCK as BLOCK', () => {
-    expect(
-      arbitrate(input({ verdict: { verdict: 'BLOCK', claim_mismatches: ['x'] } })),
-    ).toMatchObject({
-      final: 'BLOCK',
-      rule: 4,
+  it('reviewer FIX with claim_mismatches non-empty → FIX rule 10', () => {
+    const decision = arbitrate(input({ verdict: { verdict: 'FIX', claim_mismatches: ['x'] } }));
+    expect(decision).toMatchObject({
+      final: 'FIX',
+      original: 'FIX',
+      rule: 10,
       downgraded: false,
     });
   });
@@ -471,7 +490,7 @@ describe('arbiter: order matters, first hit wins', () => {
     expect(decision.mismatches.map((m) => m.rule)).toEqual([2]);
   });
 
-  it('rule 3 beats rule 4', () => {
+  it('claim_mismatches non-empty with rule 3 → rule 3 fires', () => {
     expect(
       arbitrate(
         input({ verdict: { claim_mismatches: ['x'] }, evidence: { deps_diff: ['left-pad'] } }),
@@ -479,12 +498,16 @@ describe('arbiter: order matters, first hit wins', () => {
     ).toBe(3);
   });
 
-  it('rule 4 beats rule 5', () => {
+  it('claim_mismatches non-empty, pushed true, remote_has_head false → rule 5', () => {
     expect(
       arbitrate(
-        input({ verdict: { claim_mismatches: ['x'] }, evidence: { remote_has_head: false } }),
+        input({
+          verdict: { claim_mismatches: ['x'] },
+          claims: { pushed: true },
+          evidence: { remote_has_head: false },
+        }),
       ).rule,
-    ).toBe(4);
+    ).toBe(5);
   });
 
   it('rule 5 beats rule 6, which beats rule 7', () => {

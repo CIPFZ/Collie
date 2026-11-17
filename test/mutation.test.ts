@@ -18,8 +18,8 @@ import {
 const ROOT = join(import.meta.dirname, '..');
 
 describe('mutation list shape (SPEC 15.1)', () => {
-  it('has at least 44 items', () => {
-    expect(MUTATIONS.length).toBeGreaterThanOrEqual(44);
+  it('has at least 42 items', () => {
+    expect(MUTATIONS.length).toBeGreaterThanOrEqual(42);
   });
 
   it('has no duplicate names', () => {
@@ -153,7 +153,7 @@ describe('checkUnique (SPEC 15.1)', () => {
 
 describe('last line format (SPEC 15.5)', () => {
   it('matches the fixed format regex', () => {
-    const line = 'mutation: caught 44 survived 0 invalid 0 timeout 0 stale 0';
+    const line = 'mutation: caught 42 survived 0 invalid 0 timeout 0 stale 0';
     expect(line).toMatch(/^mutation: caught \d+ survived \d+ invalid \d+ timeout \d+ stale \d+$/);
   });
 });

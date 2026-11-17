@@ -343,8 +343,8 @@ export const VerdictSchema = z.strictObject({
     deps_diff: z.array(z.string()),
     spec_diff_lines: z.number().int().nonnegative(),
   }),
-  // SPEC 3.5 does not specify item shapes; arbiter rule 4 only needs emptiness.
-  claim_mismatches: z.array(JsonValueSchema),
+  // SPEC 3.5 does not specify item shapes; v045-b13: made optional (defaults to []).
+  claim_mismatches: z.array(JsonValueSchema).optional().default([]),
   gaps: z.array(z.string()),
   /** Non-empty means PASS with conditions (SPEC 3.5). */
   conditions: z.array(z.string()).optional(),

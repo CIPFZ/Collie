@@ -525,4 +525,19 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/follow.ts'), 'utf8');
     expect(content).toContain('syncFailures');
   });
+
+  it('src/arbiter.ts non-comment lines do not contain claim_mismatches (v045-b13)', () => {
+    const lines = readFileSync(join(ROOT, 'src/arbiter.ts'), 'utf8').split('\n');
+    const codeLines = lines.filter(
+      (l) =>
+        !l.trimStart().startsWith('//') &&
+        !l.trimStart().startsWith('*') &&
+        !l.trimStart().startsWith('/*'),
+    );
+    const hasClaimMismatches = codeLines.some((l) => l.includes('claim_mismatches'));
+    expect(
+      hasClaimMismatches,
+      'claim_mismatches should not appear in non-comment code lines of arbiter.ts (v045-b13)',
+    ).toBe(false);
+  });
 });
