@@ -265,7 +265,7 @@ function livenessOpts(fp: ReturnType<typeof controllableFingerprint>) {
 // Group 1: Interrupt auto-retry (SPEC 13.14)
 // ---------------------------------------------------------------------------
 
-describe('scenario N group 1: interrupt auto-retry in --continue', { timeout: 60_000 }, () => {
+describe('scenario N group 1: interrupt auto-retry in --continue', () => {
   let box: Sandbox;
 
   beforeEach(async () => {
@@ -410,7 +410,7 @@ describe('scenario N group 1: interrupt auto-retry in --continue', { timeout: 60
 // Group 2: acceptance.failed regardless of verdict (SPEC 13.14)
 // ---------------------------------------------------------------------------
 
-describe('scenario N group 2: acceptance.failed regardless of verdict', { timeout: 60_000 }, () => {
+describe('scenario N group 2: acceptance.failed regardless of verdict', () => {
   let box: Sandbox;
 
   beforeEach(async () => {
@@ -461,7 +461,7 @@ describe('scenario N group 2: acceptance.failed regardless of verdict', { timeou
 // Group 3: queue.gate_passed (SPEC 13.14)
 // ---------------------------------------------------------------------------
 
-describe('scenario N group 3: queue.gate_passed after PASS', { timeout: 60_000 }, () => {
+describe('scenario N group 3: queue.gate_passed after PASS', () => {
   let box: Sandbox;
 
   beforeEach(async () => {

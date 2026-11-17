@@ -197,7 +197,7 @@ function queueReviewerFixScene(
 // Group 1: PASS path — B passes, C skipped, queue.finished(exhausted)
 // ---------------------------------------------------------------------------
 
-describe('scenario J group 1: PASS → status column → exhausted', { timeout: 60_000 }, () => {
+describe('scenario J group 1: PASS → status column → exhausted', () => {
   let box: Sandbox;
 
   beforeEach(async () => {
@@ -266,7 +266,7 @@ describe('scenario J group 1: PASS → status column → exhausted', { timeout: 
 // Group 2: FIX 3 times with fix_max=2 → escalated(fix_max)
 // ---------------------------------------------------------------------------
 
-describe('scenario J group 2: FIX × 3 → escalated(fix_max)', { timeout: 60_000 }, () => {
+describe('scenario J group 2: FIX × 3 → escalated(fix_max)', () => {
   let box: Sandbox;
 
   beforeEach(async () => {
@@ -358,7 +358,7 @@ describe('scenario J group 2: FIX × 3 → escalated(fix_max)', { timeout: 60_00
 // Group 3: --max 1 → run one, stop with queue.finished(limit)
 // ---------------------------------------------------------------------------
 
-describe('scenario J group 3: --max 1 → limit', { timeout: 60_000 }, () => {
+describe('scenario J group 3: --max 1 → limit', () => {
   let box: Sandbox;
 
   beforeEach(async () => {
@@ -403,7 +403,7 @@ describe('scenario J group 3: --max 1 → limit', { timeout: 60_000 }, () => {
 // interrupted_at is null, and does NOT contain "上一轮中断".
 // ---------------------------------------------------------------------------
 
-describe('scenario J group 4: FIX rerun task has 上一轮判 FIX section', { timeout: 60_000 }, () => {
+describe('scenario J group 4: FIX rerun task has 上一轮判 FIX section', () => {
   let box: Sandbox;
 
   beforeEach(async () => {
@@ -538,7 +538,7 @@ describe('scenario J group 4: FIX rerun task has 上一轮判 FIX section', { ti
 // Group 5 (v03-b04-fix): fix_max per-queue — historical FIX journals don't count
 // ---------------------------------------------------------------------------
 
-describe('scenario J group 5: fix_max per-queue counting', { timeout: 60_000 }, () => {
+describe('scenario J group 5: fix_max per-queue counting', () => {
   let box: Sandbox;
 
   beforeEach(async () => {

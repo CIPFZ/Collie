@@ -168,5 +168,5 @@ describe('reviewer-isolation: source and lint', () => {
       filePath: join(repoRoot, 'src', 'roles', 'reviewer.ts'),
     });
     expect((result?.messages ?? []).map((m) => m.ruleId)).toContain('no-restricted-imports');
-  }, 60_000);
+  });
 });

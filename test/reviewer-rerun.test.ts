@@ -208,7 +208,7 @@ function reviewerPassScene(
 // FIX then PASS (same batch, two attempts via --continue)
 // ===================================================================
 
-describe('reviewer-rerun: FIX then PASS', { timeout: 60_000 }, () => {
+describe('reviewer-rerun: FIX then PASS', () => {
   let box: Sandbox;
   const reviewerCaptures: ReviewerCapture[] = [];
   const workerCaptures: WorkerCapture[] = [];
@@ -306,7 +306,7 @@ describe('reviewer-rerun: FIX then PASS', { timeout: 60_000 }, () => {
 // First-time PASS (single attempt)
 // ===================================================================
 
-describe('reviewer-rerun: first PASS', { timeout: 60_000 }, () => {
+describe('reviewer-rerun: first PASS', () => {
   let box: Sandbox;
   const reviewerCaptures: ReviewerCapture[] = [];
   const workerCaptures: WorkerCapture[] = [];

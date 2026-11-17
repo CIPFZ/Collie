@@ -7,7 +7,7 @@ import { writeHeartbeat } from '../src/heartbeat.js';
 import { FakeRunner } from '../src/runner/fake.js';
 import { Sandbox } from './support/sandbox.js';
 
-describe('collie preflight', { timeout: 60_000 }, () => {
+describe('collie preflight', () => {
   let box: Sandbox;
 
   beforeEach(async () => {

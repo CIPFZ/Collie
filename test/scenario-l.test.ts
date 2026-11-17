@@ -211,7 +211,7 @@ function reviewerBadJson(box: Sandbox): {
 // Group a: PASS with gaps → queue.paused
 // ---------------------------------------------------------------------------
 
-describe('scenario L group a: PASS with gaps → queue.paused', { timeout: 60_000 }, () => {
+describe('scenario L group a: PASS with gaps → queue.paused', () => {
   let box: Sandbox;
 
   beforeEach(async () => {
@@ -278,7 +278,7 @@ describe('scenario L group a: PASS with gaps → queue.paused', { timeout: 60_00
 // Group b: rule 1 BLOCK → auto-retry → PASS → continue
 // ---------------------------------------------------------------------------
 
-describe('scenario L group b: rule 1 BLOCK → batch.retried → PASS', { timeout: 60_000 }, () => {
+describe('scenario L group b: rule 1 BLOCK → batch.retried → PASS', () => {
   let box: Sandbox;
 
   beforeEach(async () => {
@@ -353,86 +353,82 @@ describe('scenario L group b: rule 1 BLOCK → batch.retried → PASS', { timeou
 // Group c: two consecutive batches with rule 9 → queue.paused rule9_twice
 // ---------------------------------------------------------------------------
 
-describe(
-  'scenario L group c: rule 9 consecutive → queue.paused rule9_twice',
-  { timeout: 60_000 },
-  () => {
-    let box: Sandbox;
+describe('scenario L group c: rule 9 consecutive → queue.paused rule9_twice', () => {
+  let box: Sandbox;
 
-    beforeEach(async () => {
-      box = await Sandbox.create();
-      const backlog = makeBacklog([
-        { priority: 1, id: 'v99-a01', title: '已完成', depends: '—', status: 'passed' },
-        { priority: 2, id: 'v99-b01', title: '待跑1', depends: 'v99-a01', status: 'pending' },
-        { priority: 3, id: 'v99-c01', title: '待跑2', depends: 'v99-a01', status: 'pending' },
-      ]);
-      box.write('docs/backlog.md', backlog);
-      await box.commitAll('chore: rule9_twice backlog');
-    });
+  beforeEach(async () => {
+    box = await Sandbox.create();
+    const backlog = makeBacklog([
+      { priority: 1, id: 'v99-a01', title: '已完成', depends: '—', status: 'passed' },
+      { priority: 2, id: 'v99-b01', title: '待跑1', depends: 'v99-a01', status: 'pending' },
+      { priority: 3, id: 'v99-c01', title: '待跑2', depends: 'v99-a01', status: 'pending' },
+    ]);
+    box.write('docs/backlog.md', backlog);
+    await box.commitAll('chore: rule9_twice backlog');
+  });
 
-    afterEach(() => {
-      box.dispose();
-    });
+  afterEach(() => {
+    box.dispose();
+  });
 
-    it('stops with queue.paused reason=rule9_twice after two consecutive rule 9 downgrades', async () => {
-      // Both batches: first attempt worker does NOT push → rule 9 fires → FIX.
-      // FIX retry: worker pushes → PASS. Journal has verdict.downgraded rule=9 from attempt 1.
-      // After second batch PASS, rule9_twice fires because both batches had rule 9.
-      const runner = new FakeRunner([
-        // v99-b01 attempt 1: no push → rule 9 → FIX
-        queueWorkerScene(box, 'v99-b01', false),
-        reviewerClean(box, 'v99-b01'),
-        // v99-b01 attempt 2 (FIX retry): push → PASS
-        queueWorkerScene(box, 'v99-b01', true),
-        reviewerClean(box, 'v99-b01'),
-        // v99-c01 attempt 1: no push → rule 9 → FIX
-        queueWorkerScene(box, 'v99-c01', false),
-        reviewerClean(box, 'v99-c01'),
-        // v99-c01 attempt 2 (FIX retry): push → PASS
-        queueWorkerScene(box, 'v99-c01', true),
-        reviewerClean(box, 'v99-c01'),
-      ]);
-      const code = await box.cli(['run', '--continue'], runner);
-      expect(code).toBe(30);
-    });
+  it('stops with queue.paused reason=rule9_twice after two consecutive rule 9 downgrades', async () => {
+    // Both batches: first attempt worker does NOT push → rule 9 fires → FIX.
+    // FIX retry: worker pushes → PASS. Journal has verdict.downgraded rule=9 from attempt 1.
+    // After second batch PASS, rule9_twice fires because both batches had rule 9.
+    const runner = new FakeRunner([
+      // v99-b01 attempt 1: no push → rule 9 → FIX
+      queueWorkerScene(box, 'v99-b01', false),
+      reviewerClean(box, 'v99-b01'),
+      // v99-b01 attempt 2 (FIX retry): push → PASS
+      queueWorkerScene(box, 'v99-b01', true),
+      reviewerClean(box, 'v99-b01'),
+      // v99-c01 attempt 1: no push → rule 9 → FIX
+      queueWorkerScene(box, 'v99-c01', false),
+      reviewerClean(box, 'v99-c01'),
+      // v99-c01 attempt 2 (FIX retry): push → PASS
+      queueWorkerScene(box, 'v99-c01', true),
+      reviewerClean(box, 'v99-c01'),
+    ]);
+    const code = await box.cli(['run', '--continue'], runner);
+    expect(code).toBe(30);
+  });
 
-    it('records queue.paused with reasons containing "rule9_twice"', async () => {
-      const runner = new FakeRunner([
-        queueWorkerScene(box, 'v99-b01', false),
-        reviewerClean(box, 'v99-b01'),
-        queueWorkerScene(box, 'v99-b01', true),
-        reviewerClean(box, 'v99-b01'),
-        queueWorkerScene(box, 'v99-c01', false),
-        reviewerClean(box, 'v99-c01'),
-        queueWorkerScene(box, 'v99-c01', true),
-        reviewerClean(box, 'v99-c01'),
-      ]);
-      await box.cli(['run', '--continue'], runner);
-      const events = box.events();
-      const paused = events.find((e) => e.event === 'queue.paused');
-      expect(paused).toBeDefined();
-      expect(paused?.reasons).toEqual(['rule9_twice']);
-    });
+  it('records queue.paused with reasons containing "rule9_twice"', async () => {
+    const runner = new FakeRunner([
+      queueWorkerScene(box, 'v99-b01', false),
+      reviewerClean(box, 'v99-b01'),
+      queueWorkerScene(box, 'v99-b01', true),
+      reviewerClean(box, 'v99-b01'),
+      queueWorkerScene(box, 'v99-c01', false),
+      reviewerClean(box, 'v99-c01'),
+      queueWorkerScene(box, 'v99-c01', true),
+      reviewerClean(box, 'v99-c01'),
+    ]);
+    await box.cli(['run', '--continue'], runner);
+    const events = box.events();
+    const paused = events.find((e) => e.event === 'queue.paused');
+    expect(paused).toBeDefined();
+    expect(paused?.reasons).toEqual(['rule9_twice']);
+  });
 
-    it('both batches have verdict.downgraded rule=9 in the journal', async () => {
-      const runner = new FakeRunner([
-        queueWorkerScene(box, 'v99-b01', false),
-        reviewerClean(box, 'v99-b01'),
-        queueWorkerScene(box, 'v99-b01', true),
-        reviewerClean(box, 'v99-b01'),
-        queueWorkerScene(box, 'v99-c01', false),
-        reviewerClean(box, 'v99-c01'),
-        queueWorkerScene(box, 'v99-c01', true),
-        reviewerClean(box, 'v99-c01'),
-      ]);
-      await box.cli(['run', '--continue'], runner);
-      const events = box.events();
-      const downgrades = events.filter((e) => e.event === 'verdict.downgraded' && e.rule === 9);
-      // At least one verdict.downgraded for each batch.
-      const b01 = downgrades.filter((e) => e.batch_id === 'v99-b01');
-      const c01 = downgrades.filter((e) => e.batch_id === 'v99-c01');
-      expect(b01.length).toBeGreaterThanOrEqual(1);
-      expect(c01.length).toBeGreaterThanOrEqual(1);
-    });
-  },
-);
+  it('both batches have verdict.downgraded rule=9 in the journal', async () => {
+    const runner = new FakeRunner([
+      queueWorkerScene(box, 'v99-b01', false),
+      reviewerClean(box, 'v99-b01'),
+      queueWorkerScene(box, 'v99-b01', true),
+      reviewerClean(box, 'v99-b01'),
+      queueWorkerScene(box, 'v99-c01', false),
+      reviewerClean(box, 'v99-c01'),
+      queueWorkerScene(box, 'v99-c01', true),
+      reviewerClean(box, 'v99-c01'),
+    ]);
+    await box.cli(['run', '--continue'], runner);
+    const events = box.events();
+    const downgrades = events.filter((e) => e.event === 'verdict.downgraded' && e.rule === 9);
+    // At least one verdict.downgraded for each batch.
+    const b01 = downgrades.filter((e) => e.batch_id === 'v99-b01');
+    const c01 = downgrades.filter((e) => e.batch_id === 'v99-c01');
+    expect(b01.length).toBeGreaterThanOrEqual(1);
+    expect(c01.length).toBeGreaterThanOrEqual(1);
+  });
+});

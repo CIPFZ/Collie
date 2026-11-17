@@ -155,7 +155,7 @@ function setTokenFile(box: Sandbox, tokenPath: string): void {
 // 1. token_file missing → startup failure, no task
 // ---------------------------------------------------------------------------
 
-describe('scenario M: token_file missing → startup failure', { timeout: 60_000 }, () => {
+describe('scenario M: token_file missing → startup failure', () => {
   let box: Sandbox;
 
   beforeEach(async () => {
@@ -186,7 +186,7 @@ describe('scenario M: token_file missing → startup failure', { timeout: 60_000
 // 2. Rate-limited CI → single-batch FIX with evidence_unavailable cause
 // ---------------------------------------------------------------------------
 
-describe('scenario M: rate-limited CI → FIX with evidence_unavailable', { timeout: 60_000 }, () => {
+describe('scenario M: rate-limited CI → FIX with evidence_unavailable', () => {
   let box: Sandbox;
 
   beforeEach(async () => {
@@ -218,59 +218,55 @@ describe('scenario M: rate-limited CI → FIX with evidence_unavailable', { time
 // 3. --continue with evidence_unavailable → one run, stops, backlog pending
 // ---------------------------------------------------------------------------
 
-describe(
-  'scenario M: --continue evidence_unavailable → stops without rerun',
-  { timeout: 60_000 },
-  () => {
-    let box: Sandbox;
+describe('scenario M: --continue evidence_unavailable → stops without rerun', () => {
+  let box: Sandbox;
 
-    beforeEach(async () => {
-      box = await Sandbox.create();
-    });
+  beforeEach(async () => {
+    box = await Sandbox.create();
+  });
 
-    afterEach(() => {
-      box.dispose();
-    });
+  afterEach(() => {
+    box.dispose();
+  });
 
-    it('runs once, exits 20, backlog still pending, journal has escalated + queue.finished', async () => {
-      // Override backlog to have batch as "pending" so --continue picks it up.
-      const pendingBacklog = box.read('docs/backlog.md').replace(/running/, 'pending');
-      box.write('docs/backlog.md', pendingBacklog);
-      await box.commitAll('chore: set batch to pending');
+  it('runs once, exits 20, backlog still pending, journal has escalated + queue.finished', async () => {
+    // Override backlog to have batch as "pending" so --continue picks it up.
+    const pendingBacklog = box.read('docs/backlog.md').replace(/running/, 'pending');
+    box.write('docs/backlog.md', pendingBacklog);
+    await box.commitAll('chore: set batch to pending');
 
-      const runner = new FakeRunner([mWorkerScene(box, BATCH, true), reviewerPass(box, BATCH)]);
-      // Use rate-limiting fetch: CI evidence is unavailable.
-      const code = await box.cli(['run', '--continue'], runner, { fetch: rateLimitFetch });
-      expect(code).toBe(20); // BLOCK exit code (SPEC 13.9 says exit 20)
+    const runner = new FakeRunner([mWorkerScene(box, BATCH, true), reviewerPass(box, BATCH)]);
+    // Use rate-limiting fetch: CI evidence is unavailable.
+    const code = await box.cli(['run', '--continue'], runner, { fetch: rateLimitFetch });
+    expect(code).toBe(20); // BLOCK exit code (SPEC 13.9 says exit 20)
 
-      // Backlog status should still be "pending" (not moved to blocked).
-      const backlog = box.read('docs/backlog.md');
-      expect(backlog).not.toMatch(/v99-b01.*blocked/);
+    // Backlog status should still be "pending" (not moved to blocked).
+    const backlog = box.read('docs/backlog.md');
+    expect(backlog).not.toMatch(/v99-b01.*blocked/);
 
-      // Journal should have escalated and queue.finished with reason evidence_unavailable.
-      const events = box.events();
-      const escalated = events.find(
-        (e) => e.event === 'escalated' && e.reason === 'evidence_unavailable',
-      );
-      expect(escalated).toBeDefined();
+    // Journal should have escalated and queue.finished with reason evidence_unavailable.
+    const events = box.events();
+    const escalated = events.find(
+      (e) => e.event === 'escalated' && e.reason === 'evidence_unavailable',
+    );
+    expect(escalated).toBeDefined();
 
-      const queueFinished = events.find(
-        (e) => e.event === 'queue.finished' && e.reason === 'evidence_unavailable',
-      );
-      expect(queueFinished).toBeDefined();
+    const queueFinished = events.find(
+      (e) => e.event === 'queue.finished' && e.reason === 'evidence_unavailable',
+    );
+    expect(queueFinished).toBeDefined();
 
-      // Output summary should contain evidence_unavailable.
-      const output = box.output.join('');
-      expect(output).toContain('evidence_unavailable');
-    });
-  },
-);
+    // Output summary should contain evidence_unavailable.
+    const output = box.output.join('');
+    expect(output).toContain('evidence_unavailable');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // 4. Contrast: CI failure is normal FIX → gets retried in queue
 // ---------------------------------------------------------------------------
 
-describe('scenario M: CI failure → normal FIX, retried by queue', { timeout: 60_000 }, () => {
+describe('scenario M: CI failure → normal FIX, retried by queue', () => {
   let box: Sandbox;
 
   beforeEach(async () => {
@@ -322,7 +318,7 @@ describe('scenario M: CI failure → normal FIX, retried by queue', { timeout: 6
 // 5. Smoke: token_file missing → exit 1
 // ---------------------------------------------------------------------------
 
-describe('scenario M: smoke token_file failure', { timeout: 60_000 }, () => {
+describe('scenario M: smoke token_file failure', () => {
   let box: Sandbox;
 
   beforeEach(async () => {
@@ -350,7 +346,7 @@ describe('scenario M: smoke token_file failure', { timeout: 60_000 }, () => {
 // 6. Smoke: CI query failure after runner succeeds → exit 1
 // ---------------------------------------------------------------------------
 
-describe('scenario M: smoke CI query failure', { timeout: 60_000 }, () => {
+describe('scenario M: smoke CI query failure', () => {
   let box: Sandbox;
 
   beforeEach(async () => {

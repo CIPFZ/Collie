@@ -187,77 +187,73 @@ function reviewerClean(
 // Test
 // ---------------------------------------------------------------------------
 
-describe(
-  'no-rule4: reviewer PASS + claim_mismatches non-empty → PASS, gate_passed, no downgrade',
-  { timeout: 60_000 },
-  () => {
-    let box: Sandbox;
+describe('no-rule4: reviewer PASS + claim_mismatches non-empty → PASS, gate_passed, no downgrade', () => {
+  let box: Sandbox;
 
-    beforeEach(async () => {
-      box = await Sandbox.create();
-      const backlog = makeBacklog([
-        { priority: 1, id: 'v99-a01', title: '已完成', depends: '—', status: 'passed' },
-        { priority: 2, id: 'v99-b01', title: '待跑1', depends: 'v99-a01', status: 'pending' },
-        { priority: 3, id: 'v99-c01', title: '待跑2', depends: 'v99-a01', status: 'pending' },
-      ]);
-      box.write('docs/backlog.md', backlog);
-      await box.commitAll('chore: no-rule4 backlog');
-    });
+  beforeEach(async () => {
+    box = await Sandbox.create();
+    const backlog = makeBacklog([
+      { priority: 1, id: 'v99-a01', title: '已完成', depends: '—', status: 'passed' },
+      { priority: 2, id: 'v99-b01', title: '待跑1', depends: 'v99-a01', status: 'pending' },
+      { priority: 3, id: 'v99-c01', title: '待跑2', depends: 'v99-a01', status: 'pending' },
+    ]);
+    box.write('docs/backlog.md', backlog);
+    await box.commitAll('chore: no-rule4 backlog');
+  });
 
-    afterEach(() => {
-      box.dispose();
-    });
+  afterEach(() => {
+    box.dispose();
+  });
 
-    it('exits 0 with both batches passed', async () => {
-      const runner = new FakeRunner([
-        queueWorkerScene(box, 'v99-b01'),
-        reviewerPassWithMismatches(box, 'v99-b01'),
-        queueWorkerScene(box, 'v99-c01'),
-        reviewerClean(box, 'v99-c01'),
-      ]);
-      const code = await box.cli(['run', '--continue'], runner);
-      expect(code).toBe(0);
-    });
+  it('exits 0 with both batches passed', async () => {
+    const runner = new FakeRunner([
+      queueWorkerScene(box, 'v99-b01'),
+      reviewerPassWithMismatches(box, 'v99-b01'),
+      queueWorkerScene(box, 'v99-c01'),
+      reviewerClean(box, 'v99-c01'),
+    ]);
+    const code = await box.cli(['run', '--continue'], runner);
+    expect(code).toBe(0);
+  });
 
-    it('both batches are "passed" in the backlog', async () => {
-      const runner = new FakeRunner([
-        queueWorkerScene(box, 'v99-b01'),
-        reviewerPassWithMismatches(box, 'v99-b01'),
-        queueWorkerScene(box, 'v99-c01'),
-        reviewerClean(box, 'v99-c01'),
-      ]);
-      await box.cli(['run', '--continue'], runner);
-      const backlog = box.read('docs/backlog.md');
-      expect(backlog).toMatch(/v99-b01.*passed/);
-      expect(backlog).toMatch(/v99-c01.*passed/);
-    });
+  it('both batches are "passed" in the backlog', async () => {
+    const runner = new FakeRunner([
+      queueWorkerScene(box, 'v99-b01'),
+      reviewerPassWithMismatches(box, 'v99-b01'),
+      queueWorkerScene(box, 'v99-c01'),
+      reviewerClean(box, 'v99-c01'),
+    ]);
+    await box.cli(['run', '--continue'], runner);
+    const backlog = box.read('docs/backlog.md');
+    expect(backlog).toMatch(/v99-b01.*passed/);
+    expect(backlog).toMatch(/v99-c01.*passed/);
+  });
 
-    it('first batch records queue.gate_passed', async () => {
-      const runner = new FakeRunner([
-        queueWorkerScene(box, 'v99-b01'),
-        reviewerPassWithMismatches(box, 'v99-b01'),
-        queueWorkerScene(box, 'v99-c01'),
-        reviewerClean(box, 'v99-c01'),
-      ]);
-      await box.cli(['run', '--continue'], runner);
-      const events = box.events();
-      const gatePassed = events.find(
-        (e) => e.event === 'queue.gate_passed' && e.batch_id === 'v99-b01',
-      );
-      expect(gatePassed).toBeDefined();
-    });
+  it('first batch records queue.gate_passed', async () => {
+    const runner = new FakeRunner([
+      queueWorkerScene(box, 'v99-b01'),
+      reviewerPassWithMismatches(box, 'v99-b01'),
+      queueWorkerScene(box, 'v99-c01'),
+      reviewerClean(box, 'v99-c01'),
+    ]);
+    await box.cli(['run', '--continue'], runner);
+    const events = box.events();
+    const gatePassed = events.find(
+      (e) => e.event === 'queue.gate_passed' && e.batch_id === 'v99-b01',
+    );
+    expect(gatePassed).toBeDefined();
+  });
 
-    it('no verdict.downgraded events in the journal', async () => {
-      const runner = new FakeRunner([
-        queueWorkerScene(box, 'v99-b01'),
-        reviewerPassWithMismatches(box, 'v99-b01'),
-        queueWorkerScene(box, 'v99-c01'),
-        reviewerClean(box, 'v99-c01'),
-      ]);
-      await box.cli(['run', '--continue'], runner);
-      const events = box.events();
-      const downgraded = events.filter((e) => e.event === 'verdict.downgraded');
-      expect(downgraded).toHaveLength(0);
-    });
-  },
-);
+  it('no verdict.downgraded events in the journal', async () => {
+    const runner = new FakeRunner([
+      queueWorkerScene(box, 'v99-b01'),
+      reviewerPassWithMismatches(box, 'v99-b01'),
+      queueWorkerScene(box, 'v99-c01'),
+      reviewerClean(box, 'v99-c01'),
+    ]);
+    await box.cli(['run', '--continue'], runner);
+    const events = box.events();
+    const downgraded = events.filter((e) => e.event === 'verdict.downgraded');
+    expect(downgraded).toHaveLength(0);
+  });
+});

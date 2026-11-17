@@ -571,34 +571,30 @@ import { afterAll, beforeAll } from 'vitest';
 import { FakeRunner } from '../src/runner/fake.js';
 import { Sandbox, honestClaims, workerScene, fooledReviewerScene } from './support/sandbox.js';
 
-describe(
-  'timeline: Sandbox queue_start from real run --continue (SPEC 14.10)',
-  { timeout: 60_000 },
-  () => {
-    let box: Sandbox;
+describe('timeline: Sandbox queue_start from real run --continue (SPEC 14.10)', () => {
+  let box: Sandbox;
 
-    beforeAll(async () => {
-      box = await Sandbox.create();
-      const runner = new FakeRunner([
-        workerScene(box, { passing: 3, failing: 0, push: true, claims: honestClaims(3) }),
-        fooledReviewerScene(box, 'PASS'),
-      ]);
-      await box.cli(['run', '--continue'], runner);
-    });
+  beforeAll(async () => {
+    box = await Sandbox.create();
+    const runner = new FakeRunner([
+      workerScene(box, { passing: 3, failing: 0, push: true, claims: honestClaims(3) }),
+      fooledReviewerScene(box, 'PASS'),
+    ]);
+    await box.cli(['run', '--continue'], runner);
+  });
 
-    afterAll(() => {
-      box.dispose();
-    });
+  afterAll(() => {
+    box.dispose();
+  });
 
-    it('queue_start node has the timestamp of the first queue event', () => {
-      const runs = loadRuns(box.root);
-      const nodes = projectTimeline(runs);
-      const qsNode = nodes.find((n) => n.kind === 'queue_start');
-      expect(qsNode).toBeDefined();
-      // The first queue journal event is queue.preflight.
-      const queueEvents = box.events().filter((e) => e.run_id.startsWith('q-'));
-      expect(queueEvents[0]?.event).toBe('queue.preflight');
-      expect(qsNode?.ts).toBe(queueEvents[0]?.ts);
-    });
-  },
-);
+  it('queue_start node has the timestamp of the first queue event', () => {
+    const runs = loadRuns(box.root);
+    const nodes = projectTimeline(runs);
+    const qsNode = nodes.find((n) => n.kind === 'queue_start');
+    expect(qsNode).toBeDefined();
+    // The first queue journal event is queue.preflight.
+    const queueEvents = box.events().filter((e) => e.run_id.startsWith('q-'));
+    expect(queueEvents[0]?.event).toBe('queue.preflight');
+    expect(qsNode?.ts).toBe(queueEvents[0]?.ts);
+  });
+});

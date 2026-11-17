@@ -231,7 +231,7 @@ function unpushedReviewerPassScene(
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('queue journal correctness (SPEC 13.10, v04-b07)', { timeout: 60_000 }, () => {
+describe('queue journal correctness (SPEC 13.10, v04-b07)', () => {
   let box: Sandbox;
 
   beforeEach(async () => {

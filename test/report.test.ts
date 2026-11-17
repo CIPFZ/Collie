@@ -188,7 +188,7 @@ function queueReviewerFixScene(
 // Group 1: Two batches consecutive PASS
 // ===================================================================
 
-describe('collie report: two batches consecutive PASS', { timeout: 60_000 }, () => {
+describe('collie report: two batches consecutive PASS', () => {
   let box: Sandbox;
   let reportOutput: string;
 
@@ -345,7 +345,7 @@ describe('collie report: two batches consecutive PASS', { timeout: 60_000 }, () 
 // Group 2: First FIX then PASS (same batch, same queue run via fix_retry)
 // ===================================================================
 
-describe('collie report: FIX then PASS in same queue', { timeout: 60_000 }, () => {
+describe('collie report: FIX then PASS in same queue', () => {
   let box: Sandbox;
   let reportOutput: string;
 
@@ -451,7 +451,7 @@ describe('collie report: FIX then PASS in same queue', { timeout: 60_000 }, () =
 // Edge cases: old journal, exit codes, --json
 // ===================================================================
 
-describe('collie report: edge cases', { timeout: 60_000 }, () => {
+describe('collie report: edge cases', () => {
   let box: Sandbox;
 
   beforeEach(async () => {

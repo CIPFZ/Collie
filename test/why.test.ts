@@ -91,7 +91,7 @@ describe('why — real Sandbox runs (SPEC 13.4)', () => {
       fooledReviewerScene(box, 'PASS'),
     ]);
     await box.run(passRunner);
-  }, 60_000);
+  });
 
   afterAll(() => {
     box.dispose();
@@ -152,7 +152,7 @@ describe('why — FIX then PASS (real Sandbox)', () => {
       fooledReviewerScene(box, 'PASS'),
     ]);
     await box.run(passRunner);
-  }, 60_000);
+  });
 
   afterAll(() => {
     box.dispose();
@@ -235,7 +235,7 @@ describe('why — Sandbox with scripted cost/model/tokens (SPEC 13.23)', () => {
 
     const runner = new FakeRunner([workerWithCost, reviewerWithCost]);
     await box.run(runner);
-  }, 60_000);
+  });
 
   afterAll(() => {
     box.dispose();

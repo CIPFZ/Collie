@@ -115,7 +115,7 @@ function reviewerPassScene(batchId: string): FakeScene {
   };
 }
 
-describe('queue audit integration', { timeout: 60_000 }, () => {
+describe('queue audit integration', () => {
   let box: Sandbox;
 
   beforeEach(async () => {

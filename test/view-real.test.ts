@@ -60,7 +60,7 @@ describe('view-real (SPEC 13.13)', () => {
     ]);
     await box.run(passRunner);
     taskAttemptAfterRun2 = parseTaskAttempt(box.root, BATCH);
-  }, 60_000);
+  });
 
   afterAll(() => {
     box.dispose();
