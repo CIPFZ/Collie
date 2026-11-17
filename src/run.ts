@@ -223,6 +223,11 @@ async function withHeadWorktree<T>(
     await addWorktree(root, dir, headSha);
     const modules = join(root, 'node_modules');
     if (existsSync(modules)) symlinkSync(modules, join(dir, 'node_modules'), 'dir');
+    // SPEC 14.17: reviewer must never see this batch's report.md in its working
+    // directory, even on FIX reruns where head_sha's tree contains a previous
+    // attempt's report (iron rule 6, SPEC 4.2).
+    const batchReportFile = join(dir, '.collie', 'batches', batchId, 'report.md');
+    if (existsSync(batchReportFile)) rmSync(batchReportFile);
     return await body(dir);
   } finally {
     await removeWorktree(root, dir).catch(() => undefined);

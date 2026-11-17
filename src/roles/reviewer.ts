@@ -94,7 +94,12 @@ export function buildReviewerPrompt(input: ReviewerInput): string {
     [
       '## 取证范围',
       '',
-      `worker 产出的 diff 为 \`${range}\`（\`git log ${range}\`、\`git diff ${range}\`）。`,
+      `worker 产出的 diff 为 \`${range}\`。`,
+      '',
+      `\`git log ${range} -- . ':(exclude).collie/batches'\``,
+      `\`git diff ${range} -- . ':(exclude).collie/batches'\``,
+      '',
+      '`.collie/batches/` 下是信封文件，不是 worker 的产出；只读本批次的 `task.md`。',
       '`head_sha` 之后的 `report(collie):` 信封提交不在取证范围内（SPEC 3.4）。',
     ].join('\n'),
     [
