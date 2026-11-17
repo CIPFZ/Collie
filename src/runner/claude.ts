@@ -439,6 +439,25 @@ export class ClaudeRunner implements AgentRunner {
     } catch (error) {
       opts.signal?.removeEventListener('abort', forwardAbort);
       if (opts.signal?.aborted === true) throw opts.signal.reason;
+      // SPEC 14.18: when a result message was received before the SDK threw,
+      // carry cost, turns, usage and sessionId back — the data is real even
+      // though the run failed.  stopReason maps from the result's subtype
+      // using the same logic as the normal-exit path.
+      if (result !== undefined) {
+        const sessionId = result.session_id ?? lastSessionId;
+        const errorStopReason: RunResult['stopReason'] =
+          result.subtype === 'error_max_turns' ? 'turns_exhausted' : 'error';
+        const durationMs = Date.now() - runStart;
+        return {
+          exitCode: EXIT_FAILED,
+          ...(sessionId === undefined ? {} : { sessionId }),
+          ...(result.usage === undefined ? {} : { usage: toUsage(result.usage) }),
+          stopReason: errorStopReason,
+          ...(result.total_cost_usd !== undefined ? { costUsd: result.total_cost_usd } : {}),
+          ...(result.num_turns !== undefined ? { numTurns: result.num_turns } : {}),
+          durationMs,
+        };
+      }
       // SPEC 11.2: SDK errors must still return RunResult with sessionId when possible.
       if (lastSessionId !== undefined) {
         return {

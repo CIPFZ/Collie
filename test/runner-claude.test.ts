@@ -1008,6 +1008,69 @@ describe('runner-claude: PreToolUse bash deny hook (SPEC 11.2 v03-b02)', () => {
   });
 });
 
+describe('claude runner: result message before the SDK throws', () => {
+  it('carries cost, turns and stopReason=turns_exhausted when error_max_turns result precedes throw', async () => {
+    const errorMaxTurnsResult: unknown = {
+      type: 'result',
+      subtype: 'error_max_turns',
+      is_error: true,
+      session_id: 'sess-max-turns',
+      usage: { input_tokens: 5000, output_tokens: 1200 },
+      total_cost_usd: 3.14,
+      num_turns: 25,
+    };
+    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery requires AsyncIterable
+    const query: ClaudeQuery = async function* () {
+      yield assistant('working');
+      yield errorMaxTurnsResult;
+      throw new Error('SDK stream error after result');
+    };
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.exitCode).toBe(1);
+    expect(result.stopReason).toBe('turns_exhausted');
+    expect(result.costUsd).toBe(3.14);
+    expect(result.numTurns).toBe(25);
+    expect(result.sessionId).toBe('sess-max-turns');
+    expect(result.usage).toEqual({ inputTokens: 5000, outputTokens: 1200 });
+    expect(result).not.toHaveProperty('finalText');
+    expect(result.durationMs).toBeTypeOf('number');
+  });
+
+  it('carries cost and turns with stopReason=error for non-max-turns error subtypes', async () => {
+    const errorResult: unknown = {
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      session_id: 'sess-exec-err',
+      usage: { input_tokens: 300, output_tokens: 50 },
+      total_cost_usd: 0.42,
+      num_turns: 3,
+    };
+    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery requires AsyncIterable
+    const query: ClaudeQuery = async function* () {
+      yield errorResult;
+      throw new Error('connection reset');
+    };
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.exitCode).toBe(1);
+    expect(result.stopReason).toBe('error');
+    expect(result.costUsd).toBe(0.42);
+    expect(result.numTurns).toBe(3);
+    expect(result.sessionId).toBe('sess-exec-err');
+    expect(result.usage).toEqual({ inputTokens: 300, outputTokens: 50 });
+    expect(result).not.toHaveProperty('finalText');
+  });
+
+  it('throws when no result message was received before the SDK throws (unchanged behaviour)', async () => {
+    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery requires AsyncIterable
+    const query: ClaudeQuery = async function* () {
+      yield assistant('thinking');
+      throw new Error('SDK exploded');
+    };
+    await expect(new ClaudeRunner(config, { query }).run(opts())).rejects.toThrow('SDK exploded');
+  });
+});
+
 describe('runner-claude: bash_deny positive/negative with repo toml patterns (v03-b03-fix2)', () => {
   // Uses the actual config loaded from the repo's collie.toml, which has
   // (?=\\s|$) word boundary instead of \\b (merge-base false positive fix).
