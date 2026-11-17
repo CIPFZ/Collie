@@ -146,6 +146,98 @@ describe('backlog: frozen fixture (status snapshot at v01-b02 issue)', () => {
   });
 });
 
+describe('backlog: scenarios and interfaces', () => {
+  /** A backlog with a batch that has scenarios and interfaces. */
+  function backlogWithScenarios(opts?: {
+    scenariosLabel?: string;
+    interfacesLabel?: string;
+    scenarioLines?: string[];
+    interfaceLines?: string[];
+  }): string {
+    const sLabel = opts?.scenariosLabel ?? '情形：';
+    const iLabel = opts?.interfacesLabel ?? '接口：';
+    const sLines = opts?.scenarioLines ?? [
+      '- S1 [新] 新增功能 A',
+      '- S2 [新] 新增功能 B',
+      '- K1 [保持] 现有行为不变',
+    ];
+    const iLines = opts?.interfaceLines ?? ['- src/feature.ts exportName', '- collie show --flag'];
+    return [
+      '# backlog',
+      '',
+      '## 队列总览',
+      '',
+      '| 优先级 | 批次 | 标题 | 依赖 | 状态 |',
+      '|---|---|---|---|---|',
+      '| 1 | v99-b01 | 示例功能 | — | pending |',
+      '',
+      '## v99-b01 示例功能',
+      '',
+      '优先级：1　依赖：无',
+      '',
+      '条目：',
+      '1. 实现 feature',
+      '',
+      '验收标准：',
+      '',
+      '| 说明 | 命令 | 期望 |',
+      '|---|---|---|',
+      '| 通过 | `npm test` | exit 0 |',
+      '',
+      sLabel,
+      ...sLines,
+      '',
+      iLabel,
+      ...iLines,
+    ].join('\n');
+  }
+
+  it('parses 2 [新] and 1 [保持] scenario with correct id, kind, and text', () => {
+    const batches = parseBacklog(backlogWithScenarios());
+    const batch = batches[0];
+    expect(batch?.scenarios).toHaveLength(3);
+    expect(batch?.scenarios?.[0]).toEqual({ id: 'S1', kind: 'new', text: '新增功能 A' });
+    expect(batch?.scenarios?.[1]).toEqual({ id: 'S2', kind: 'new', text: '新增功能 B' });
+    expect(batch?.scenarios?.[2]).toEqual({ id: 'K1', kind: 'keep', text: '现有行为不变' });
+  });
+
+  it('parses interfaces as string array', () => {
+    const batches = parseBacklog(backlogWithScenarios());
+    const batch = batches[0];
+    expect(batch?.interfaces).toEqual(['src/feature.ts exportName', 'collie show --flag']);
+  });
+
+  it('joins indented continuation lines of a scenario with a newline', () => {
+    const batches = parseBacklog(
+      backlogWithScenarios({
+        scenarioLines: ['- S1 [新] 新增功能 A', '  这是续行', '- S2 [新] 另一个功能'],
+      }),
+    );
+    expect(batches[0]?.scenarios?.[0]?.text).toBe('新增功能 A\n这是续行');
+  });
+
+  it('accepts full-width colon for scenario and interface labels', () => {
+    const batches = parseBacklog(
+      backlogWithScenarios({
+        scenariosLabel: '情形：',
+        interfacesLabel: '接口：',
+      }),
+    );
+    expect(batches[0]?.scenarios).toHaveLength(3);
+    expect(batches[0]?.interfaces).toHaveLength(2);
+  });
+
+  it('a batch without scenario/interface sections has no extra keys', () => {
+    // Use the frozen fixture which has no scenarios or interfaces.
+    const batches = parseBacklog(FIXTURE, 'fixture.md');
+    const batch = batches[0];
+    expect(batch).toBeDefined();
+    // The key must not be present (not even as undefined).
+    expect('scenarios' in (batch as object)).toBe(false);
+    expect('interfaces' in (batch as object)).toBe(false);
+  });
+});
+
 describe('setBatchStatus (SPEC 12.2)', () => {
   const MINI_BACKLOG = [
     '# backlog',

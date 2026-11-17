@@ -81,6 +81,50 @@ describe('cli: init, show and the R2 commits', () => {
     expect(await box.cli(['show', 'v99-b99'], undefined)).toBe(1);
   });
 
+  it('show prints scenarios and interfaces when the batch has them', async () => {
+    // Replace the sandbox backlog with one that has scenarios and interfaces.
+    const backlogWithScenarios = [
+      '# backlog',
+      '',
+      '## 队列总览',
+      '',
+      '| 优先级 | 批次 | 标题 | 依赖 | 状态 |',
+      '|---|---|---|---|---|',
+      `| 1 | ${BATCH} | 示例功能 | — | running |`,
+      '',
+      `## ${BATCH} 示例功能`,
+      '',
+      '优先级：1　依赖：无',
+      '',
+      '条目：',
+      '1. 实现 feature.txt 并补测试',
+      '',
+      '验收标准：',
+      '',
+      '| 说明 | 命令 | 期望 |',
+      '|---|---|---|',
+      '| 全部测试通过 | `sh run-tests.sh` | exit 0 |',
+      '| 功能文件存在 | `test -f feature.txt` | exit 0 |',
+      '',
+      '情形：',
+      '- S1 [新] 新增行为 A',
+      '- K1 [保持] 现有行为不变',
+      '',
+      '接口：',
+      '- src/feature.ts exportName',
+    ].join('\n');
+    box.write('docs/backlog.md', backlogWithScenarios);
+    expect(await box.cli(['show', BATCH], undefined)).toBe(0);
+    const shown = box.output.join('');
+    expect(shown).toContain('S1');
+    expect(shown).toContain('新');
+    expect(shown).toContain('新增行为 A');
+    expect(shown).toContain('K1');
+    expect(shown).toContain('保持');
+    expect(shown).toContain('现有行为不变');
+    expect(shown).toContain('src/feature.ts exportName');
+  });
+
   it('run commits the task envelope before the worker and verdict + progress after', async () => {
     const before = (await git(box.root, ['rev-parse', 'HEAD'])).trim();
     const r = new FakeRunner([

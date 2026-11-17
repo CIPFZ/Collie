@@ -9,6 +9,8 @@ import {
   type Acceptance,
   type Batch,
   type BatchStatus,
+  type Scenario,
+  type ScenarioKind,
 } from './schema/index.js';
 
 export const BACKLOG_RELATIVE_PATH = join('docs', 'backlog.md');
@@ -26,6 +28,8 @@ const COLON = '[\\uFF1A:]';
 const LABEL_ITEMS = new RegExp(`^条目${COLON}$`);
 const LABEL_ACCEPTANCE = new RegExp(`^验收标准${COLON}$`);
 const LABEL_FORBIDDEN = new RegExp(`^额外禁止${COLON}$`);
+const LABEL_SCENARIOS = new RegExp(`^情形${COLON}$`);
+const LABEL_INTERFACES = new RegExp(`^接口${COLON}$`);
 // e.g. "优先级\uFF1A2\u3000依赖\uFF1Av01-b01": full-width colons, U+3000 between the fields.
 const META_LINE = new RegExp(
   `^优先级${COLON}\\s*(?<priority>\\S+)[\\s\\u3000]+依赖${COLON}\\s*(?<deps>.*)$`,
@@ -37,6 +41,8 @@ const CONTINUATION = /^\s+\S/;
 const INTEGER = /^\d+$/;
 const SEPARATOR_CELL = /^:?-+:?$/;
 const DEPENDENCY_SEPARATOR = /[,，、]/;
+// SPEC 16.11: scenario line format: "- <id> [新|保持] <text>"
+const SCENARIO_LINE = /^[-*]\s+(?<sid>[A-Z]\d+)\s+\[(?<kind>新|保持)\]\s+(?<text>.+)$/;
 
 export class BacklogError extends Error {
   readonly source: string;
@@ -344,6 +350,8 @@ interface SectionContent {
   items: string[] | undefined;
   acceptance: Acceptance[] | undefined;
   forbidden: string[] | undefined;
+  scenarios: Scenario[] | undefined;
+  interfaces: string[] | undefined;
 }
 
 function parseSection(section: Section, source: string): SectionContent {
@@ -353,6 +361,8 @@ function parseSection(section: Section, source: string): SectionContent {
     items: undefined,
     acceptance: undefined,
     forbidden: undefined,
+    scenarios: undefined,
+    interfaces: undefined,
   };
   const { body, id } = section;
   const once = (key: keyof SectionContent, line: number, label: string): void => {
@@ -395,6 +405,16 @@ function parseSection(section: Section, source: string): SectionContent {
       const list = parseList(body, i + 1, BULLET_ITEM);
       content.forbidden = list.items;
       i = list.end;
+    } else if (LABEL_SCENARIOS.test(text)) {
+      once('scenarios', line.no, '情形');
+      content.scenarios = parseScenarios(body, i + 1, source, id);
+      // Advance past the scenarios list
+      i = skipScenarioList(body, i + 1);
+    } else if (LABEL_INTERFACES.test(text)) {
+      once('interfaces', line.no, '接口');
+      const list = parseList(body, i + 1, BULLET_ITEM);
+      content.interfaces = list.items;
+      i = list.end;
     } else {
       // Free prose (notes for R4, separators) is allowed between blocks.
       i++;
@@ -405,6 +425,82 @@ function parseSection(section: Section, source: string): SectionContent {
 
 function sameList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/** SPEC 16.11: Parses scenarios from the 「情形」 section body. */
+function parseScenarios(
+  body: readonly Line[],
+  start: number,
+  source: string,
+  batchId: string,
+): Scenario[] {
+  const scenarios: Scenario[] = [];
+  const seenIds = new Set<string>();
+  let i = skipBlank(body, start);
+  for (; i < body.length; i++) {
+    const line = body[i];
+    if (line === undefined) break;
+    const text = line.text.trim();
+    const match = SCENARIO_LINE.exec(text);
+    if (match !== null) {
+      const sid = match.groups?.sid ?? '';
+      const kindText = match.groups?.kind ?? '';
+      const scenarioText = (match.groups?.text ?? '').trim();
+      if (seenIds.has(sid)) {
+        throw new BacklogError(source, line.no, batchId, `duplicate scenario id "${sid}"`);
+      }
+      seenIds.add(sid);
+      const kind: ScenarioKind = kindText === '新' ? 'new' : 'keep';
+      scenarios.push({ id: sid, kind, text: scenarioText });
+    } else if (scenarios.length > 0 && CONTINUATION.test(line.text)) {
+      // Indented continuation line: append to the last scenario's text.
+      const last = scenarios[scenarios.length - 1];
+      if (last !== undefined) {
+        last.text = `${last.text}\n${text}`;
+      }
+    } else if (/^[-*]\s/.test(text)) {
+      // A bullet that does not match the scenario format
+      throw new BacklogError(
+        source,
+        line.no,
+        batchId,
+        `scenario does not match expected format "- <ID> [新|保持] <text>"`,
+      );
+    } else {
+      break;
+    }
+  }
+  if (scenarios.length === 0) {
+    throw new BacklogError(
+      source,
+      body[start - 1]?.no ?? body[0]?.no,
+      batchId,
+      `「情形」 section is present but has no scenarios`,
+    );
+  }
+  if (!scenarios.some((s) => s.kind === 'new')) {
+    throw new BacklogError(
+      source,
+      body[start - 1]?.no ?? body[0]?.no,
+      batchId,
+      `「情形」 section has no [新] scenario (at least one is required)`,
+    );
+  }
+  return scenarios;
+}
+
+/** Advances past the scenario list starting at `start`. */
+function skipScenarioList(body: readonly Line[], start: number): number {
+  let i = skipBlank(body, start);
+  for (; i < body.length; i++) {
+    const line = body[i];
+    if (line === undefined) break;
+    const text = line.text.trim();
+    if (SCENARIO_LINE.test(text)) continue;
+    if (CONTINUATION.test(line.text)) continue;
+    break;
+  }
+  return i;
 }
 
 /** Parses backlog Markdown. Any invalid batch fails the whole parse. */
@@ -492,7 +588,7 @@ export function parseBacklog(text: string, source: string = BACKLOG_RELATIVE_PAT
     if (content.acceptance === undefined)
       throw new BacklogError(source, section.line, row.id, 'missing "验收标准：" table');
 
-    const candidate = {
+    const candidate: Record<string, unknown> = {
       id: row.id,
       title: row.title,
       priority: row.priority,
@@ -502,6 +598,9 @@ export function parseBacklog(text: string, source: string = BACKLOG_RELATIVE_PAT
       forbidden: content.forbidden ?? [],
       status: row.status,
     };
+    // SPEC 16.11: only include scenarios/interfaces when the section is present.
+    if (content.scenarios !== undefined) candidate.scenarios = content.scenarios;
+    if (content.interfaces !== undefined) candidate.interfaces = content.interfaces;
     const parsed = BatchSchema.safeParse(candidate);
     if (!parsed.success) {
       const issues = parsed.error.issues

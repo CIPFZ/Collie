@@ -21,7 +21,11 @@ const config = templateConfig();
 function validInput(overrides: Partial<TesterInput> = {}): TesterInput {
   return {
     batch_id: 'v046-b02',
-    items: ['item 1: do something', 'item 2: do another thing'],
+    scenarios: [
+      { id: 'S1', kind: 'new', text: 'do something new' },
+      { id: 'S2', kind: 'new', text: 'do another new thing' },
+    ],
+    interfaces: ['src/feature.ts exportName'],
     spec_paths: ['SPEC.md'],
     out_dir: 'test/acceptance/v046-b02',
     ...overrides,
@@ -49,7 +53,7 @@ describe('tester: TESTER_MANUAL constant', () => {
 });
 
 describe('tester: TesterInputSchema validation', () => {
-  it('accepts a valid input with exactly four fields', () => {
+  it('accepts a valid input with exactly five fields', () => {
     const result = TesterInputSchema.safeParse(validInput());
     expect(result.success).toBe(true);
   });
@@ -78,9 +82,13 @@ describe('tester: buildTesterPrompt', () => {
     expect(prompt).toContain('v046-b02');
   });
 
-  it('includes items verbatim', () => {
-    const prompt = buildTesterPrompt(validInput({ items: ['exact item text here'] }));
-    expect(prompt).toContain('exact item text here');
+  it('includes scenario text verbatim', () => {
+    const prompt = buildTesterPrompt(
+      validInput({
+        scenarios: [{ id: 'S1', kind: 'new', text: 'exact scenario text here' }],
+      }),
+    );
+    expect(prompt).toContain('exact scenario text here');
   });
 
   it('includes SPEC paths', () => {
@@ -89,18 +97,36 @@ describe('tester: buildTesterPrompt', () => {
     expect(prompt).toContain('CONSTRAINTS.md');
   });
 
-  it('includes output directory and the three file names', () => {
+  it('includes output directory and the file names', () => {
     const prompt = buildTesterPrompt(validInput({ out_dir: 'test/acceptance/v099' }));
     expect(prompt).toContain('test/acceptance/v099');
     expect(prompt).toContain('new.test.ts');
-    expect(prompt).toContain('keep.test.ts');
     expect(prompt).toContain('MAP.md');
   });
 
-  it('includes self-check vitest commands', () => {
+  it('includes self-check vitest commands and lint/typecheck when only new scenarios', () => {
     const prompt = buildTesterPrompt(validInput({ out_dir: 'test/acceptance/v099' }));
     expect(prompt).toContain('npx vitest run test/acceptance/v099/new.test.ts');
+    expect(prompt).not.toContain('keep.test.ts');
+    expect(prompt).toContain('npm run lint');
+    expect(prompt).toContain('npm run typecheck');
+  });
+
+  it('includes keep.test.ts and its self-check command when keep scenarios exist', () => {
+    const prompt = buildTesterPrompt(
+      validInput({
+        out_dir: 'test/acceptance/v099',
+        scenarios: [
+          { id: 'S1', kind: 'new', text: 'new behavior' },
+          { id: 'K1', kind: 'keep', text: 'must keep this' },
+        ],
+      }),
+    );
+    expect(prompt).toContain('npx vitest run test/acceptance/v099/new.test.ts');
     expect(prompt).toContain('npx vitest run test/acceptance/v099/keep.test.ts');
+    expect(prompt).toContain('keep.test.ts');
+    expect(prompt).toContain('npm run lint');
+    expect(prompt).toContain('npm run typecheck');
   });
 
   it('throws TesterError on invalid input', () => {
@@ -151,5 +177,61 @@ describe('tester: source does not reference report.md', () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(join(import.meta.dirname, '..', 'src', 'roles', 'tester.ts'), 'utf8');
     expect(src).not.toContain('report.md');
+  });
+});
+
+describe('tester: scenarios in the prompt', () => {
+  it('only-new scenarios: prompt does not mention keep.test.ts anywhere', () => {
+    const prompt = buildTesterPrompt(
+      validInput({
+        scenarios: [
+          { id: 'S1', kind: 'new', text: 'new feature A' },
+          { id: 'S2', kind: 'new', text: 'new feature B' },
+        ],
+      }),
+    );
+    expect(prompt).not.toContain('keep.test.ts');
+    expect(prompt).toContain('new.test.ts');
+    expect(prompt).toContain('MAP.md');
+  });
+
+  it('with keep scenarios: keep.test.ts and its self-check command are present', () => {
+    const prompt = buildTesterPrompt(
+      validInput({
+        scenarios: [
+          { id: 'S1', kind: 'new', text: 'new feature A' },
+          { id: 'K1', kind: 'keep', text: 'must keep this' },
+        ],
+      }),
+    );
+    expect(prompt).toContain('keep.test.ts');
+    expect(prompt).toContain('npx vitest run test/acceptance/v046-b02/keep.test.ts');
+  });
+
+  it('新行为 group appears before 必须保持 group', () => {
+    const prompt = buildTesterPrompt(
+      validInput({
+        scenarios: [
+          { id: 'S1', kind: 'new', text: 'new feature' },
+          { id: 'K1', kind: 'keep', text: 'keep behavior' },
+        ],
+      }),
+    );
+    const newIdx = prompt.indexOf('### 新行为');
+    const keepIdx = prompt.indexOf('### 必须保持');
+    expect(newIdx).toBeGreaterThanOrEqual(0);
+    expect(keepIdx).toBeGreaterThan(newIdx);
+  });
+
+  it('interfaces section shows （未指定） when empty', () => {
+    const prompt = buildTesterPrompt(validInput({ interfaces: [] }));
+    expect(prompt).toContain('（未指定）');
+  });
+
+  it('self-check commands include npm run lint and npm run typecheck', () => {
+    const prompt = buildTesterPrompt(validInput());
+    const shBlock = prompt.slice(prompt.indexOf('```sh'));
+    expect(shBlock).toContain('npm run lint');
+    expect(shBlock).toContain('npm run typecheck');
   });
 });

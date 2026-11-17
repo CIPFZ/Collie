@@ -174,6 +174,17 @@ export type Acceptance = z.infer<typeof AcceptanceSchema>;
 export const BatchStatusSchema = z.enum(['pending', 'running', 'passed', 'blocked']);
 export type BatchStatus = z.infer<typeof BatchStatusSchema>;
 
+/** SPEC 16.11: a parsed scenario from the 「情形」 section. */
+export const ScenarioKindSchema = z.enum(['new', 'keep']);
+export type ScenarioKind = z.infer<typeof ScenarioKindSchema>;
+
+export const ScenarioSchema = z.strictObject({
+  id: NonEmptyString,
+  kind: ScenarioKindSchema,
+  text: NonEmptyString,
+});
+export type Scenario = z.infer<typeof ScenarioSchema>;
+
 export const BatchSchema = z.strictObject({
   id: NonEmptyString,
   title: NonEmptyString,
@@ -184,6 +195,10 @@ export const BatchSchema = z.strictObject({
   acceptance: z.array(AcceptanceSchema).nonempty(),
   forbidden: z.array(z.string()),
   status: BatchStatusSchema,
+  /** SPEC 16.11: optional scenarios section; absent when the batch has no 「情形」 heading. */
+  scenarios: z.array(ScenarioSchema).optional(),
+  /** SPEC 16.11: optional interfaces section; absent when the batch has no 「接口」 heading. */
+  interfaces: z.array(z.string()).optional(),
 });
 export type Batch = z.infer<typeof BatchSchema>;
 

@@ -390,6 +390,18 @@ function show(deps: CliDeps, batchId: string): number {
       `acceptance commands (parsed, run these verbatim):\n${commands}`,
     ),
   );
+
+  // SPEC 16.11: show scenarios and interfaces after acceptance commands, when present.
+  if (batch.scenarios !== undefined && batch.scenarios.length > 0) {
+    const scenarioLines = batch.scenarios
+      .map((s) => `  ${s.id} [${s.kind === 'new' ? '新' : '保持'}] ${s.text}`)
+      .join('\n');
+    deps.out(section('scenarios', scenarioLines));
+  }
+  if (batch.interfaces !== undefined && batch.interfaces.length > 0) {
+    const interfaceLines = batch.interfaces.map((iface) => `  - ${iface}`).join('\n');
+    deps.out(section('interfaces', interfaceLines));
+  }
   deps.out(section('task.md', readEnvelope(deps.cwd, batchId, 'task.md')));
   deps.out(section('report.md', readEnvelope(deps.cwd, batchId, 'report.md')));
   deps.out(section('verdict.md', readEnvelope(deps.cwd, batchId, 'verdict.md')));

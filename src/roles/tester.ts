@@ -6,18 +6,24 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { AgentRunner, RunResult } from '../runner/index.js';
-import { BatchIdSchema, type CollieConfig } from '../schema/index.js';
+import {
+  BatchIdSchema,
+  ScenarioSchema,
+  type CollieConfig,
+  type Scenario,
+} from '../schema/index.js';
 
 export const TESTER_MANUAL = 'AGENT-tester.md';
 
 /**
- * Everything the tester may be told (SPEC 16.10): batch_id, the raw items,
- * SPEC paths to read, and the output directory for the three files.
+ * Everything the tester may be told (SPEC 16.11): batch_id, scenarios,
+ * interfaces, SPEC paths to read, and the output directory for the files.
  * Strict: an extra field is rejected at runtime.
  */
 export const TesterInputSchema = z.strictObject({
   batch_id: BatchIdSchema,
-  items: z.array(z.string().min(1)),
+  scenarios: z.array(ScenarioSchema).nonempty(),
+  interfaces: z.array(z.string()),
   spec_paths: z.array(z.string().min(1)),
   out_dir: z.string().min(1),
 });
@@ -38,6 +44,12 @@ function validInput(input: TesterInput): TesterInput {
     );
     throw new TesterError(`invalid tester input: ${issues.join('; ')}`);
   }
+  // SPEC 16.11: at least one scenario must be [新].
+  if (!parsed.data.scenarios.some((s: Scenario) => s.kind === 'new')) {
+    throw new TesterError(
+      'invalid tester input: scenarios must contain at least one "new" scenario',
+    );
+  }
   return parsed.data;
 }
 
@@ -46,34 +58,71 @@ const NEW_TEST_FILE = 'new.test.ts';
 const KEEP_TEST_FILE = 'keep.test.ts';
 const MAP_FILE = 'MAP.md';
 
-/** Builds the tester prompt from the SPEC 16.10 allow-list only. */
+/** Builds the tester prompt from the SPEC 16.11 allow-list only. */
 export function buildTesterPrompt(input: TesterInput): string {
   const data = validInput(input);
+
+  const newScenarios = data.scenarios.filter((s: Scenario) => s.kind === 'new');
+  const keepScenarios = data.scenarios.filter((s: Scenario) => s.kind === 'keep');
+  const hasKeep = keepScenarios.length > 0;
+
+  // Build the scenarios section with two groups.
+  const scenarioLines: string[] = ['## 情形', ''];
+  scenarioLines.push('### 新行为', '');
+  for (const s of newScenarios) {
+    scenarioLines.push(`- ${s.id} ${s.text}`);
+  }
+  if (hasKeep) {
+    scenarioLines.push('', '### 必须保持', '');
+    for (const s of keepScenarios) {
+      scenarioLines.push(`- ${s.id} ${s.text}`);
+    }
+  }
+
+  // Build the interfaces section.
+  const interfaceLines: string[] = ['## 接口', ''];
+  if (data.interfaces.length > 0) {
+    for (const iface of data.interfaces) {
+      interfaceLines.push(`- ${iface}`);
+    }
+  } else {
+    interfaceLines.push('（未指定）');
+  }
+
+  // Build the output section: new.test.ts and MAP.md always; keep.test.ts only when keep exists.
+  const outputFiles: string[] = [
+    `- \`${NEW_TEST_FILE}\`：新行为的情形`,
+    `- \`${MAP_FILE}\`：对照表`,
+  ];
+  if (hasKeep) {
+    outputFiles.splice(1, 0, `- \`${KEEP_TEST_FILE}\`：必须保持的情形`);
+  }
+
+  // Build self-check commands.
+  const selfCheckCmds: string[] = [`npx vitest run ${data.out_dir}/${NEW_TEST_FILE}`];
+  if (hasKeep) {
+    selfCheckCmds.push(`npx vitest run ${data.out_dir}/${KEEP_TEST_FILE}`);
+  }
+  selfCheckCmds.push('npm run lint');
+  selfCheckCmds.push('npm run typecheck');
+
   const sections = [
     `# 测试批次 ${data.batch_id}`,
-    [
-      '## 本批次条目',
-      '',
-      ...(data.items.length > 0
-        ? data.items.map((item, i) => `${String(i + 1)}. ${item.split('\n').join('\n   ')}`)
-        : ['（未提供）']),
-    ].join('\n'),
+    scenarioLines.join('\n'),
+    interfaceLines.join('\n'),
     ['## 需要自行阅读的 SPEC 章节', '', ...data.spec_paths.map((p) => `- \`${p}\``)].join('\n'),
     [
       '## 输出',
       '',
       `输出目录：\`${data.out_dir}\``,
       '',
-      '在该目录下写三个文件：',
-      `- \`${NEW_TEST_FILE}\`：条目里标为「新行为」的情形`,
-      `- \`${KEEP_TEST_FILE}\`：条目里标为「必须保持」的情形（没有就不写）`,
-      `- \`${MAP_FILE}\`：对照表`,
+      '在该目录下写以下文件：',
+      ...outputFiles,
       '',
       '写完后自检：',
       '',
       '```sh',
-      `npx vitest run ${data.out_dir}/${NEW_TEST_FILE}`,
-      `npx vitest run ${data.out_dir}/${KEEP_TEST_FILE}`,
+      ...selfCheckCmds,
       '```',
     ].join('\n'),
   ];

@@ -195,3 +195,78 @@ describe('backlog-reject: batch sections', () => {
     expect(err.message).toContain('missing column(s) 期望');
   });
 });
+
+describe('backlog: rejects malformed scenarios', () => {
+  /** Build a backlog with a custom scenarios block to test rejection. */
+  function backlogWith(scenarioBlock: string): string {
+    return [
+      '# backlog',
+      '',
+      '## 队列总览',
+      '',
+      '| 优先级 | 批次 | 标题 | 依赖 | 状态 |',
+      '|---|---|---|---|---|',
+      '| 1 | v99-b01 | 示例功能 | — | pending |',
+      '',
+      '## v99-b01 示例功能',
+      '',
+      '优先级：1　依赖：无',
+      '',
+      '条目：',
+      '1. 实现功能',
+      '',
+      '验收标准：',
+      '',
+      '| 说明 | 命令 | 期望 |',
+      '|---|---|---|',
+      '| 通过 | `npm test` | exit 0 |',
+      '',
+      scenarioBlock,
+    ].join('\n');
+  }
+
+  it('rejects duplicate scenario id', () => {
+    const text = backlogWith('情形：\n- S1 [新] 功能 A\n- S1 [新] 功能 B');
+    const err = backlogError(text);
+    expect(err.batchId).toBe('v99-b01');
+    expect(err.line).toBe(lineOf(text, '- S1 [新] 功能 B'));
+    expect(err.message).toContain('duplicate scenario id "S1"');
+  });
+
+  it('rejects a kind that is not 新 or 保持', () => {
+    const text = backlogWith('情形：\n- S1 [已完成] 功能 A');
+    const err = backlogError(text);
+    expect(err.batchId).toBe('v99-b01');
+    expect(err.line).toBe(lineOf(text, '- S1 [已完成] 功能 A'));
+    expect(err.message).toContain('does not match expected format');
+  });
+
+  it('rejects a scenario that does not match the expected format', () => {
+    const text = backlogWith('情形：\n- 没有编号的情形');
+    const err = backlogError(text);
+    expect(err.batchId).toBe('v99-b01');
+    expect(err.line).toBe(lineOf(text, '- 没有编号的情形'));
+    expect(err.message).toContain('does not match expected format');
+  });
+
+  it('rejects 情形 label with zero scenarios', () => {
+    const text = backlogWith('情形：\n');
+    const err = backlogError(text);
+    expect(err.batchId).toBe('v99-b01');
+    expect(err.message).toContain('has no scenarios');
+  });
+
+  it('rejects scenarios with no [新] kind', () => {
+    const text = backlogWith('情形：\n- K1 [保持] 现有行为');
+    const err = backlogError(text);
+    expect(err.batchId).toBe('v99-b01');
+    expect(err.message).toContain('no [新] scenario');
+  });
+
+  it('rejects duplicate 情形 section', () => {
+    const text = backlogWith('情形：\n- S1 [新] 功能 A\n\n情形：\n- S2 [新] 功能 B');
+    const err = backlogError(text);
+    expect(err.batchId).toBe('v99-b01');
+    expect(err.message).toContain('duplicate "情形" block');
+  });
+});

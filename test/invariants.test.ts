@@ -576,4 +576,21 @@ describe('structural invariants (SPEC 3.2)', () => {
     // not left as .vitest/ in the working directory.
     expect(content).toContain('--outputFile');
   });
+
+  it('src/roles/tester.ts non-comment lines do not contain items (v046-b04)', () => {
+    const lines = readFileSync(join(ROOT, 'src/roles/tester.ts'), 'utf8').split('\n');
+    // SPEC 16.11: TesterInput uses scenarios/interfaces, not items.
+    // Only check non-comment code lines (铁律 26).
+    const codeLines = lines.filter(
+      (l) =>
+        !l.trimStart().startsWith('//') &&
+        !l.trimStart().startsWith('*') &&
+        !l.trimStart().startsWith('/*'),
+    );
+    const hasItems = codeLines.some((l) => /\bitems\b/.test(l));
+    expect(
+      hasItems,
+      'items should not appear in non-comment code lines of src/roles/tester.ts (v046-b04)',
+    ).toBe(false);
+  });
 });
