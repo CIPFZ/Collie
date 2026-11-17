@@ -520,4 +520,9 @@ describe('structural invariants (SPEC 3.2)', () => {
       'batchesRun.length >= ctx.max should not appear in non-comment code (SPEC 14.14)',
     ).toBe(false);
   });
+
+  it('src/follow.ts contains syncFailures (v045-b11)', () => {
+    const content = readFileSync(join(ROOT, 'src/follow.ts'), 'utf8');
+    expect(content).toContain('syncFailures');
+  });
 });

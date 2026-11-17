@@ -1171,9 +1171,9 @@ describe('collie follow (SPEC 14.4 / 14.9)', { timeout: 120_000 }, () => {
   });
 
   // -----------------------------------------------------------------------
-  // 20. SPEC 14.9 item 2: git pull failure 3 cycles → notify once
+  // 20. SPEC 14.9 item 2 / 14.15 item 1: git pull failure — sync failure notification
   // -----------------------------------------------------------------------
-  it('broken remote 4 cycles → no crash, no queue-end notification', async () => {
+  it('broken remote 4 cycles → 1 "git pull 连续失败" notification at cycle 3, no queue-end', async () => {
     box.write('docs/ops/next.md', nextRunMd(baseSha, baseSha, 4), box.root);
     await box.commitAll('ops: next -> run');
     await git(box.root, ['push', '-q', 'origin', 'main']);
@@ -1208,7 +1208,10 @@ describe('collie follow (SPEC 14.4 / 14.9)', { timeout: 120_000 }, () => {
     });
 
     expect(sleepCount).toBe(CYCLES);
-    // Sync can't reach remote; no queue-end notification possible
+    // SPEC 14.15 item 1: "git pull 连续失败" exactly once (at cycle 3)
+    const pullNotifs = notifications.filter((n) => n.includes('git pull 连续失败'));
+    expect(pullNotifs.length).toBe(1);
+    // No queue-end notification
     const endNotifs = notifications.filter((n) => n.includes('队列') && n.includes('结束'));
     expect(endNotifs.length).toBe(0);
   });
@@ -1322,7 +1325,7 @@ describe('collie follow (SPEC 14.4 / 14.9)', { timeout: 120_000 }, () => {
   // -----------------------------------------------------------------------
   // 22. SPEC 14.12: remote has extra commit during queue → rebase, no diverged notification
   // -----------------------------------------------------------------------
-  it('remote extra commit during queue → rebase, remote has both commits, no diverged notification', async () => {
+  it('remote extra commit during queue → rebase, remote has both commits, no diverged notification, 4 cycles', async () => {
     const pinnedSha = baseSha;
     box.write('docs/ops/next.md', nextRunMd(baseSha, pinnedSha, 4), box.root);
     await box.commitAll('ops: next -> run');
@@ -1330,6 +1333,24 @@ describe('collie follow (SPEC 14.4 / 14.9)', { timeout: 120_000 }, () => {
 
     const notifications: string[] = [];
     const clock = createFakeClock();
+    let sleepCount = 0;
+    let extraCommitDone = false;
+
+    const countedSleep = async (ms: number) => {
+      sleepCount++;
+      await clock.sleep(ms);
+      // Push an extra commit to remote between cycle 1 and cycle 2
+      if (!extraCommitDone) {
+        const tmpClone = join(box.dir, 'tmpclone');
+        mkdirSync(tmpClone);
+        await git(box.dir, ['clone', '-q', box.remote, tmpClone]);
+        writeFileSync(join(tmpClone, 'extra.txt'), 'extra\n');
+        await git(tmpClone, ['add', 'extra.txt']);
+        await git(tmpClone, ['commit', '-q', '-m', 'chore: extra commit from another actor']);
+        await git(tmpClone, ['push', '-q', 'origin', 'main']);
+        extraCommitDone = true;
+      }
+    };
 
     const preflightJson = JSON.stringify({
       ok: true,
@@ -1345,11 +1366,21 @@ describe('collie follow (SPEC 14.4 / 14.9)', { timeout: 120_000 }, () => {
     ]);
 
     // Cycle 1: execute run, commit report
+    // Sleep → push extra commit to remote
+    // Cycle 2: sync → fetch → diverged → rebase → push → pendingReport notification
+    // Sleep
+    // Cycle 3: nothing (wait)
+    // Sleep
+    // Cycle 4: timeout
+
+    const CYCLES = 4;
+    const timeoutSecs = (CYCLES - 1) * (SIXTY_SEC_MS / 1000) + 1;
     await follow({
       root: box.root,
-      once: true,
+      intervalSecs: SIXTY_SEC_MS / 1000,
+      timeoutSecs,
       now: clock.now,
-      sleep: clock.sleep,
+      sleep: countedSleep,
       spawn: wrapWithQueueDir(spawn, calls, 'q-rebase-1'),
       sendNotify: collector(notifications),
       out: () => {
@@ -1358,29 +1389,8 @@ describe('collie follow (SPEC 14.4 / 14.9)', { timeout: 120_000 }, () => {
       pinnedParentDir: pinnedDir,
     });
 
-    // Now push an extra commit directly to the remote (simulating another actor)
-    // Clone the remote, commit, and push
-    const tmpClone = join(box.dir, 'tmpclone');
-    mkdirSync(tmpClone);
-    await git(box.dir, ['clone', '-q', box.remote, tmpClone]);
-    writeFileSync(join(tmpClone, 'extra.txt'), 'extra\n');
-    await git(tmpClone, ['add', 'extra.txt']);
-    await git(tmpClone, ['commit', '-q', '-m', 'chore: extra commit from another actor']);
-    await git(tmpClone, ['push', '-q', 'origin', 'main']);
-
-    // Cycle 2: sync should rebase local report commit on top of remote's extra commit, then push
-    await follow({
-      root: box.root,
-      once: true,
-      now: clock.now,
-      sleep: clock.sleep,
-      spawn,
-      sendNotify: collector(notifications),
-      out: () => {
-        /* noop */
-      },
-      pinnedParentDir: pinnedDir,
-    });
+    // Assert cycle count
+    expect(sleepCount).toBe(CYCLES);
 
     // Remote should have both the extra commit and the report commit
     const remoteLog = await git(box.remote, ['log', '--oneline', '-5']);
@@ -1849,5 +1859,239 @@ describe('collie follow (SPEC 14.4 / 14.9)', { timeout: 120_000 }, () => {
     // Preflight should have been called again (backoff cleared)
 
     expect(preflightCount).toBe(2);
+  });
+
+  // -----------------------------------------------------------------------
+  // 31. SPEC 14.15 item 1: remote unreachable 5 cycles → 1 notification at cycle 3;
+  //     restore 1 cycle → syncFailures=0; break again 3 cycles → 2nd notification; total 2
+  // -----------------------------------------------------------------------
+  it('remote unreachable 5+1+3 cycles: 2 "git pull 连续失败" notifications total', async () => {
+    box.write('docs/ops/next.md', nextRunMd(baseSha, baseSha, 4), box.root);
+    await box.commitAll('ops: next -> run');
+    await git(box.root, ['push', '-q', 'origin', 'main']);
+
+    const realRemote = box.remote;
+    // Phase 1: break remote, run 5 cycles
+    await git(box.root, ['remote', 'set-url', 'origin', '/nonexistent/path.git']);
+
+    const notifications: string[] = [];
+    const clock = createFakeClock();
+    let sleepCount = 0;
+    const countedSleep = async (ms: number) => {
+      sleepCount++;
+      await clock.sleep(ms);
+    };
+    const { spawn } = createFakeSpawn();
+
+    const PHASE1_CYCLES = 5;
+    const timeoutSecs1 = (PHASE1_CYCLES - 1) * (SIXTY_SEC_MS / 1000) + 1;
+    await follow({
+      root: box.root,
+      intervalSecs: SIXTY_SEC_MS / 1000,
+      timeoutSecs: timeoutSecs1,
+      now: clock.now,
+      sleep: countedSleep,
+      spawn,
+      sendNotify: collector(notifications),
+      out: () => {
+        /* noop */
+      },
+      pinnedParentDir: pinnedDir,
+    });
+
+    expect(sleepCount).toBe(PHASE1_CYCLES);
+    // 1 "git pull 连续失败" (appeared at cycle 3)
+    const pullNotifs1 = notifications.filter((n) => n.includes('git pull 连续失败'));
+    expect(pullNotifs1.length).toBe(1);
+
+    // Phase 2: restore remote, run 1 cycle to clear syncFailures
+    await git(box.root, ['remote', 'set-url', 'origin', realRemote]);
+    sleepCount = 0;
+
+    await follow({
+      root: box.root,
+      once: true,
+      now: clock.now,
+      sleep: countedSleep,
+      spawn,
+      sendNotify: collector(notifications),
+      out: () => {
+        /* noop */
+      },
+      pinnedParentDir: pinnedDir,
+    });
+
+    // syncFailures should be 0 after success
+    const stateRaw = readFileSync(join(box.root, '.collie', 'follow.json'), 'utf8');
+    const state = JSON.parse(stateRaw) as FollowJson;
+    expect(state.syncFailures ?? 0).toBe(0);
+
+    // Phase 3: break remote again, run 3 cycles → 2nd notification at cycle 3
+    await git(box.root, ['remote', 'set-url', 'origin', '/nonexistent/path.git']);
+    sleepCount = 0;
+
+    const PHASE3_CYCLES = 3;
+    const timeoutSecs3 = (PHASE3_CYCLES - 1) * (SIXTY_SEC_MS / 1000) + 1;
+    await follow({
+      root: box.root,
+      intervalSecs: SIXTY_SEC_MS / 1000,
+      timeoutSecs: timeoutSecs3,
+      now: clock.now,
+      sleep: countedSleep,
+      spawn,
+      sendNotify: collector(notifications),
+      out: () => {
+        /* noop */
+      },
+      pinnedParentDir: pinnedDir,
+    });
+
+    expect(sleepCount).toBe(PHASE3_CYCLES);
+    // Total 2 "git pull 连续失败" notifications
+    const pullNotifs2 = notifications.filter((n) => n.includes('git pull 连续失败'));
+    expect(pullNotifs2.length).toBe(2);
+  });
+
+  // -----------------------------------------------------------------------
+  // 32. SPEC 14.15 item 1: local behind, pull blocked by untracked file for 3 cycles
+  // -----------------------------------------------------------------------
+  it('pull blocked by untracked file 3 cycles: 1 "git pull 连续失败" notification', async () => {
+    box.write('docs/ops/next.md', nextWaitMd(baseSha, 'check wait'), box.root);
+    await box.commitAll('ops: next -> wait');
+    await git(box.root, ['push', '-q', 'origin', 'main']);
+
+    // Push a commit to remote that creates a file
+    const tmpClone = join(box.dir, 'tmpclone-pull');
+    mkdirSync(tmpClone);
+    await git(box.dir, ['clone', '-q', box.remote, tmpClone]);
+    writeFileSync(join(tmpClone, 'blocking-file.txt'), 'from-remote\n');
+    await git(tmpClone, ['add', 'blocking-file.txt']);
+    await git(tmpClone, ['commit', '-q', '-m', 'chore: add blocking file']);
+    await git(tmpClone, ['push', '-q', 'origin', 'main']);
+
+    // Create an untracked file with the same name locally to block ff pull
+    writeFileSync(join(box.root, 'blocking-file.txt'), 'local-untracked\n');
+
+    const notifications: string[] = [];
+    const clock = createFakeClock();
+    let sleepCount = 0;
+    const countedSleep = async (ms: number) => {
+      sleepCount++;
+      await clock.sleep(ms);
+    };
+    const { spawn } = createFakeSpawn();
+
+    const CYCLES = 3;
+    const timeoutSecs = (CYCLES - 1) * (SIXTY_SEC_MS / 1000) + 1;
+
+    await follow({
+      root: box.root,
+      intervalSecs: SIXTY_SEC_MS / 1000,
+      timeoutSecs,
+      now: clock.now,
+      sleep: countedSleep,
+      spawn,
+      sendNotify: collector(notifications),
+      out: () => {
+        /* noop */
+      },
+      pinnedParentDir: pinnedDir,
+    });
+
+    expect(sleepCount).toBe(CYCLES);
+    // SPEC 14.15 item 1: "git pull 连续失败" exactly once
+    const pullNotifs = notifications.filter((n) => n.includes('git pull 连续失败'));
+    expect(pullNotifs.length).toBe(1);
+  });
+
+  // -----------------------------------------------------------------------
+  // 33. SPEC 14.15 item 2: report commit failure → notify "汇报没能提交", no "到对话里说"
+  // -----------------------------------------------------------------------
+  it('report commit failure 3 cycles: run --continue once, 1 notification with "汇报没能提交", no "到对话里说"', async () => {
+    const pinnedSha = baseSha;
+    box.write('docs/ops/next.md', nextRunMd(baseSha, pinnedSha, 4), box.root);
+    await box.commitAll('ops: next -> run');
+    await git(box.root, ['push', '-q', 'origin', 'main']);
+
+    // Install a pre-commit hook that rejects all commits
+    const hookDir = join(box.root, '.git', 'hooks');
+    mkdirSync(hookDir, { recursive: true });
+    writeFileSync(join(hookDir, 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+
+    const notifications: string[] = [];
+    const clock = createFakeClock();
+    let sleepCount = 0;
+    const countedSleep = async (ms: number) => {
+      sleepCount++;
+      await clock.sleep(ms);
+    };
+
+    const preflightJson = JSON.stringify({
+      ok: true,
+      checks: [{ name: 'worktree_clean', ok: true }],
+    });
+    const reportJson = JSON.stringify({ reason: 'limit' });
+
+    let runContinueCount = 0;
+    // eslint-disable-next-line @typescript-eslint/require-await -- test fake
+    const spawn: SpawnFn = async (cmd) => {
+      const cmdStr = cmd.join(' ');
+      if (cmdStr.includes('--continue')) {
+        runContinueCount++;
+        mkdirSync(join(box.root, '.collie', 'runs', `q-commit-fail-${String(runContinueCount)}`), {
+          recursive: true,
+        });
+        return { exitCode: 0, stdout: 'done\n', stderr: '' };
+      }
+      if (cmdStr.includes('preflight')) {
+        return { exitCode: 0, stdout: preflightJson + '\n', stderr: '' };
+      }
+      if (cmdStr.includes('--json')) {
+        return { exitCode: 0, stdout: reportJson + '\n', stderr: '' };
+      }
+      if (cmdStr.includes('report')) {
+        return { exitCode: 0, stdout: '# Report\n', stderr: '' };
+      }
+      return OK;
+    };
+
+    const CYCLES = 3;
+    const timeoutSecs = (CYCLES - 1) * (SIXTY_SEC_MS / 1000) + 1;
+    await follow({
+      root: box.root,
+      intervalSecs: SIXTY_SEC_MS / 1000,
+      timeoutSecs,
+      now: clock.now,
+      sleep: countedSleep,
+      spawn,
+      sendNotify: collector(notifications),
+      out: () => {
+        /* noop */
+      },
+      pinnedParentDir: pinnedDir,
+    });
+
+    expect(sleepCount).toBe(CYCLES);
+    // run --continue should have been called exactly once
+    expect(runContinueCount).toBe(1);
+
+    // Exactly 1 notification with "汇报没能提交"
+    const commitFailNotifs = notifications.filter((n) => n.includes('汇报没能提交'));
+    expect(commitFailNotifs.length).toBe(1);
+    // The notification must contain the queue run id
+    expect(commitFailNotifs[0]).toContain('q-commit-fail-1');
+    // Must NOT contain "到对话里说"
+    expect(commitFailNotifs[0]).not.toContain('到对话里说');
+
+    // No queue-end "到对话里说「看」" notification
+    const lookNotifs = notifications.filter((n) => n.includes('到对话里说'));
+    expect(lookNotifs.length).toBe(0);
+
+    // pendingReport should NOT be in state (commit failed)
+    const stateRaw = readFileSync(join(box.root, '.collie', 'follow.json'), 'utf8');
+    const state = JSON.parse(stateRaw) as FollowJson;
+    expect(state.pendingReport).toBeUndefined();
+    // But handledBase should be set (base marked as handled)
+    expect(state.handledBase).toBe(baseSha);
   });
 });
