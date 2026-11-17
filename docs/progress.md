@@ -1667,4 +1667,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b05 · r-20261117150143 · PASS
+
+- 时间：2026-11-17T15:18:03.514Z
+- 裁定：规则 10，All 8 acceptance commands pass. Static command execution (SPEC 16.11) correctly implemented via injected spawn with sh -c, same timeoutMs, exit code + tail-20 in reason, timeout recorded. Missing keep report detected and recorded. judgeRedCheck unchanged. 7 new test cases cover both bold scenarios, mixed problems, timeout, no-staticCommands, and missing report. No protected or prohibited files modified, no dependency changes, no existing assertions altered. CI status unknown — deferred to R2.
+- 提交：`eb0a34b`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1267 passed, 0 failed
+  - `npm test -- test/redcheck.test.ts && ! test -e .vitest` → exit 0，23 passed, 0 failed
+  - `grep -qF "runRedCheck: static commands and missing reports" test/redcheck.test.ts` → exit 0，exit 0
+  - `grep -qF "staticCommands" src/redcheck.ts && grep -qF "staticCommands" test/redcheck.test.ts && grep -qF "no report produced" src/redcheck.ts && grep -qF "no report produced" test/redcheck.test.ts` → exit 0，exit 0
+  - `d=$(mktemp -d) && TMPDIR=$d npm test -- test/redcheck.test.ts && ! ls -d "$d"/collie-redcheck-* >/dev/null 2>&1` → exit 0，23 passed, 0 failed
+  - `grep -qF "staticCommands" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44110973811
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
