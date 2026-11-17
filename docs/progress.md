@@ -1532,4 +1532,21 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b17 · r-20261117104317 · PASS
+
+- 时间：2026-11-17T10:53:47.189Z
+- 裁定：规则 10，All 5 acceptance commands pass. 27 { timeout: 60_000 } and 5 }, 60_000); removals across 14 files match task description exactly. Values ≥120s and non-timeout numbers correctly preserved. No scope creep, no assertion changes, no protected/prohibited files touched, no dependency changes. CI以R2取证为准。
+- 提交：`a7c602f`
+- 验收命令：5/5 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1184 passed, 0 failed
+  - `! grep -nE "timeout: (30|60)_000" test/*.test.ts` → exit 0，exit 0
+  - `! grep -nE "^\s*\}, (30|60)_000\);" test/*.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44068136968
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
