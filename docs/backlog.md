@@ -17,7 +17,7 @@
 > 对照没做过的结论不写进规格（「变异检查 44 项全部被发现」里有 9 项是测试文件加载失败）。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；队列为空。所有者 2026-11-17 已裁定（`docs/decisions/OPEN.md`「已裁定」、SPEC 14.17），R1 在写修 R2 的修法与分工改造的方案，写完再签第十次队列
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；队列从 v045-b12 起（SPEC 14.18），固定版本 `cf4e02b`。分工改造的方案在 SPEC 第 16 章，还没有签批次
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -83,6 +83,9 @@
 | 55 | v045-b09 | 变异检查判定收紧：基线含类型检查、caught 看测试结果不看退出码、超时不算 invalid | v045-b07 | passed |
 | 56 | v045-b10 | --max 只数通过的批次：FIX 重跑不占名额 | v045-b01 | passed |
 | 57 | v045-b11 | collie follow 的同步失败与汇报没提交成：补回连续失败通知、没提交成不说「看」 | v045-b08 | blocked |
+| 58 | v045-b12 | reviewer 拿不到任何一轮的汇报：工作目录里没有 report.md，取证范围排除信封目录 | v045-b10 | pending |
+| 59 | v045-b13 | 删除仲裁规则 4：reviewer 报的「声称不符」不再改裁定 | v045-b10 | pending |
+| 60 | v045-b14 | 运行器：SDK 抛错之前已收到结果消息时，花费与轮数照常带回 | v04-b17 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -2323,3 +2326,127 @@ v045-b08 修好了推送，但把 SPEC 14.9 的「`git pull` 连续失败 3 圈�
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner、真实的 `npx` / `npm` 子进程或真实网络请求；自己在工作区里运行不带 `--dry-run` 的 `collie follow`
 - 改动 SPEC 14.12 的推送、rebase 与「汇报上了远端才通知」的行为；改动 `src/handoff.ts`、`src/run.ts`、`src/view.ts`、`src/preflight.ts`；新增依赖
+
+## v045-b12 reviewer 拿不到任何一轮的汇报：工作目录里没有 report.md，取证范围排除信封目录
+
+优先级：58　依赖：v045-b10
+
+SPEC 3.5 写的是「reviewer 的 worktree 不含 `report.md`」，这只在第 1 次运行成立：FIX 重跑时上一轮的汇报提交排在新的 `head_sha` 之前，检出 `head_sha` 就带上了它。
+v045-b11 因此被拦了 4 次（SPEC 14.16）。规格见 SPEC 14.18 第一部分（读这一部分；背景在 14.16，原要求在 3.5 末句与 4.2）。
+
+条目：
+1. `src/run.ts` 准备 `head_sha` 工作目录的地方：reviewer 开始工作时，目录里不存在 `.collie/batches/<本批次>/report.md`，第几次运行都一样。
+   别的文件不动（本批次的 `task.md` 要留着），验收命令照旧在这个目录里跑。这件事只放在 `src/run.ts`，`src/roles/reviewer.ts` 的源码里仍然不得出现 `report.md` 字样。
+   **同一个批次先 FIX 再 PASS：第 2 次运行的 `head_sha` 的树里有上一轮的 report.md（`git ls-tree` 查得到），而 reviewer 的工作目录里没有**
+2. `src/roles/reviewer.ts` 的 `buildReviewerPrompt`：「取证范围」一节给出的两条命令改为带路径排除的写法，
+   `git log <base>..<head> -- . ':(exclude).collie/batches'` 与 `git diff <base>..<head> -- . ':(exclude).collie/batches'`，
+   并加一句「`.collie/batches/` 下是信封文件，不是 worker 的产出；只读本批次的 `task.md`」。`ReviewerInputSchema` 不加字段。
+3. 新文件 `test/reviewer-rerun.test.ts`：用 `FakeRunner` 跑真实的 `run --continue`（照 `test/report.test.ts` 里「FIX then PASS」那一组的做法，不手写 journal），
+   在两次 reviewer 场景里各记下 `ctx.cwd` 下那个文件在不在、本批次的 `task.md` 在不在，以及 `ctx.opts` 里的提示词。断言：
+   汇报文件两次都不在；第 2 次的 `head_sha` 的树里它在（这是对照，没有它这条测试什么也证明不了）；`task.md` 两次都在；两次的提示词都含 `':(exclude).collie/batches'`。
+   再加一条「第 1 次就 PASS」的。
+   允许改写的旧用例只有一处：`test/reviewer-isolation.test.ts` 的 `contains the diff pointer, items, parsed commands verbatim and SPEC paths` 里断言取证范围原文的那一条，
+   只许因为两条命令多了路径参数而改；改了就在「偏离或疑问」里列出原断言与现断言。同一文件的 `never reads a report or imports the worker role` 不许改。
+
+本批次只改 `src/run.ts`、`src/roles/reviewer.ts`、`test/reviewer-rerun.test.ts`、`test/reviewer-isolation.test.ts`（仅上面点名的一条）。不应改动 `test/invariants.test.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 重跑隔离的专项测试通过 | `npm test -- test/reviewer-rerun.test.ts` | exit 0 |
+| 原有的隔离测试仍然通过 | `npm test -- test/reviewer-isolation.test.ts` | exit 0 |
+| 专项测试不少于 3 个 | `grep -cE "^\s+it\(" test/reviewer-rerun.test.ts \| grep -qE "^([3-9]\|[1-9][0-9])$"` | exit 0 |
+| 专项测试跑的是真实队列，且带对照 | `grep -qE "FakeRunner" test/reviewer-rerun.test.ts && grep -qE "ls-tree" test/reviewer-rerun.test.ts` | exit 0 |
+| 提示词的路径排除有断言 | `grep -qF ":(exclude).collie/batches" test/reviewer-rerun.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/follow.ts`、`src/view.ts`；给 `ReviewerInputSchema` 加字段；让 reviewer 以任何方式拿到汇报的内容
+- 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v045-b13 删除仲裁规则 4：reviewer 报的「声称不符」不再改裁定
+
+优先级：59　依赖：v045-b10
+
+所有者 2026-11-17 裁定删除规则 4（SPEC 14.17）。reviewer 按设计拿不到 worker 的声称，它报的「声称不符」只可能来自泄漏的汇报；v045-b11 两次被它从 PASS 降成 FIX。
+规格见 SPEC 14.18 第二部分（读这一部分；规则表在 4.3，变异清单在 15.1）。
+
+条目：
+1. `src/arbiter.ts`：删掉规则 4 这一段。规则 5~10 的编号不变，4 空着。`src/schema/index.ts` 的 `VerdictSchema`：`claim_mismatches` 改为可选，缺省按空数组，`SCHEMA_VERSION` 不变；R2 不再读它。
+   放行判定（`src/gate.ts`）不动：它的第 2 项数的是 R2 自己记的 `claim.mismatch`。旧 journal 里的 `rule: 4` 照常显示，`src/view.ts` 不动。
+   **reviewer 判 PASS、`claim_mismatches` 非空、其余证据都好：结论是 PASS、规则 10、没有降级，队列照常放行并取下一个批次**
+2. `scripts/mutation.ts`：清单去掉 `rule4-reviewer-mismatch` 与 `rule4-pass-to-fix`，共 42 项；其余 42 项的名字不动。
+3. 测试。允许改写或删除的旧用例只有下面几处，每一处都在「偏离或疑问」里列出用例名、原断言、现断言：
+   `test/arbiter.test.ts` 的 `arbiter: rule 4, reviewer-reported mismatches` 一组（2 条）删掉；`rule 3 beats rule 4` 改成「`claim_mismatches` 非空时规则 3 照常命中」；
+   `rule 4 beats rule 5` 改成「`claim_mismatches` 非空、声称已推送而远端没有 → 规则 5」；`test/mutation.test.ts` 的 `has at least 44 items` 改为 42，末行格式那条里的示例数字可以跟着改。
+   新增：`test/arbiter.test.ts` 里条目 1 加粗的情形，以及「reviewer 判 FIX、`claim_mismatches` 非空 → FIX、规则 10」；
+   `test/reviewer.test.ts` 里「没有 `claim_mismatches` 字段的 verdict 能解析，取出来是空数组」；
+   新文件 `test/no-rule4.test.ts`：用 `FakeRunner` 跑真实的 `run --continue`，两个批次，第一个的 reviewer 判 PASS 且 `claim_mismatches` 非空，第二个正常 PASS →
+   退出码 0、两个批次都是 `passed`、第一个批次记了 `queue.gate_passed`、它的 journal 里没有 `verdict.downgraded`。
+   `test/invariants.test.ts` 加「`src/arbiter.ts` 的非注释行不含 `claim_mismatches`」
+
+本批次只改 `src/arbiter.ts`、`src/schema/index.ts`、`scripts/mutation.ts`、`test/arbiter.test.ts`、`test/reviewer.test.ts`、`test/mutation.test.ts`、`test/no-rule4.test.ts`、`test/invariants.test.ts`。
+不应改动 `test/invariants.test.ts` 已有的任何数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 删除规则 4 的专项测试通过 | `npm test -- test/no-rule4.test.ts` | exit 0 |
+| 仲裁、裁决解析、变异清单的测试通过 | `npm test -- test/arbiter.test.ts test/reviewer.test.ts test/mutation.test.ts` | exit 0 |
+| 专项测试跑的是真实队列并断言了放行 | `grep -qE "FakeRunner" test/no-rule4.test.ts && grep -qE "gate_passed" test/no-rule4.test.ts` | exit 0 |
+| 仲裁不再读 reviewer 报的声称不符（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" src/arbiter.ts \| grep -qE "claim_mismatches"` | exit 0 |
+| 变异清单是 42 项 | `npx tsx scripts/mutation.ts --list \| grep -c . \| grep -qx 42` | exit 0 |
+| 变异检查全部被发现，工作区里没有留下报告 | `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" \| tail -n 1 \| grep -qE "^mutation: caught 42 survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` | exit 0 |
+| 不变量同步 | `grep -qE "claim_mismatches" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/gate.ts`、`src/evidence.ts`、`src/run.ts`、`src/view.ts`、`src/follow.ts`；重排规则编号；改动规则 1~3、5~10 的任何判断
+- 删除或跳过条目 3 点名之外的任何测试；改写点名之外的任何已有断言；从变异清单里去掉点名之外的项
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v045-b14 运行器：SDK 抛错之前已收到结果消息时，花费与轮数照常带回
+
+优先级：60　依赖：v04-b17
+
+第九次队列里有一次 reviewer 用到 61 轮结束，事件流里有带花费的结果消息，`reviewer.finished` 却只有 `exit_code`，花费与轮数没有进 journal（SPEC 14.16）。
+规格见 SPEC 14.18 第三部分（读这一部分）。原因是 R1 读代码推断的：SDK 给出结果消息之后又抛了错，出错分支把已经收到的结果消息丢了。
+
+条目：
+1. `src/runner/claude.ts` 的 `run`：遍历 SDK 消息的循环抛错时，如果此前已经收到过结果消息，返回值里带上花费、轮数、token、会话号，
+   结束原因按结果消息的类型映射（与正常结束时同一套，`error_max_turns` → `turns_exhausted`）。只多带数据，成败的判定不变：这条路径上退出码仍然非 0，不带 `finalText`。
+   没收到过结果消息的，行为不变；被 signal 中止的，行为不变。
+2. `test/runner-claude.test.ts`，用文件里已有的假 SDK 写法，新用例放进一组 `describe('claude runner: result message before the SDK throws', …)`：
+   先给出 `error_max_turns` 的结果消息（带 `total_cost_usd` 与 `num_turns`）再抛错 → 返回值带这两个数、结束原因是 `turns_exhausted`、退出码非 0、没有 `finalText`；
+   先给出别的出错类型的结果消息再抛错 → 花费与轮数带回、结束原因是 `error`；没有结果消息就抛错 → 和现在一样。
+   已有用例一条都不改；如果你发现这条路径的现状和上面的推断对不上，停下，在「偏离或疑问」里写明你看到的，不要照猜的改。
+
+本批次只改 `src/runner/claude.ts` 与 `test/runner-claude.test.ts`。不应改动 `test/invariants.test.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 运行器的测试通过 | `npm test -- test/runner-claude.test.ts` | exit 0 |
+| 新情形有一组测试 | `grep -qF "result message before the SDK throws" test/runner-claude.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/run.ts`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/view.ts`、`src/follow.ts`；改动传给 SDK 的参数
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
