@@ -2596,8 +2596,10 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
 
       prevBatchRule9Downgraded = thisBatchHadRule9;
 
-      // SPEC 12.2: PASS → take next. Status already updated inside runBatch.
-      if (ctx.max !== undefined && batchesRun.length >= ctx.max) {
+      // SPEC 14.14: --max counts only PASS verdicts, not total runs.
+      // FIX retries, rule 1 retries, and interrupt retries do not count.
+      const passedCount = batchesRun.filter((b) => b.verdict === 'PASS').length;
+      if (ctx.max !== undefined && passedCount >= ctx.max) {
         queueRec.record('queue.finished', {
           reason: 'limit',
           batches: batchesRun,

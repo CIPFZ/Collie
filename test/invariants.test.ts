@@ -503,4 +503,21 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'scripts/mutation.ts'), 'utf8');
     expect(content).toContain('numFailedTests');
   });
+
+  it('src/run.ts does not contain batchesRun.length >= ctx.max (v045-b10)', () => {
+    const lines = readFileSync(join(ROOT, 'src/run.ts'), 'utf8').split('\n');
+    // SPEC 14.14: --max counts only PASS verdicts, not total runs.
+    // Filter out comment lines to avoid false positives (铁律 26).
+    const codeLines = lines.filter(
+      (l) =>
+        !l.trimStart().startsWith('//') &&
+        !l.trimStart().startsWith('*') &&
+        !l.trimStart().startsWith('/*'),
+    );
+    const hasBatchesRunLength = codeLines.some((l) => l.includes('batchesRun.length >= ctx.max'));
+    expect(
+      hasBatchesRunLength,
+      'batchesRun.length >= ctx.max should not appear in non-comment code (SPEC 14.14)',
+    ).toBe(false);
+  });
 });
