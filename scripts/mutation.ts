@@ -433,6 +433,7 @@ function runMutation(item: MutationItem, repoRoot: string): Result {
       'src',
       'test',
       'scripts',
+      '.collie',
       'tsconfig.json',
       'tsconfig.build.json',
       'vitest.config.ts',
