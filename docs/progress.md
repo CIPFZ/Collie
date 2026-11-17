@@ -1306,4 +1306,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b09 · r-20261117043400 · PASS
+
+- 时间：2026-11-17T05:03:26.944Z
+- 裁定：规则 10，全部 10 条验收命令通过。judgeExecResult 是纯函数，用 numFailedTests 判定 caught/survived/invalid。基线先跑类型检查再跑测试，失败时末行写 baseline failed。类型检查超时→timeout（非 invalid），限 120s；测试限 180s。末行固定格式 caught/survived/invalid/timeout/stale 全齐。44 项变异全部 caught。preflight 克隆目录用完删掉。invariants 新增 numFailedTests 断言。旧断言因 SPEC 15.5 API 重写而正当替换。CI 以 R2 取证为准。
+- 提交：`fa89a59` `4f74ffb`
+- 验收命令：10/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1135 passed, 0 failed
+  - `npm test -- test/mutation.test.ts` → exit 0，22 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/mutation.test.ts | grep -qE "^(1[8-9]|[2-9][0-9])$"` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" scripts/mutation.ts | grep -qE "numFailedTests" && grep -qE "numFailedTests" test/mutation.test.ts` → exit 0，exit 0
+  - `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" | tail -n 1 | grep -qE "^mutation: caught [0-9]+ survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` → exit 0，exit 0
+  - `d=$(mktemp -d) && TMPDIR=$d npm test -- test/preflight.test.ts && ! ls -d "$d"/collie-clone-* >/dev/null 2>&1` → exit 0，10 passed, 0 failed
+  - `npx tsx scripts/mutation.ts --list | grep -c . | grep -qE "^(4[4-9]|[5-9][0-9]|[1-9][0-9][0-9])$"` → exit 0，exit 0
+  - `grep -qE "numFailedTests" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44018937810
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
