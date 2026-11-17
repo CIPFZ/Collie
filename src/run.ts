@@ -207,8 +207,8 @@ function verifyCommands(globalCommands: readonly string[], batch: Batch): Accept
 }
 
 /**
- * A worktree at head_sha: the committed result, without report.md (it is
- * committed after head_sha) and without uncommitted leftovers. Dependencies are
+ * A worktree at head_sha: the committed result, with this batch's envelope
+ * directory stripped to task.md only (SPEC 14.18 & 14.20). Dependencies are
  * not part of git, so the main tree's node_modules is linked in when present.
  */
 async function withHeadWorktree<T>(
@@ -223,11 +223,17 @@ async function withHeadWorktree<T>(
     await addWorktree(root, dir, headSha);
     const modules = join(root, 'node_modules');
     if (existsSync(modules)) symlinkSync(modules, join(dir, 'node_modules'), 'dir');
-    // SPEC 14.17: reviewer must never see this batch's report.md in its working
-    // directory, even on FIX reruns where head_sha's tree contains a previous
-    // attempt's report (iron rule 6, SPEC 4.2).
-    const batchReportFile = join(dir, '.collie', 'batches', batchId, 'report.md');
-    if (existsSync(batchReportFile)) rmSync(batchReportFile);
+    // SPEC 14.18 & 14.20: reviewer's working directory for this batch keeps
+    // only task.md; everything else (report.md, verdict.md, …) is removed.
+    // Other batches' directories are not touched (iron rule 6, SPEC 4.2).
+    const batchDir = join(dir, '.collie', 'batches', batchId);
+    if (existsSync(batchDir)) {
+      for (const entry of readdirSync(batchDir)) {
+        if (entry !== 'task.md') {
+          rmSync(join(batchDir, entry), { recursive: true, force: true });
+        }
+      }
+    }
     return await body(dir);
   } finally {
     await removeWorktree(root, dir).catch(() => undefined);

@@ -1,7 +1,7 @@
 // SPEC 14.17: on FIX reruns the reviewer worktree must not contain the
 // previous attempt's report.md, even though git ls-tree at head_sha would
 // show it.  The path exclusion in the prompt must also be present.
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { git } from '../src/git.js';
@@ -55,6 +55,10 @@ interface ReviewerCapture {
   reportExists: boolean;
   taskExists: boolean;
   prompt: string;
+  /** Sorted file listing of .collie/batches/<BATCH_ID>/ in the reviewer cwd. */
+  batchFiles: string[];
+  /** Whether v99-other/report.md survives in the reviewer cwd. */
+  otherBatchReportExists: boolean;
 }
 
 interface WorkerCapture {
@@ -135,10 +139,15 @@ function reviewerFixScene(
   return {
     expectRole: 'reviewer',
     effect: ({ cwd, opts }: FakeSceneContext) => {
+      const batchDir = join(cwd, '.collie', 'batches', BATCH_ID);
       captures.push({
-        reportExists: existsSync(join(cwd, '.collie', 'batches', BATCH_ID, 'report.md')),
-        taskExists: existsSync(join(cwd, '.collie', 'batches', BATCH_ID, 'task.md')),
+        reportExists: existsSync(join(batchDir, 'report.md')),
+        taskExists: existsSync(join(batchDir, 'task.md')),
         prompt: opts.prompt,
+        batchFiles: existsSync(batchDir) ? readdirSync(batchDir).sort() : [],
+        otherBatchReportExists: existsSync(
+          join(cwd, '.collie', 'batches', 'v99-other', 'report.md'),
+        ),
       });
     },
     result: {
@@ -177,10 +186,15 @@ function reviewerPassScene(
   return {
     expectRole: 'reviewer',
     effect: ({ cwd, opts }: FakeSceneContext) => {
+      const batchDir = join(cwd, '.collie', 'batches', BATCH_ID);
       captures.push({
-        reportExists: existsSync(join(cwd, '.collie', 'batches', BATCH_ID, 'report.md')),
-        taskExists: existsSync(join(cwd, '.collie', 'batches', BATCH_ID, 'task.md')),
+        reportExists: existsSync(join(batchDir, 'report.md')),
+        taskExists: existsSync(join(batchDir, 'task.md')),
         prompt: opts.prompt,
+        batchFiles: existsSync(batchDir) ? readdirSync(batchDir).sort() : [],
+        otherBatchReportExists: existsSync(
+          join(cwd, '.collie', 'batches', 'v99-other', 'report.md'),
+        ),
       });
     },
     result: {
@@ -206,6 +220,9 @@ describe('reviewer-rerun: FIX then PASS', { timeout: 60_000 }, () => {
     box = await Sandbox.create();
     box.write('docs/backlog.md', makeBacklog());
     await box.commitAll('chore: single-batch backlog');
+    // Commit another batch's envelope to verify it is not removed (SPEC 14.20).
+    box.write('.collie/batches/v99-other/report.md', '# other batch report\n');
+    await box.commitAll('chore: other batch envelope');
 
     const runner = new FakeRunner([
       workerScene(box, workerCaptures, true),
@@ -245,6 +262,34 @@ describe('reviewer-rerun: FIX then PASS', { timeout: 60_000 }, () => {
     expect(lsTree).toContain('report.md');
   });
 
+  it('head_sha tree for attempt 2 contains verdict.md via ls-tree (contrast)', async () => {
+    // The first run's FIX verdict is committed before the second worker runs,
+    // so verdict.md must be in the tree — without it this test proves nothing.
+    expect(workerCaptures).toHaveLength(2);
+    const secondHead = workerCaptures[1]?.headSha ?? '';
+    expect(secondHead).not.toBe('');
+    const lsTree = await git(box.root, [
+      'ls-tree',
+      '-r',
+      '--name-only',
+      secondHead,
+      '--',
+      `.collie/batches/${BATCH_ID}/`,
+    ]);
+    expect(lsTree).toContain('verdict.md');
+  });
+
+  it('batch dir in reviewer cwd contains only task.md on both attempts', () => {
+    expect(reviewerCaptures).toHaveLength(2);
+    expect(reviewerCaptures[0]?.batchFiles).toEqual(['task.md']);
+    expect(reviewerCaptures[1]?.batchFiles).toEqual(['task.md']);
+  });
+
+  it('other batch dir files are not removed from reviewer cwd', () => {
+    expect(reviewerCaptures[0]?.otherBatchReportExists).toBe(true);
+    expect(reviewerCaptures[1]?.otherBatchReportExists).toBe(true);
+  });
+
   it('task.md is present in reviewer cwd on both attempts', () => {
     expect(reviewerCaptures[0]?.taskExists).toBe(true);
     expect(reviewerCaptures[1]?.taskExists).toBe(true);
@@ -273,6 +318,9 @@ describe('reviewer-rerun: first PASS', { timeout: 60_000 }, () => {
     box = await Sandbox.create();
     box.write('docs/backlog.md', makeBacklog());
     await box.commitAll('chore: single-batch backlog');
+    // Commit another batch's envelope to verify it is not removed (SPEC 14.20).
+    box.write('.collie/batches/v99-other/report.md', '# other batch report\n');
+    await box.commitAll('chore: other batch envelope');
 
     const runner = new FakeRunner([
       workerScene(box, workerCaptures, true),
@@ -291,5 +339,14 @@ describe('reviewer-rerun: first PASS', { timeout: 60_000 }, () => {
     expect(reviewerCaptures[0]?.reportExists).toBe(false);
     expect(reviewerCaptures[0]?.taskExists).toBe(true);
     expect(reviewerCaptures[0]?.prompt).toContain("':(exclude).collie/batches'");
+  });
+
+  it('batch dir in reviewer cwd contains only task.md', () => {
+    expect(reviewerCaptures).toHaveLength(1);
+    expect(reviewerCaptures[0]?.batchFiles).toEqual(['task.md']);
+  });
+
+  it('other batch dir files are not removed from reviewer cwd', () => {
+    expect(reviewerCaptures[0]?.otherBatchReportExists).toBe(true);
   });
 });
