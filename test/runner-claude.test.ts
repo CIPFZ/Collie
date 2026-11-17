@@ -236,12 +236,14 @@ describe('runner-claude: result mapping', () => {
     expect(result).toMatchObject({ exitCode: 1 });
   });
 
-  it('keeps the last result when a run reports several', async () => {
+  it('aggregates all results when a run reports several (SPEC 14.20)', async () => {
     const { query } = scripted([
       { type: 'result', subtype: 'success', is_error: false, result: 'first' },
       success('second'),
     ]);
-    expect((await new ClaudeRunner(config, { query }).run(opts())).finalText).toBe('second');
+    expect((await new ClaudeRunner(config, { query }).run(opts())).finalText).toBe(
+      'first\n\nsecond',
+    );
   });
 
   it('rejects when the query ends without a result message', async () => {
@@ -1069,6 +1071,23 @@ describe('claude runner: result message before the SDK throws', () => {
     };
     await expect(new ClaudeRunner(config, { query }).run(opts())).rejects.toThrow('SDK exploded');
   });
+
+  it('returns error with sessionId when no result message but session_id was seen before throw', async () => {
+    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery requires AsyncIterable
+    const query: ClaudeQuery = async function* () {
+      yield { type: 'system', subtype: 'init', session_id: 'sess-no-result' };
+      yield assistant('thinking');
+      throw new Error('connection lost mid-session');
+    };
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.exitCode).toBe(1);
+    expect(result.sessionId).toBe('sess-no-result');
+    expect(result.stopReason).toBe('error');
+    expect(result).not.toHaveProperty('finalText');
+    expect(result).not.toHaveProperty('usage');
+    expect(result).not.toHaveProperty('costUsd');
+    expect(result).not.toHaveProperty('numTurns');
+  });
 });
 
 describe('runner-claude: bash_deny positive/negative with repo toml patterns (v03-b03-fix2)', () => {
@@ -1209,5 +1228,151 @@ describe('runner-claude: bash_deny positive/negative with repo toml patterns (v0
     const output = (result as { hookSpecificOutput?: { permissionDecision?: string } })
       .hookSpecificOutput;
     expect(output?.permissionDecision).toBe('deny');
+  });
+});
+
+describe('runner-claude: more than one result message', () => {
+  it('two successful results: turns summed, tokens summed, cost from last, finalText joined, exit 0', async () => {
+    const result1: unknown = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: '# first part',
+      session_id: 'sess-a',
+      usage: { input_tokens: 10000, output_tokens: 2000 },
+      total_cost_usd: 3.0978,
+      num_turns: 66,
+    };
+    const result2: unknown = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: '# second part',
+      session_id: 'sess-b',
+      usage: { input_tokens: 500, output_tokens: 100 },
+      total_cost_usd: 3.1515,
+      num_turns: 1,
+    };
+    const { query } = scripted([assistant('working'), result1, assistant('more'), result2]);
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.exitCode).toBe(0);
+    expect(result.numTurns).toBe(67);
+    expect(result.usage).toEqual({ inputTokens: 10500, outputTokens: 2100 });
+    expect(result.costUsd).toBe(3.1515);
+    expect(result.finalText).toBe('# first part\n\n# second part');
+    expect(result.sessionId).toBe('sess-b');
+    expect(result.stopReason).toBeUndefined();
+    expect(result.durationMs).toBeTypeOf('number');
+  });
+
+  it('first error_max_turns then success: exit 1, turns_exhausted, no finalText, turns summed', async () => {
+    const errorResult: unknown = {
+      type: 'result',
+      subtype: 'error_max_turns',
+      is_error: true,
+      session_id: 'sess-err',
+      usage: { input_tokens: 8000, output_tokens: 1500 },
+      total_cost_usd: 2.5,
+      num_turns: 50,
+    };
+    const successResult: unknown = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'done after retry',
+      session_id: 'sess-retry',
+      usage: { input_tokens: 200, output_tokens: 40 },
+      total_cost_usd: 2.55,
+      num_turns: 2,
+    };
+    const { query } = scripted([errorResult, successResult]);
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.exitCode).toBe(1);
+    expect(result.stopReason).toBe('turns_exhausted');
+    expect(result).not.toHaveProperty('finalText');
+    expect(result.numTurns).toBe(52);
+    expect(result.usage).toEqual({ inputTokens: 8200, outputTokens: 1540 });
+    expect(result.costUsd).toBe(2.55);
+    expect(result.sessionId).toBe('sess-retry');
+    expect(result.durationMs).toBeTypeOf('number');
+  });
+
+  it('three successful results: all fields aggregated correctly', async () => {
+    const r1: unknown = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'part A',
+      session_id: 'sa',
+      usage: { input_tokens: 100, output_tokens: 10 },
+      total_cost_usd: 0.1,
+      num_turns: 5,
+    };
+    const r2: unknown = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'part B',
+      session_id: 'sb',
+      usage: { input_tokens: 200, output_tokens: 20 },
+      total_cost_usd: 0.3,
+      num_turns: 10,
+    };
+    const r3: unknown = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'part C',
+      session_id: 'sc',
+      usage: { input_tokens: 300, output_tokens: 30 },
+      total_cost_usd: 0.6,
+      num_turns: 15,
+    };
+    const { query } = scripted([r1, r2, r3]);
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.exitCode).toBe(0);
+    expect(result.numTurns).toBe(30);
+    expect(result.usage).toEqual({ inputTokens: 600, outputTokens: 60 });
+    expect(result.costUsd).toBe(0.6);
+    expect(result.finalText).toBe('part A\n\npart B\n\npart C');
+    expect(result.sessionId).toBe('sc');
+    expect(result.stopReason).toBeUndefined();
+  });
+
+  it('two results then SDK throws: cost and turns still carried back', async () => {
+    const r1: unknown = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'partial',
+      session_id: 'sa',
+      usage: { input_tokens: 400, output_tokens: 80 },
+      total_cost_usd: 0.5,
+      num_turns: 8,
+    };
+    const r2: unknown = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'more',
+      session_id: 'sb',
+      usage: { input_tokens: 100, output_tokens: 20 },
+      total_cost_usd: 0.55,
+      num_turns: 2,
+    };
+    // eslint-disable-next-line @typescript-eslint/require-await -- ClaudeQuery requires AsyncIterable
+    const query: ClaudeQuery = async function* () {
+      yield r1;
+      yield r2;
+      throw new Error('stream broken');
+    };
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.exitCode).toBe(1);
+    expect(result.numTurns).toBe(10);
+    expect(result.usage).toEqual({ inputTokens: 500, outputTokens: 100 });
+    expect(result.costUsd).toBe(0.55);
+    expect(result.sessionId).toBe('sb');
+    expect(result).not.toHaveProperty('finalText');
+    expect(result.durationMs).toBeTypeOf('number');
   });
 });

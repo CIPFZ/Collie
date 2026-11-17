@@ -216,6 +216,107 @@ function toUsage(usage: ResultMessage['usage']): Usage | undefined {
   };
 }
 
+/**
+ * Sums two Usage objects field by field. Returns undefined when both are
+ * undefined; otherwise missing sides are treated as zero.
+ */
+function sumUsage(a: Usage | undefined, b: Usage | undefined): Usage | undefined {
+  if (a === undefined && b === undefined) return undefined;
+  const left = a ?? { inputTokens: 0, outputTokens: 0 };
+  const right = b ?? { inputTokens: 0, outputTokens: 0 };
+  const merged: Usage = {
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+  };
+  const cacheCreation =
+    (left.cacheCreationInputTokens ?? 0) + (right.cacheCreationInputTokens ?? 0);
+  if (
+    cacheCreation > 0 ||
+    left.cacheCreationInputTokens !== undefined ||
+    right.cacheCreationInputTokens !== undefined
+  ) {
+    merged.cacheCreationInputTokens = cacheCreation;
+  }
+  const cacheRead = (left.cacheReadInputTokens ?? 0) + (right.cacheReadInputTokens ?? 0);
+  if (
+    cacheRead > 0 ||
+    left.cacheReadInputTokens !== undefined ||
+    right.cacheReadInputTokens !== undefined
+  ) {
+    merged.cacheReadInputTokens = cacheRead;
+  }
+  return merged;
+}
+
+/**
+ * Aggregates multiple result messages into a single RunResult (SPEC 14.20).
+ *
+ * - Turns & token fields: sum across all messages.
+ * - Cost: last message that carries a cost.
+ * - Success: every message must be successful.
+ * - stopReason: stopped > turns_exhausted > error > undefined (see SPEC).
+ * - finalText: only when all succeed; texts joined by blank line.
+ * - sessionId: last message's.
+ */
+function aggregateResults(
+  results: readonly ResultMessage[],
+  lastSessionId: string | undefined,
+  interrupted: boolean,
+  durationMs: number,
+): RunResult {
+  // Every result must be a success for the aggregate to be a success.
+  const allSucceeded = results.every((r) => r.subtype === 'success' && r.is_error !== true);
+
+  // stopReason priority: stopped (interrupted) > turns_exhausted > error.
+  const stopReason: RunResult['stopReason'] = (() => {
+    if (interrupted) return 'stopped';
+    if (results.some((r) => r.subtype === 'error_max_turns')) return 'turns_exhausted';
+    if (!allSucceeded) return 'error';
+    return undefined;
+  })();
+
+  // Aggregate turns: sum of num_turns across all messages.
+  const totalTurns = results.reduce(
+    (sum, r) => (r.num_turns !== undefined ? sum + r.num_turns : sum),
+    0,
+  );
+  const hasTurns = results.some((r) => r.num_turns !== undefined);
+
+  // Aggregate usage: sum across all messages.
+  let totalUsage: Usage | undefined;
+  for (const r of results) {
+    totalUsage = sumUsage(totalUsage, toUsage(r.usage));
+  }
+
+  // Cost: last message that carries total_cost_usd.
+  let costUsd: number | undefined;
+  for (const r of results) {
+    if (r.total_cost_usd !== undefined) costUsd = r.total_cost_usd;
+  }
+
+  // sessionId: last message's, falling back to lastSessionId from any message.
+  const sessionId = results[results.length - 1]?.session_id ?? lastSessionId;
+
+  // finalText: only when all succeeded; join texts by blank line.
+  const finalText = allSucceeded
+    ? results
+        .map((r) => r.result)
+        .filter((t): t is string => t !== undefined)
+        .join('\n\n') || undefined
+    : undefined;
+
+  return {
+    exitCode: allSucceeded ? EXIT_OK : EXIT_FAILED,
+    ...(sessionId === undefined ? {} : { sessionId }),
+    ...(totalUsage === undefined ? {} : { usage: totalUsage }),
+    ...(finalText === undefined ? {} : { finalText }),
+    ...(stopReason === undefined ? {} : { stopReason }),
+    ...(costUsd !== undefined ? { costUsd } : {}),
+    ...(hasTurns ? { numTurns: totalTurns } : {}),
+    durationMs,
+  };
+}
+
 /** Extracts session_id from any message that carries one (SPEC 11.2: never lose it). */
 function extractSessionId(message: unknown): string | undefined {
   if (typeof message === 'object' && message !== null) {
@@ -424,7 +525,8 @@ export class ClaudeRunner implements AgentRunner {
     };
     opts.onStarted?.(handle);
 
-    let result: ResultMessage | undefined;
+    // SPEC 14.20: collect all result messages (a session may emit more than one).
+    const results: ResultMessage[] = [];
     // Track sessionId from any message (SPEC 11.2: do not lose it on error).
     let lastSessionId: string | undefined;
     const secrets = opts.redact ?? [];
@@ -434,29 +536,21 @@ export class ClaudeRunner implements AgentRunner {
         opts.onEvent?.(redacted);
         const sid = extractSessionId(message);
         if (sid !== undefined) lastSessionId = sid;
-        if (isResultMessage(message)) result = message;
+        if (isResultMessage(message)) results.push(message);
       }
     } catch (error) {
       opts.signal?.removeEventListener('abort', forwardAbort);
       if (opts.signal?.aborted === true) throw opts.signal.reason;
-      // SPEC 14.18: when a result message was received before the SDK threw,
-      // carry cost, turns, usage and sessionId back — the data is real even
-      // though the run failed.  stopReason maps from the result's subtype
-      // using the same logic as the normal-exit path.
-      if (result !== undefined) {
-        const sessionId = result.session_id ?? lastSessionId;
-        const errorStopReason: RunResult['stopReason'] =
-          result.subtype === 'error_max_turns' ? 'turns_exhausted' : 'error';
+      // SPEC 14.18 / 14.20: when result messages were received before the SDK
+      // threw, aggregate them and carry back cost, turns, usage and sessionId.
+      if (results.length > 0) {
         const durationMs = Date.now() - runStart;
-        return {
-          exitCode: EXIT_FAILED,
-          ...(sessionId === undefined ? {} : { sessionId }),
-          ...(result.usage === undefined ? {} : { usage: toUsage(result.usage) }),
-          stopReason: errorStopReason,
-          ...(result.total_cost_usd !== undefined ? { costUsd: result.total_cost_usd } : {}),
-          ...(result.num_turns !== undefined ? { numTurns: result.num_turns } : {}),
-          durationMs,
-        };
+        // The throw means the run failed regardless of individual results.
+        const agg = aggregateResults(results, lastSessionId, interrupted, durationMs);
+        // Force failure: exitCode non-zero, strip finalText (destructure to omit).
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars -- stripping finalText
+        const { finalText: _stripped, ...rest } = agg;
+        return { ...rest, exitCode: EXIT_FAILED };
       }
       // SPEC 11.2: SDK errors must still return RunResult with sessionId when possible.
       if (lastSessionId !== undefined) {
@@ -471,7 +565,7 @@ export class ClaudeRunner implements AgentRunner {
       opts.signal?.removeEventListener('abort', forwardAbort);
     }
 
-    if (result === undefined) {
+    if (results.length === 0) {
       // interrupt() may end the stream before a result message arrives.
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by handle.stop()
       if (interrupted) {
@@ -483,28 +577,8 @@ export class ClaudeRunner implements AgentRunner {
       }
       throw new Error('the Claude query ended without a result message');
     }
-    const succeeded = result.subtype === 'success' && result.is_error !== true;
-    const sessionId = result.session_id ?? lastSessionId;
-    // Map SDK error subtypes to stopReason (SPEC 11.2).
-    const stopReason: RunResult['stopReason'] = (() => {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by handle.stop()
-      if (interrupted) return 'stopped';
-      if (result.subtype === 'error_max_turns') return 'turns_exhausted';
-      if (!succeeded && result.subtype !== 'success') return 'error';
-      return undefined;
-    })();
+    // SPEC 14.20: aggregate all collected result messages.
     const durationMs = Date.now() - runStart;
-    return {
-      exitCode: succeeded ? EXIT_OK : EXIT_FAILED,
-      ...(sessionId === undefined ? {} : { sessionId }),
-      ...(result.usage === undefined ? {} : { usage: toUsage(result.usage) }),
-      // Only a successful run's final text is a deliverable (e.g. the verdict).
-      ...(succeeded && result.result !== undefined ? { finalText: result.result } : {}),
-      ...(stopReason === undefined ? {} : { stopReason }),
-      // SPEC 13.1: running-level data from the SDK (v0.4).
-      ...(result.total_cost_usd !== undefined ? { costUsd: result.total_cost_usd } : {}),
-      ...(result.num_turns !== undefined ? { numTurns: result.num_turns } : {}),
-      durationMs,
-    };
+    return aggregateResults(results, lastSessionId, interrupted, durationMs);
   }
 }
