@@ -1414,4 +1414,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b11 · r-20261117061857 · FIX（reviewer 原判 PASS，规则 4 降级）
+
+- 时间：2026-11-17T06:35:37.370Z
+- 裁定：规则 4，reviewer reported 2 claim mismatch(es)
+- 提交：`47dac07` `613b95c` `658a070`
+- 验收命令：10/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1144 passed, 0 failed
+  - `npm test -- test/follow.test.ts` → exit 0，33 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/follow.test.ts | grep -qE "^(3[3-9]|[4-9][0-9])$"` → exit 0，exit 0
+  - `d=$(mktemp -d) && TMPDIR=$d npm test -- test/follow.test.ts && ! ls -d "$d"/collie-r2-* >/dev/null 2>&1` → exit 0，33 passed, 0 failed
+  - `grep -vE "^\s*(//|\*|/\*)" src/follow.ts | grep -qE "syncFailures" && grep -qE "syncFailures" test/follow.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/follow.ts | grep -qE "git pull 连续失败" && grep -vE "^\s*(//|\*|/\*)" test/follow.test.ts | grep -qE "git pull 连续失败"` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/follow.ts | grep -qE "汇报没能提交" && grep -vE "^\s*(//|\*|/\*)" test/follow.test.ts | grep -qE "汇报没能提交"` → exit 0，exit 0
+  - `grep -qE "syncFailures" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44027133305
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
