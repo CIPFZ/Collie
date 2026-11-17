@@ -85,7 +85,7 @@
 | 57 | v045-b11 | collie follow 的同步失败与汇报没提交成：补回连续失败通知、没提交成不说「看」 | v045-b08 | blocked |
 | 58 | v045-b12 | reviewer 拿不到任何一轮的汇报：工作目录里没有 report.md，取证范围排除信封目录 | v045-b10 | passed |
 | 59 | v045-b13 | 删除仲裁规则 4：reviewer 报的「声称不符」不再改裁定 | v045-b10 | passed |
-| 60 | v045-b14 | 运行器：SDK 抛错之前已收到结果消息时，花费与轮数照常带回 | v04-b17 | pending |
+| 60 | v045-b14 | 运行器：SDK 抛错之前已收到结果消息时，花费与轮数照常带回 | v04-b17 | passed |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
