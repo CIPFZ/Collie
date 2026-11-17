@@ -1549,4 +1549,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b01 · r-20261117105351 · PASS
+
+- 时间：2026-11-17T11:24:09.269Z
+- 裁定：规则 10，All 9 acceptance commands pass. The 3 task items are fully implemented: templateConfig() created, 7 test files decoupled from repo config, mutation.ts copies templates/ instead of .collie/, invariant added. No protected files modified, no dependencies changed, no assertions deleted or weakened outside the explicitly allowed scope. CI以R2取证为准。
+- 提交：`f4819c6`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1186 passed, 0 failed
+  - `npm test -- test/cli.test.ts test/config.test.ts test/evidence.test.ts test/reviewer-isolation.test.ts test/reviewer.test.ts test/runner-claude.test.ts test/worker.test.ts` → exit 0，205 passed, 0 failed
+  - `grep -qE "export function templateConfig" test/support/template-config.ts && grep -lE "templateConfig\(" test/*.test.ts | grep -c . | grep -qE "^([7-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `grep -nE "loadConfig\((repoRoot|ROOT|join\(import\.meta\.dirname)" test/*.test.ts | grep -v "^test/invariants.test.ts:" | grep -c . | grep -qx 1 && grep -qE "loadConfig\((repoRoot|ROOT|join\(import\.meta\.dirname)" test/config.test.ts` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" scripts/mutation.ts | grep -qF "'.collie'" && grep -qF "'templates'" scripts/mutation.ts` → exit 0，exit 0
+  - `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" | tail -n 1 | grep -qE "^mutation: caught 42 survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` → exit 0，exit 0
+  - `grep -qE "templateConfig|template-config" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44071063922
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->

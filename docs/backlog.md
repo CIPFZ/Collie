@@ -89,7 +89,7 @@
 | 61 | v045-b15 | 运行器：一个会话给出多条结果消息时，轮数与 token 合计，成败不被后一条盖掉 | v045-b14 | passed |
 | 62 | v045-b16 | reviewer 的工作目录里，本批次的信封只留 task.md | v045-b12 | passed |
 | 63 | v045-b17 | 测试：去掉低于全局值的局部超时 | v045-b07 | passed |
-| 64 | v046-b01 | 配置解耦：测试不再盯着本仓库 .collie/collie.toml 里的数值 | v045-b13 | pending |
+| 64 | v046-b01 | 配置解耦：测试不再盯着本仓库 .collie/collie.toml 里的数值 | v045-b13 | passed |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
