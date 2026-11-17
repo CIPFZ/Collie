@@ -901,6 +901,7 @@ export async function follow(opts: FollowOpts): Promise<number> {
           retry: result.retryState,
           retryBase: result.retryState !== undefined ? action.baseSha : stateJson.retryBase,
           pendingReport: result.pendingReport ?? stateJson.pendingReport,
+          syncFailures: stateJson.syncFailures,
         };
         saveFollowState(root, updated);
         break;
