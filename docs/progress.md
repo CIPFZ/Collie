@@ -1513,4 +1513,23 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b16 · r-20261117103146 · PASS
+
+- 时间：2026-11-17T10:43:13.041Z
+- 裁定：规则 10，All 7 acceptance commands pass. Code correctly strips all files except task.md from this batch's envelope directory in the reviewer worktree. Tests cover verdict.md contrast, batchFiles equality, and v99-other preservation. No protected files touched, no dependencies changed, no existing assertions modified. CI status unknown — deferred to R2.
+- 提交：`c59f919`
+- 验收命令：7/7 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1184 passed, 0 failed
+  - `npm test -- test/reviewer-rerun.test.ts` → exit 0，10 passed, 0 failed
+  - `npm test -- test/reviewer-isolation.test.ts` → exit 0，19 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/reviewer-rerun.test.ts | grep -qE "^([7-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `grep -qF "v99-other" test/reviewer-rerun.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44066470461
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
