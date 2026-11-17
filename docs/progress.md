@@ -1328,4 +1328,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v045-b10 · r-20261117050330 · PASS
+
+- 时间：2026-11-17T05:17:53.978Z
+- 裁定：规则 10，All 8 acceptance commands pass. Code change correctly replaces batchesRun.length with PASS-only count. 4 test cases cover all specified scenarios using FakeRunner with real queue. No protected files modified, no dependency changes, no existing assertions altered. CI 以 R2 取证为准。
+- 提交：`bfaec1b`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1140 passed, 0 failed
+  - `npm test -- test/queue-limit.test.ts` → exit 0，4 passed, 0 failed
+  - `grep -cE "^\s+it\(" test/queue-limit.test.ts | grep -qE "^([4-9]|[1-9][0-9])$"` → exit 0，exit 0
+  - `grep -qE "FakeRunner" test/queue-limit.test.ts && grep -qE -e "--max" test/queue-limit.test.ts` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "batchesRun\.length >= ctx\.max"` → exit 0，exit 0
+  - `grep -qE "batchesRun" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44022343997
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->

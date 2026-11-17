@@ -79,7 +79,7 @@
 | 53 | v045-b07 | 变异检查：删掉规则、放行条件或受保护路径里的任意一处，测试必须变红 | v04-b17 | passed |
 | 54 | v045-b08 | collie follow 的推送与收尾：每圈先同步、分叉时 rebase、汇报上了远端才通知、完整输出、npm ci 失败清目录 | v045-b05 | passed |
 | 55 | v045-b09 | 变异检查判定收紧：基线含类型检查、caught 看测试结果不看退出码、超时不算 invalid | v045-b07 | passed |
-| 56 | v045-b10 | --max 只数通过的批次：FIX 重跑不占名额 | v045-b01 | pending |
+| 56 | v045-b10 | --max 只数通过的批次：FIX 重跑不占名额 | v045-b01 | passed |
 | 57 | v045-b11 | collie follow 的同步失败与汇报没提交成：补回连续失败通知、没提交成不说「看」 | v045-b08 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
