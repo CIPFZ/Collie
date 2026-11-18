@@ -1882,4 +1882,21 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b13 · r-20261118123213 · PASS
+
+- 时间：2026-11-18T12:49:09.678Z
+- 裁定：规则 10，全部验收命令通过；提交已推送；无受保护文件或禁止文件被改；无依赖变化；条目的结构与行为要求逐条核对均满足；CI 以 R2 取证为准。
+- 提交：`3252fbf`
+- 验收命令：5/5 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1355 passed, 0 failed
+  - `npm test -- test/fingerprint-lock.test.ts test/scenario-g.test.ts` → exit 0，8 passed, 0 failed
+  - `grep -qF "fingerprint: never rewrites the git index" test/fingerprint-lock.test.ts && grep -qF "Sandbox" test/fingerprint-lock.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44306590247
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->

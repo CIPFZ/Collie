@@ -107,7 +107,7 @@
 | 74 | v046-b10 | prepareAcceptance 收尾：带回测试 agent 的回复、类别标错不再重拉（不接进队列） | v046-b09 | passed |
 | 75 | v046-b11 | R2 诊断信息：规则 9 重跑的 task 带 CI 链接；查裁定提交 CI 出异常时记事件 | v046-b09 | passed |
 | 76 | v046-b12 | 接线前的铺垫补齐：测试 agent 的事件与中止、类别标错清单；三处测试小修（不接进队列） | v046-b10 | blocked |
-| 77 | v046-b13 | 活性指纹不占索引锁：R2 在 worker 工作期间不改写 .git/index | v046-b09 | pending |
+| 77 | v046-b13 | 活性指纹不占索引锁：R2 在 worker 工作期间不改写 .git/index | v046-b09 | passed |
 | 78 | v046-b14 | R2 凭提交号认自己的提交：规则 2 不再按提交说明的开头跳过 | v046-b11 | pending |
 | 79 | v046-b15 | 接线第一块：带情形的批次在写 task 信封之前先拉起测试 agent | v046-b12, v046-b14 | pending |
 
