@@ -20,7 +20,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { prepareAcceptance, type RecordFn, type RedCheckFn } from '../src/acceptance.js';
 import { git, revParse } from '../src/git.js';
 import type { RunRedCheckOpts, RunRedCheckResult } from '../src/redcheck.js';
@@ -31,6 +31,58 @@ import { templateConfig } from './support/template-config.js';
 
 const config = templateConfig();
 const repoRoot = join(import.meta.dirname, '..');
+
+// ---------------------------------------------------------------------------
+// Private temp directory: each test suite uses its own TMPDIR so assertions
+// about collie-accept-* leftovers don't collide with other tests or the
+// system temp dir. SPEC 16.13.
+// ---------------------------------------------------------------------------
+let privateTmpDir: string;
+let savedTmpDir: string | undefined;
+
+// Git identity env vars set in beforeEach so tests pass on machines
+// with no global git config (SPEC 16.13).
+const GIT_ID_KEYS = [
+  'GIT_AUTHOR_NAME',
+  'GIT_AUTHOR_EMAIL',
+  'GIT_COMMITTER_NAME',
+  'GIT_COMMITTER_EMAIL',
+] as const;
+type GitIdKey = (typeof GIT_ID_KEYS)[number];
+let savedGitId: Record<GitIdKey, string | undefined>;
+
+beforeEach(() => {
+  privateTmpDir = mkdtempSync(join(tmpdir(), 'collie-pa-suite-'));
+  savedTmpDir = process.env.TMPDIR;
+  process.env.TMPDIR = privateTmpDir;
+
+  savedGitId = {
+    GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME,
+    GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL,
+    GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME,
+    GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL,
+  };
+  process.env.GIT_AUTHOR_NAME = 'PATest';
+  process.env.GIT_AUTHOR_EMAIL = 'pa@example.invalid';
+  process.env.GIT_COMMITTER_NAME = 'PATest';
+  process.env.GIT_COMMITTER_EMAIL = 'pa@example.invalid';
+});
+
+afterEach(() => {
+  if (savedTmpDir === undefined) delete process.env.TMPDIR;
+  else process.env.TMPDIR = savedTmpDir;
+  if (existsSync(privateTmpDir)) rmSync(privateTmpDir, { recursive: true, force: true });
+
+  for (const k of GIT_ID_KEYS) {
+    const v = savedGitId[k];
+    if (v === undefined) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- restoring env
+      delete process.env[k];
+    } else {
+      process.env[k] = v;
+    }
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -91,36 +143,22 @@ function dummyRedCheckOpts(): RunRedCheckOpts {
 // Track temp directories for cleanup verification.
 const tempDirs: string[] = [];
 
-/** Creates a minimal git repo suitable for prepareAcceptance. */
+/** Creates a minimal git repo suitable for prepareAcceptance.
+ *  Uses the private TMPDIR set in beforeEach; relies on the git identity
+ *  env vars also set in beforeEach (SPEC 16.13). */
 async function createTestRepo(): Promise<{ root: string; headSha: string; dir: string }> {
-  const dir = mkdtempSync(join(tmpdir(), 'collie-pa-test-'));
+  const dir = mkdtempSync(join(privateTmpDir, 'collie-pa-test-'));
   tempDirs.push(dir);
   const root = dir;
 
-  // Set up git config for this repo.
-  const configFile = join(dir, '.gitconfig');
-  writeFileSync(
-    configFile,
-    '[user]\n\tname = Test\n\temail = test@example.invalid\n[init]\n\tdefaultBranch = main\n[gc]\n\tauto = 0\n',
-  );
-  const savedGlobal = process.env.GIT_CONFIG_GLOBAL;
-  const savedNoSystem = process.env.GIT_CONFIG_NOSYSTEM;
-  process.env.GIT_CONFIG_GLOBAL = configFile;
-  process.env.GIT_CONFIG_NOSYSTEM = '1';
-
-  await git(root, ['init', '-q']);
+  await git(root, ['init', '-q', '-b', 'main']);
+  await git(root, ['config', 'gc.auto', '0']);
   // Write AGENT-tester.md so runTester can read it.
   writeFileSync(join(root, 'AGENT-tester.md'), '# Tester Manual\n');
   writeFileSync(join(root, 'dummy.txt'), 'hello\n');
   await git(root, ['add', '-A']);
   await git(root, ['commit', '-q', '-m', 'initial']);
   const headSha = await revParse(root, 'HEAD');
-
-  // Restore env.
-  if (savedGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
-  else process.env.GIT_CONFIG_GLOBAL = savedGlobal;
-  if (savedNoSystem === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
-  else process.env.GIT_CONFIG_NOSYSTEM = savedNoSystem;
 
   return { root, headSha, dir };
 }
@@ -129,9 +167,6 @@ afterAll(() => {
   for (const d of tempDirs) {
     if (existsSync(d)) rmSync(d, { recursive: true, force: true });
   }
-  // Verify no collie-accept-* directories remain in TMPDIR.
-  const leftover = readdirSync(tmpdir()).filter((n) => n.startsWith('collie-accept-'));
-  expect(leftover, 'collie-accept-* leftovers in TMPDIR').toHaveLength(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -397,8 +432,8 @@ describe('prepareAcceptance: what is taken from the tree', () => {
     const worktreeOut = await git(root, ['worktree', 'list']);
     expect(worktreeOut.trim().split('\n')).toHaveLength(1);
 
-    // No collie-accept-* leftover in tmpdir.
-    const leftover = readdirSync(tmpdir()).filter((n) => n.startsWith('collie-accept-'));
+    // No collie-accept-* leftover in private tmpdir.
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-accept-'));
     expect(leftover).toHaveLength(0);
   });
 
@@ -544,7 +579,7 @@ describe('prepareAcceptance: what is taken from the tree', () => {
     const worktreeOut = await git(root, ['worktree', 'list']);
     expect(worktreeOut.trim().split('\n')).toHaveLength(1);
 
-    const leftover = readdirSync(tmpdir()).filter((n) => n.startsWith('collie-accept-'));
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-accept-'));
     expect(leftover).toHaveLength(0);
   });
 });
@@ -571,7 +606,7 @@ export default defineConfig({ test: { include: ['**/*.test.ts'] } });
     if (!existsSync(join(root, 'node_modules'))) {
       symlinkSync(repoNodeModules, join(root, 'node_modules'));
     }
-    // Commit vitest.config.ts so it's in the worktree.
+    // Commit vitest.config.ts so it's in the worktree (identity from env, SPEC 16.13).
     await git(root, ['add', '-A']);
     await git(root, ['commit', '-q', '-m', 'add vitest config']);
     const newHead = await revParse(root, 'HEAD');

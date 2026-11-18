@@ -304,11 +304,13 @@ describe('config: tester_max and verify.static', () => {
     expect(parsed.verify.static).toBeUndefined();
   });
 
-  it('.collie/collie.toml loads without tester_max or verify.static', () => {
-    // The repository config has neither field; it must still load fine.
-    const config = loadConfig(repoRoot);
-    expect(config.limits.tester_max).toBe(2);
-    expect(config.verify.static).toBeUndefined();
+  it('loads without tester_max or verify.static (inline config)', () => {
+    // SPEC 16.13: use inline config instead of repo root so adding these fields
+    // to .collie/collie.toml later does not break this test.
+    const text = VALID_TOML.replace(/tester_max = 2\n/, '').replace(/static = \[.*\]\n/, '');
+    const parsed = parseConfig(text, 'inline.toml');
+    expect(parsed.limits.tester_max).toBe(2);
+    expect(parsed.verify.static).toBeUndefined();
   });
 });
 

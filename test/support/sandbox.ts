@@ -3,6 +3,7 @@
 // agents scripted through FakeRunner. Nothing touches the network.
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -12,7 +13,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { expect as vitestExpect } from 'vitest';
 import type { FetchLike } from '../../src/ci.js';
 import { main, type CliDeps } from '../../src/cli.js';
 import { git, revParse } from '../../src/git.js';
@@ -204,6 +206,33 @@ export class Sandbox {
   }
 
   dispose(): void {
+    // SPEC 16.13: when COLLIE_TEST_KEEP_RUNS is set, copy .collie/runs/ and
+    // write TEST_NAME before deleting the sandbox.
+    const keepDir = process.env.COLLIE_TEST_KEEP_RUNS;
+    if (keepDir) {
+      try {
+        const dest = join(keepDir, basename(this.dir));
+        mkdirSync(dest, { recursive: true });
+
+        const runsDir = join(this.root, '.collie', 'runs');
+        if (existsSync(runsDir)) {
+          cpSync(runsDir, join(dest, 'runs'), { recursive: true });
+        }
+
+        // Try to get the current test name from vitest's expect state.
+        let testName = '';
+        try {
+          const state = vitestExpect.getState();
+          testName = state.currentTestName ?? '';
+        } catch {
+          // Not available outside a test context — leave empty.
+        }
+        writeFileSync(join(dest, 'TEST_NAME'), testName);
+      } catch {
+        // Copy errors must not cause the test to fail.
+      }
+    }
+
     restore('GIT_CONFIG_GLOBAL', this.savedEnv.global);
     restore('GIT_CONFIG_NOSYSTEM', this.savedEnv.nosystem);
     rmSync(this.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

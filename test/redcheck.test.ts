@@ -6,22 +6,34 @@
 // Timeout: one scenario injects a fake spawn that never finishes.
 
 import { execFile } from 'node:child_process';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { VitestJsonReport } from '../src/redcheck.js';
 import { judgeRedCheck, runRedCheck } from '../src/redcheck.js';
 
 const repoRoot = join(import.meta.dirname, '..');
+
+// ---------------------------------------------------------------------------
+// Private temp directory: each test suite uses its own TMPDIR so the
+// "no collie-redcheck-* leftover" assertion doesn't collide with other
+// processes or tests. SPEC 16.13.
+// ---------------------------------------------------------------------------
+let privateTmpDir: string;
+let savedTmpDir: string | undefined;
+
+beforeEach(() => {
+  privateTmpDir = mkdtempSync(join(tmpdir(), 'collie-rc-suite-'));
+  savedTmpDir = process.env.TMPDIR;
+  process.env.TMPDIR = privateTmpDir;
+});
+
+afterEach(() => {
+  if (savedTmpDir === undefined) delete process.env.TMPDIR;
+  else process.env.TMPDIR = savedTmpDir;
+  if (existsSync(privateTmpDir)) rmSync(privateTmpDir, { recursive: true, force: true });
+});
 
 // ---------------------------------------------------------------------------
 // Helpers for building fake vitest JSON reports
@@ -243,7 +255,7 @@ describe('judgeRedCheck', () => {
 const createdTempDirs: string[] = [];
 
 function createTestTree(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'collie-redcheck-'));
+  const dir = mkdtempSync(join(privateTmpDir, 'collie-redcheck-'));
   createdTempDirs.push(dir);
   // Link node_modules from repo root so vitest is available.
   symlinkSync(join(repoRoot, 'node_modules'), join(dir, 'node_modules'));
@@ -270,10 +282,6 @@ afterAll(() => {
       rmSync(d, { recursive: true, force: true });
     }
   }
-  // Verify no collie-redcheck-* directories remain in TMPDIR.
-  const tmpBase = tmpdir();
-  const leftovers = readdirSync(tmpBase).filter((n) => n.startsWith('collie-redcheck-'));
-  expect(leftovers, 'collie-redcheck-* leftovers in TMPDIR').toHaveLength(0);
 });
 
 describe('runRedCheck (real vitest)', () => {

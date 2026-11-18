@@ -564,6 +564,21 @@ describe('structural invariants (SPEC 3.2)', () => {
     ).toEqual(['test/config.test.ts']);
   });
 
+  it('test/config.test.ts loads config from repo root exactly once (v046-b09)', () => {
+    // SPEC 16.13: keeping the count at 1 ensures new tests use inline config,
+    // not the repository's live .collie/collie.toml.
+    let output: string;
+    try {
+      output = execSync(
+        'grep -cE "loadConfig\\((repoRoot|ROOT|join\\(import\\.meta\\.dirname)" test/config.test.ts',
+        { cwd: ROOT, encoding: 'utf8' },
+      ).trim();
+    } catch {
+      throw new Error('expected test/config.test.ts to have at least one loadConfig(repoRoot)');
+    }
+    expect(output).toBe('1');
+  });
+
   it('src/roles/tester.ts source does not contain report.md (v046-b02)', () => {
     const content = readFileSync(join(ROOT, 'src/roles/tester.ts'), 'utf8');
     // SPEC 16.10: the tester runs before the worker; it has nothing to do with reports.
