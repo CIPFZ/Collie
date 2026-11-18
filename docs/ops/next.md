@@ -1,41 +1,31 @@
 # 下一轮指令（R1 → 操作员）
 
 状态：开跑
-基准提交：9bf2e2d
-固定版本：e5492d7
+基准提交：5b8363c
+固定版本：c475eaa
 批次上限：3
 
 上面四行是给 `collie follow` 读的键值行（SPEC 14.3），你照常当文字读。`git pull --ff-only` 后 `git merge-base --is-ancestor <基准提交> HEAD` 必须成功，否则停下报告。
 
-## 本轮：第十四次队列 `--continue --max 3`，固定版本前移到 `e5492d7`（应依次选中 v046-b06、b07、b08）
+## 本轮：第十五次队列 `--continue --max 3`，固定版本前移到 `c475eaa`（应依次选中 v046-b09、b10、b11）
 
-第十三次队列的汇报我核过了，两批的 PASS 都成立，裁定记在 SPEC 14.24。你第 8 段的两条：
+第十四次队列的汇报我核过了，裁定记在 SPEC 14.25。你查 CI 日志、在本机去掉全局身份复现的那一步是这一轮的关键，我用已有的测试照你的做法各跑了一遍，结论一样：
+没有 git 全局身份时全量测试 1308 条里恰好 1 条失败。你第 8 段的几条：
 
-- **第 1 条，固定版本前移到 `e5492d7`、先修空行丢情形：** 前移就是这一轮；空行那一处是 **v046-b06**。在它通过之前我不写带情形的批次，所以前移不用等它。
-- **第 2 条，接线怎么签：** SPEC 16.11 末尾那几条我定了，写在 16.12：FIX 重跑时测试 agent 不再跑（树里已经有测试）；重写上限是配置项 `limits.tester_max`，缺省 2，用完上报；
-  静态检查的命令来自配置 `[verify] static`；验收测试随 task 信封一起提交；`test/acceptance` 列入受保护路径。
-  接线本身（改 `src/run.ts`）下一轮签。这一轮是它之前的三块铺垫，**都不接进队列**：
-  - **v046-b06**：情形与接口的列表允许空行；提示词两处小修（小标题不再叫「需要自行阅读的 SPEC 章节」，写明不要通读；JSON 里的批次号写明）。
-  - **v046-b07**：配置加 `tester_max` 与 `static`、三个事件类型、`test/acceptance` 进受保护路径与变异清单（43 项）。
-  - **v046-b08**：新模块 `src/acceptance.ts`，把「拉起测试 agent → 红检查 → 不过就交回重写 → 只取走点名的文件」做成一个函数。
-- 你试跑测试 agent 的那一组做得很细，尤其是顺手试的两个错误实现。两份手册我各补了一处：`AGENT-tester.md` 写明不要通读 SPEC、批次号照标题填；`AGENT-worker.md` 的禁写清单加了 `test/acceptance/`。
-- 红检查的时间几乎全在整仓 lint 上：不改，接线时把超时按它给。
+- **第 1 条，先把主分支 CI 修绿：** 就是 **v046-b09**。它同时收掉你查出来的另外两处同类问题（两份测试断言整个系统临时目录；b07 那条测试又绑回本仓库配置），并给 `Sandbox` 加一个留 journal 的开关。
+  **v046-b08 保持 `blocked`**，代码不回退；算不算数看 b09：b09 通过，就是 R2 在含这些代码的树上拿到了 CI 全过的证据。
+- **第 2 条，规则 9 的重跑：** task 带上 `head_sha` 与 CI 运行的链接，是 **v046-b11**。「同一个 `head_sha` 再被规则 9 降级就直接上报」是改队列的规则，我转给所有者了（`docs/decisions/OPEN.md` 的 D10）。
+  worker 的手册我加了一段：规则 9 的失败在 CI 的机器上，环境不同；查不出来就写明，不要只重写汇报。
+- **第 3 条，固定版本：** 前移到 `c475eaa`（b07 的裁定提交，CI 最后一次成功的地方），不含 b08 的代码。本仓库的配置这一轮不加新配置项。
+- **第 4 条，接线时带回测试 agent 的回复、类别标错不再重拉：** **v046-b10**。「不再重拉」我没有按红检查的原因文字判断，而是让测试 agent 在汇报的 JSON 里用 `misclassified` 自己声明
+  （手册已加）：「本该失败的通过了」也可能只是它的断言写弱了，那种情况重写是有用的。
+- `verdict-ci-recheck` 的偶发失败：你 60 次没有复现，我这边这一轮又出了两条别的（`no-rule4`、`queue-limit` 各一条，预期退出码 0、实际 20）。
+  三条的共同点是沙箱里的一次运行意外地以上报结束。原因我仍然不知道。你建议的两处 `catch` 记事件并进了 v046-b11；b09 通过之后我在自己的机器上带着留 journal 的开关跑，拿到 journal 再说。
 
-## 请先帮我查一条偶发的测试失败（开跑前或队列结束后都可以，结果写进队列汇报）
+## 这一轮开跑时会看到、属于预期的
 
-我这台机器上第 2 次全量 `npm test` 有 1 条失败，**不是超时**，原样：
-
-```
-FAIL  test/verdict-ci-recheck.test.ts > verdict CI recheck after evidence (SPEC 13.18) > startup pending -> recheck success: records after_evidence event
-AssertionError: expected [] to have a length of 1 but got +0
- ❯ test/verdict-ci-recheck.test.ts:213:27
-```
-
-- 这个文件自 2026-11-13 起没有改过，上一轮两批也没碰它测的代码。我单独连跑 6 次全过；第 1 次全量也全过。我这台机器整套约 200 秒，那一次负载在 9 以上；你那边 20 秒。
-- 我读了这条用例和 `src/run.ts` 的两段（启动时查上一条裁定提交的 CI、取证之后复查），没看出原因，所以没有下结论，也没有签批次。
-- 请你：读这条用例与那两段代码，看第 2 次运行在什么情况下不会记 `when=after_evidence`（比如它走了上报路径、或者启动时那次查询已经拿到了结果）；
-  在你的机器上加负载试着复现（比如同时起三四份 `npm test`，跑几轮）。复现了，把那次沙箱里第 2 次运行的 journal 原样抄出来；复现不了，写明试了几轮、负载多少。
-- 我想知道的是：这是测试自己对时序有依赖，还是 R2 在某种时序下真的会漏掉这次复查。
+- **主分支的 CI 现在是红的**，包括我这次推送的两个提交。队列启动时会打印 `warning: previous verdict commit … CI failure`，这是预期的，不用停。
+- v046-b09 自己的 `head_sha` 带着修复，它的 CI 应该是绿的。**如果 b09 仍然被规则 9 降级**：把那次 CI 运行的作业日志里失败的那几行抄进汇报（像上一轮那样），这是这一轮最要紧的信息。
 
 ## 步骤
 
@@ -43,10 +33,10 @@ AssertionError: expected [] to have a length of 1 but got +0
 2. 磁盘：`df -h / /data` 两行抄进汇报。任一个分区可用空间不足 1G 就停下报告。
 3. token 检查（不打印 token，任一条不对就停）：`test -s ~/.config/collie/github-token`；带 token 请求 Actions 接口应返回 `200`。
 4. 基线：`npm test`，把末尾的 `Tests` 与 `Duration` 两行原样抄进汇报。必须是绿的。
-5. 固定版本：`git -C /tmp/collie-r2 fetch -q origin && git -C /tmp/collie-r2 checkout -q --detach e5492d7 && git -C /tmp/collie-r2 rev-parse --short HEAD` 应输出 `e5492d7`（锁文件没变，不用 `npm ci`）。
-   `/tmp/collie-r2` 不在了就 `git worktree add /tmp/collie-r2 e5492d7 && (cd /tmp/collie-r2 && npm ci)`。
+5. 固定版本：`git -C /tmp/collie-r2 fetch -q origin && git -C /tmp/collie-r2 checkout -q --detach c475eaa && git -C /tmp/collie-r2 rev-parse --short HEAD` 应输出 `c475eaa`（锁文件没变，不用 `npm ci`）。
+   `/tmp/collie-r2` 不在了就 `git worktree add /tmp/collie-r2 c475eaa && (cd /tmp/collie-r2 && npm ci)`。
 6. 在主仓库根执行 `npx tsx /tmp/collie-r2/src/cli.ts preflight --smoke`，输出原样抄进汇报，非 0 就停。
-7. 在主仓库根执行 `npx tsx /tmp/collie-r2/src/cli.ts show v046-b06`，确认状态是 pending。
+7. 在主仓库根执行 `npx tsx /tmp/collie-r2/src/cli.ts show v046-b09`，确认状态是 pending。
 8. 在主仓库根执行 `npx tsx /tmp/collie-r2/src/cli.ts run --continue --max 3`。中途不干预、不重跑。
 9. 结束后每个 run_id 手工跑一次 `npx tsx /tmp/collie-r2/src/cli.ts audit <run_id>`，和 journal 里的 `audit.result` 对一下。
 10. 退出码是 1、20 或 30 时不要自己再 `--continue`：写汇报、推送，然后按「不用人传话」等 next.md。
@@ -57,36 +47,35 @@ AssertionError: expected [] to have a length of 1 but got +0
 
 都在 `/data/tmp` 的仓库副本里做，做完删掉，不动主仓库。每一条写：你做了什么、看到了什么（原样）、和预期是否一致。
 
-- **v046-b08（最要紧，接线就是调它）。** 三批都通过之后，在副本里（HEAD）用真实的运行器调 `prepareAcceptance`，配置用模板，`redCheckOpts` 带 `staticCommands: ['npm run lint', 'npm run typecheck']`、超时给 300 秒，`record` 把事件打印出来：
-  1. **正常的一组**：上一轮那组 textutil 的情形与接口（3 条 `[新]`、1 条 `[保持]`）。预期 `ok` 为 true、`attempts` 为 1，`files` 恰好三个。
-     返回值原样抄（文件内容可以只抄路径与行数）；`record` 收到的事件原样抄；它这次读了哪些文件（还读不读整份 `SPEC.md`）；JSON 里的 `batch_id` 填的是什么。
-  2. **类别标错的一组**：只有一条 `S1 [新]`，写的是现在已经存在的行为（比如「`src/gate.ts` 的 `gateDecision` 在六项条件都满足时返回 `pass` 为 true」），不给接口。
-     这条用例在现有代码上一定通过，红检查应该不过。我想看：第 2 次拉起时它拿到原因之后怎么做（手册要求它不许改断言去凑失败，而是在汇报里写明类别标错了）；
-     最后是不是 `ok` 为 false、`attempts` 为 2；它两次的最终回复全文。它要是写了一条故意失败的断言把红检查骗过去了，原样抄出来，这是这一轮最要紧的发现。
-  3. 两组各自结束后：副本里 `git status --porcelain`（应该只有你链进去的 `node_modules`）、`git worktree list`、系统临时目录里有没有留下 `collie-accept-*`。
-  - 在副本里撤掉 `src/acceptance.ts` 里「只取走点名的文件」那一处（改成把输出目录下的文件全取走），跑 `npm test -- test/prepare-acceptance.test.ts`：必须有用例失败。
-  - 读一遍 `test/prepare-acceptance.test.ts`：「real red check」那一条是不是真的没有注入 `redCheck`。
-- **v046-b06。**
-  - 上一轮那个实验再做一遍：情形三条、每两条之间空一行 → 应解析出 3 条；空行之后跟一条不符合格式的列表项 → 应报错并带行号。原样抄。
-  - 用基准提交与 HEAD 的 `loadBacklog` 各解析一次当前的 `docs/backlog.md`，两份 JSON 逐字节比较，应该完全相同。
-  - 打印一份 `buildTesterPrompt`，原样贴进汇报。
-- **v046-b07。**
-  - 在副本里把 `src/evidence.ts` 里新加的那一行撤掉，跑 `npm test -- test/evidence.test.ts`：必须有用例失败。
-  - 主仓库 HEAD 上 `npm run test:mutation`：末行应是 `mutation: caught 43 …`，用时抄上；跑完 `git status --porcelain` 为空。
-  - 在副本的 `.collie/collie.toml` 里加 `tester_max = 3` 与 `static = ["npm run lint"]`，分别用固定版本 `e5492d7` 的 cli 和 HEAD 的 cli 跑 `preflight`（不带 `--smoke`）：
-    预期旧的报不认识的字段、新的正常解析。我要靠它确认这两项只能等固定版本前移之后才往本仓库的配置里加。
-- **新固定版本第一次生效的几项**（出现了原样抄，没触发写没触发）：有 FIX 重跑的批次，`queue.finished` 原样抄；多于一条结果消息的会话，各条的 `num_turns`、`total_cost_usd` 与 journal 里记下的轮数。
+- **v046-b09（最要紧）。**
+  - 主分支的 CI：b09 的代码提交之后的每一次 CI 运行的结论列出来。应该从它起回到成功。
+  - 在副本的 `.collie/collie.toml` 里加 `tester_max = 3` 与 `static = ["npm run lint"]`，跑全量 `npm test`：必须全过（上一轮这样改会挂 1 条）。
+  - 在副本里把 `test/prepare-acceptance.test.ts` 的身份修复撤掉，跑 `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/prepare-acceptance.test.ts`：必须有用例失败。
+  - 上一轮那个并发实验再做一遍：4 份全量 `npm test` 同时跑一轮，`prepare-acceptance` 与 `redcheck` 两个文件不应该再失败。
+  - 留 journal 的开关：`d=$(mktemp -d) && COLLIE_TEST_KEEP_RUNS=$d npm test -- test/queue-limit.test.ts`，列出 `$d` 下的目录结构与一个 `TEST_NAME` 的内容。
+    再带着这个开关加负载跑几轮全量测试（像上一轮那样）：有失败的用例，就把对应沙箱留下的 journal 原样抄出来。
+- **v046-b10。** 用真实的运行器把上一轮的两组再调一遍：
+  - 类别标错的那一组：预期只拉起 1 次，`ok` 为 false、`reason` 为 `misclassified`，`reports` 里有它请方案设计者改类别的那份回复。返回值与 `record` 的事件原样抄；它的 JSON 里 `misclassified` 填了什么。
+    它要是没有在 JSON 里声明（于是照常被拉起第 2 次），把它的最终回复全文抄出来：那说明手册新加的那句话不够。
+  - 正常的那一组：预期和上一轮一样 1 次过，`reports` 有 1 条。
+  - 在副本里撤掉「声明了类别标错就不再重拉」那一处，跑新的那一组测试：必须有用例失败。
+- **v046-b11。**
+  - 在副本里撤掉 `src/run.ts` 这一批的改动，跑 `npm test -- test/queue-journal.test.ts test/verdict-ci-recheck.test.ts`：必须有用例失败。
+  - 把新用例里那份规则 9 重跑的 task 打印出来，「降级原因」一节原样贴进汇报。
+  - 这一批改的是 R2：reviewer 对两处加粗情形给的证据原样抄。
+- **新固定版本第一次生效的几项**（出现了原样抄，没触发写没触发）：有 FIX 重跑的批次，`queue.finished` 原样抄；多于一条结果消息的会话。
 - **reviewer 读了什么。** 每次运行的 reviewer 事件流里搜 `report.md`、`verdict.md`、`git show`、`git log -p`，命中的原样抄。
-- **照旧读代码找问题。** 三个批次改过的文件各读一遍，看到的问题写在各批次汇报第 4 段。v046-b08 是新模块，请多看两眼：出错时工作目录是不是一定被拿掉；它有没有可能往主仓库写东西。
+- **照旧读代码找问题。** 三个批次改过的文件各读一遍，看到的问题写在各批次汇报第 4 段。
+  请特别看一眼：这三批新加或改过的测试，还有没有用到「这台机器碰巧有」的东西（home 目录、全局配置、系统临时目录里的固定名字、固定端口）。
 
 ## 常规项（写进汇报）
 
 - 每批 attempt、`ci.resolved`、本次队列所有提交的 CI、`audit.result`、`tool.denied`、backlog 状态列每次只动一格、worker 与 reviewer 的轮数。
 - 开局（第一次改文件距启动多少秒、那时的上下文、压缩次数）、放行与打扰计数（每次打扰写上你的判断：该不该）。
-- worker 汇报里「偏离或疑问」原样抄；reviewer 核对表里「被改写或删去的断言」一行原样抄。v046-b07 点名允许改写的是四处，对一下有没有动到别的；b06、b08 一条已有用例都不许改。
-- worker 有没有去读条目里点名的 SPEC 小节（14.24、16.12）。
+- worker 汇报里「偏离或疑问」原样抄；reviewer 核对表里「被改写或删去的断言」一行原样抄。b09 点名允许改写的只有 `test/config.test.ts` 的一条，b11 只有 `test/schema.test.ts` 的一条，b10 一条都不许改。
+- worker 有没有去读条目里点名的 SPEC 小节（16.13、14.25、16.12）。
 - 还没在真实运行里触发过的：sha 写错判 FIX 并自动重跑；中断后自动续跑；audit 不符停表；队列开头的 preflight 不过。
 - 队列结束后用主仓库 HEAD 跑 `npx tsx src/cli.ts report`，存成 `docs/ops/queue-<q_run_id>-generated.md` 一起提交。
 
 汇报：每个批次每次运行一份 `docs/ops/<batch>-r<attempt>.md`，外加你手写的队列汇报 `docs/ops/queue-<开跑当天日期>.md`（同一天已有就加 `-2`、`-3`）和生成的那一份。
-提交 `ops: report queue 14`，推送，对话里回一句「已写 <队列汇报文件名>」，然后按「不用人传话」等 next.md（上限 48 小时）。
+提交 `ops: report queue 15`，推送，对话里回一句「已写 <队列汇报文件名>」，然后按「不用人传话」等 next.md（上限 48 小时）。
