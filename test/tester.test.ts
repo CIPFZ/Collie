@@ -300,3 +300,59 @@ describe('tester: previous problems in the prompt', () => {
     expect(withEmpty).not.toContain('上一次没过的原因');
   });
 });
+
+// ---------------------------------------------------------------------------
+// tester: run options are forwarded (SPEC 16.14, v046-b12)
+// ---------------------------------------------------------------------------
+
+describe('tester: run options are forwarded', () => {
+  it('signal, onEvent, and redact are forwarded to runner.run', async () => {
+    const cwd = tempDir();
+    writeFileSync(join(cwd, TESTER_MANUAL), '# tester manual');
+
+    const ac = new AbortController();
+    const receivedEvents: unknown[] = [];
+    const onEvent = (event: unknown) => {
+      receivedEvents.push(event);
+    };
+    const redactList = ['supersecretvalue123'];
+
+    const runner = new FakeRunner([
+      {
+        result: OK_RESULT,
+        expectRole: 'tester',
+        events: [{ msg: 'hello supersecretvalue123' }],
+      },
+    ]);
+
+    await runTester(runner, config, validInput(), cwd, {
+      signal: ac.signal,
+      onEvent,
+      redact: redactList,
+    });
+
+    expect(runner.calls).toHaveLength(1);
+    const call = runner.calls[0];
+    expect(call).toBeDefined();
+    expect(call?.hasSignal).toBe(true);
+    expect(call?.hasOnEvent).toBe(true);
+    // Redaction should have replaced the secret in the event.
+    expect(receivedEvents).toHaveLength(1);
+    const evt = receivedEvents[0] as Record<string, unknown>;
+    expect(evt.msg).not.toContain('supersecretvalue123');
+  });
+
+  it('opts defaults to empty when not provided', async () => {
+    const cwd = tempDir();
+    writeFileSync(join(cwd, TESTER_MANUAL), '# tester manual');
+    const runner = new FakeRunner([{ result: OK_RESULT, expectRole: 'tester' }]);
+
+    // Call without opts (backward compat).
+    await runTester(runner, config, validInput(), cwd);
+
+    expect(runner.calls).toHaveLength(1);
+    const call = runner.calls[0];
+    expect(call?.hasSignal).toBe(false);
+    expect(call?.hasOnEvent).toBe(false);
+  });
+});

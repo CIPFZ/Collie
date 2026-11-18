@@ -637,6 +637,11 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(content).toContain('misclassified');
   });
 
+  it('src/acceptance.ts has onTesterEvent (v046-b12)', () => {
+    const content = readFileSync(join(ROOT, 'src/acceptance.ts'), 'utf8');
+    expect(content).toContain('onTesterEvent');
+  });
+
   it('src/run.ts non-comment lines do not contain acceptance.js (v046-b08)', () => {
     const lines = readFileSync(join(ROOT, 'src/run.ts'), 'utf8').split('\n');
     const codeLines = lines.filter(

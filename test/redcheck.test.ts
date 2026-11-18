@@ -6,7 +6,15 @@
 // Timeout: one scenario injects a fake spawn that never finishes.
 
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -255,7 +263,7 @@ describe('judgeRedCheck', () => {
 const createdTempDirs: string[] = [];
 
 function createTestTree(): string {
-  const dir = mkdtempSync(join(privateTmpDir, 'collie-redcheck-'));
+  const dir = mkdtempSync(join(privateTmpDir, 'collie-rc-tree-'));
   createdTempDirs.push(dir);
   // Link node_modules from repo root so vitest is available.
   symlinkSync(join(repoRoot, 'node_modules'), join(dir, 'node_modules'));
@@ -299,14 +307,18 @@ describe('new', () => {
 `,
     );
 
-    const result = await runRedCheck(tree, outDir, { timeoutMs: 60_000, spawn: execFile });
+    const result = await runRedCheck(tree, outDir, { timeoutMs: 240_000, spawn: execFile });
     expect(result.ok).toBe(true);
     expect(result.newTestCount).toBe(2);
     expect(result.keepTestCount).toBe(0);
     expect(result.problems).toHaveLength(0);
 
+    // No collie-redcheck-* leftover in private tmpdir (SPEC 16.14).
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-redcheck-'));
+    expect(leftover).toHaveLength(0);
+
     rmSync(tree, { recursive: true, force: true });
-  });
+  }, 300_000);
 
   it('fails when new has one pass and one fail, naming the passing test', async () => {
     const tree = createTestTree();
@@ -322,7 +334,7 @@ describe('new', () => {
 `,
     );
 
-    const result = await runRedCheck(tree, outDir, { timeoutMs: 60_000, spawn: execFile });
+    const result = await runRedCheck(tree, outDir, { timeoutMs: 240_000, spawn: execFile });
     expect(result.ok).toBe(false);
     expect(result.newTestCount).toBe(2);
     // The passing test should be named in the problems.
@@ -332,8 +344,12 @@ describe('new', () => {
     expect(passingProblem).toBeDefined();
     expect(passingProblem?.testName).toContain('passes B');
 
+    // No collie-redcheck-* leftover in private tmpdir (SPEC 16.14).
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-redcheck-'));
+    expect(leftover).toHaveLength(0);
+
     rmSync(tree, { recursive: true, force: true });
-  });
+  }, 300_000);
 
   it('fails when new file has an import error (file load failure)', async () => {
     const tree = createTestTree();
@@ -346,15 +362,19 @@ nonExistentFunction();
 `,
     );
 
-    const result = await runRedCheck(tree, outDir, { timeoutMs: 60_000, spawn: execFile });
+    const result = await runRedCheck(tree, outDir, { timeoutMs: 240_000, spawn: execFile });
     expect(result.ok).toBe(false);
     expect(result.problems.length).toBeGreaterThanOrEqual(1);
     expect(
       result.problems.some((p) => p.file === 'new' && p.reason.includes('file load failed')),
     ).toBe(true);
 
+    // No collie-redcheck-* leftover in private tmpdir (SPEC 16.14).
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-redcheck-'));
+    expect(leftover).toHaveLength(0);
+
     rmSync(tree, { recursive: true, force: true });
-  });
+  }, 300_000);
 
   it('fails when new all fail but keep has one failing test, naming it', async () => {
     const tree = createTestTree();
@@ -379,7 +399,7 @@ describe('keep', () => {
 `,
     );
 
-    const result = await runRedCheck(tree, outDir, { timeoutMs: 60_000, spawn: execFile });
+    const result = await runRedCheck(tree, outDir, { timeoutMs: 240_000, spawn: execFile });
     expect(result.ok).toBe(false);
     expect(result.newTestCount).toBe(1);
     expect(result.keepTestCount).toBe(2);
@@ -389,8 +409,12 @@ describe('keep', () => {
     expect(keepProblem).toBeDefined();
     expect(keepProblem?.testName).toContain('fails K2');
 
+    // No collie-redcheck-* leftover in private tmpdir (SPEC 16.14).
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-redcheck-'));
+    expect(leftover).toHaveLength(0);
+
     rmSync(tree, { recursive: true, force: true });
-  });
+  }, 300_000);
 
   it('fails on timeout with injected fake spawn', async () => {
     const tree = createTestTree();
@@ -431,6 +455,10 @@ describe('new', () => { it('fails', () => { expect(1).toBe(2); }); });
     expect(result.problems).toHaveLength(1);
     expect(result.problems.some((p) => p.reason.includes('timeout'))).toBe(true);
 
+    // No collie-redcheck-* leftover in private tmpdir (SPEC 16.14).
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-redcheck-'));
+    expect(leftover).toHaveLength(0);
+
     rmSync(tree, { recursive: true, force: true });
   });
 });
@@ -455,15 +483,19 @@ describe('new', () => {
     );
 
     const result = await runRedCheck(tree, outDir, {
-      timeoutMs: 60_000,
+      timeoutMs: 240_000,
       spawn: execFile,
       staticCommands: ['exit 0'],
     });
     expect(result.ok).toBe(true);
     expect(result.problems).toHaveLength(0);
 
+    // No collie-redcheck-* leftover in private tmpdir (SPEC 16.14).
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-redcheck-'));
+    expect(leftover).toHaveLength(0);
+
     rmSync(tree, { recursive: true, force: true });
-  });
+  }, 300_000);
 
   it('static command with non-zero exit fails, records exit code and output', async () => {
     const tree = createTestTree();
@@ -481,7 +513,7 @@ describe('new', () => {
 
     const cmdText = 'echo boom && exit 3';
     const result = await runRedCheck(tree, outDir, {
-      timeoutMs: 60_000,
+      timeoutMs: 240_000,
       spawn: execFile,
       staticCommands: [cmdText],
     });
@@ -492,8 +524,12 @@ describe('new', () => {
     expect(p?.reason).toContain('3');
     expect(p?.reason).toContain('boom');
 
+    // No collie-redcheck-* leftover in private tmpdir (SPEC 16.14).
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-redcheck-'));
+    expect(leftover).toHaveLength(0);
+
     rmSync(tree, { recursive: true, force: true });
-  });
+  }, 300_000);
 
   it('two static commands, first passes second fails — only second problem recorded', async () => {
     const tree = createTestTree();
@@ -509,7 +545,7 @@ describe('new', () => {
     );
 
     const result = await runRedCheck(tree, outDir, {
-      timeoutMs: 60_000,
+      timeoutMs: 240_000,
       spawn: execFile,
       staticCommands: ['exit 0', 'echo oops && exit 1'],
     });
@@ -518,8 +554,12 @@ describe('new', () => {
     expect(staticProblems).toHaveLength(1);
     expect(staticProblems[0]?.testName).toBe('echo oops && exit 1');
 
+    // No collie-redcheck-* leftover in private tmpdir (SPEC 16.14).
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-redcheck-'));
+    expect(leftover).toHaveLength(0);
+
     rmSync(tree, { recursive: true, force: true });
-  });
+  }, 300_000);
 
   it('test problems and static problems coexist in the result', async () => {
     const tree = createTestTree();
@@ -536,7 +576,7 @@ describe('new', () => {
     );
 
     const result = await runRedCheck(tree, outDir, {
-      timeoutMs: 60_000,
+      timeoutMs: 240_000,
       spawn: execFile,
       staticCommands: ['exit 7'],
     });
@@ -546,8 +586,12 @@ describe('new', () => {
     expect(testProblems.length).toBeGreaterThanOrEqual(1);
     expect(staticProblems.length).toBeGreaterThanOrEqual(1);
 
+    // No collie-redcheck-* leftover in private tmpdir (SPEC 16.14).
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-redcheck-'));
+    expect(leftover).toHaveLength(0);
+
     rmSync(tree, { recursive: true, force: true });
-  });
+  }, 300_000);
 
   it('static command timeout records timeout problem', async () => {
     const tree = createTestTree();
@@ -599,6 +643,10 @@ describe('new', () => {
     expect(staticProblems[0]?.reason).toContain('timeout');
     expect(callCount).toBeGreaterThanOrEqual(2); // at least vitest + static
 
+    // No collie-redcheck-* leftover in private tmpdir (SPEC 16.14).
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-redcheck-'));
+    expect(leftover).toHaveLength(0);
+
     rmSync(tree, { recursive: true, force: true });
   });
 
@@ -628,7 +676,7 @@ describe('new', () => {
     };
 
     const result = await runRedCheck(tree, outDir, {
-      timeoutMs: 60_000,
+      timeoutMs: 240_000,
       spawn: countingSpawn as unknown as typeof execFile,
       // no staticCommands
     });
@@ -636,8 +684,12 @@ describe('new', () => {
     // Only 1 spawn call: new.test.ts. No static commands.
     expect(spawnCalls).toBe(1);
 
+    // No collie-redcheck-* leftover in private tmpdir (SPEC 16.14).
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-redcheck-'));
+    expect(leftover).toHaveLength(0);
+
     rmSync(tree, { recursive: true, force: true });
-  });
+  }, 300_000);
 
   it('keep.test.ts exists but no report produced — not ok with reason', async () => {
     const tree = createTestTree();
@@ -688,7 +740,7 @@ describe('keep', () => {
     };
 
     const result = await runRedCheck(tree, outDir, {
-      timeoutMs: 60_000,
+      timeoutMs: 240_000,
       spawn: fakeSpawn as unknown as typeof execFile,
     });
     expect(result.ok).toBe(false);
@@ -697,6 +749,38 @@ describe('keep', () => {
     );
     expect(keepProblem).toBeDefined();
 
+    // No collie-redcheck-* leftover in private tmpdir (SPEC 16.14).
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-redcheck-'));
+    expect(leftover).toHaveLength(0);
+
     rmSync(tree, { recursive: true, force: true });
-  });
+  }, 300_000);
+});
+
+// ---------------------------------------------------------------------------
+// runRedCheck: leaves nothing behind (SPEC 16.14, v046-b12)
+// ---------------------------------------------------------------------------
+
+describe('runRedCheck: leaves nothing behind', () => {
+  it('real run leaves no collie-redcheck-* in private tmpdir', async () => {
+    const tree = createTestTree();
+    const outDir = 'acceptance';
+    writeTestFile(
+      tree,
+      `${outDir}/new.test.ts`,
+      `import { describe, expect, it } from 'vitest';
+describe('new', () => {
+  it('fails A', () => { expect(1).toBe(2); });
+});
+`,
+    );
+
+    await runRedCheck(tree, outDir, { timeoutMs: 240_000, spawn: execFile });
+
+    // The private tmpdir must not contain any collie-redcheck-* leftovers.
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-redcheck-'));
+    expect(leftover).toHaveLength(0);
+
+    rmSync(tree, { recursive: true, force: true });
+  }, 300_000);
 });

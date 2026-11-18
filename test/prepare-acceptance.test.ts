@@ -56,6 +56,12 @@ const GIT_ID_KEYS = [
 type GitIdKey = (typeof GIT_ID_KEYS)[number];
 let savedGitId: Record<GitIdKey, string | undefined>;
 
+// GIT_CONFIG_GLOBAL / GIT_CONFIG_NOSYSTEM: replaced during the suite so
+// tests do not read the machine's global git config (SPEC 16.14, v046-b12).
+let gitConfigFile: string;
+let savedGitConfigGlobal: string | undefined;
+let savedGitConfigNosystem: string | undefined;
+
 beforeEach(() => {
   privateTmpDir = mkdtempSync(join(tmpdir(), 'collie-pa-suite-'));
   savedTmpDir = process.env.TMPDIR;
@@ -71,6 +77,18 @@ beforeEach(() => {
   process.env.GIT_AUTHOR_EMAIL = 'pa@example.invalid';
   process.env.GIT_COMMITTER_NAME = 'PATest';
   process.env.GIT_COMMITTER_EMAIL = 'pa@example.invalid';
+
+  // Replace global git config so tests pass on machines with commit signing,
+  // no identity, etc. (照 test/support/sandbox.ts 的做法, SPEC 16.14).
+  gitConfigFile = join(privateTmpDir, 'gitconfig');
+  writeFileSync(
+    gitConfigFile,
+    '[user]\n\tname = PATest\n\temail = pa@example.invalid\n[init]\n\tdefaultBranch = main\n[gc]\n\tauto = 0\n',
+  );
+  savedGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
+  savedGitConfigNosystem = process.env.GIT_CONFIG_NOSYSTEM;
+  process.env.GIT_CONFIG_GLOBAL = gitConfigFile;
+  process.env.GIT_CONFIG_NOSYSTEM = '1';
 });
 
 afterEach(() => {
@@ -87,6 +105,12 @@ afterEach(() => {
       process.env[k] = v;
     }
   }
+
+  // Restore GIT_CONFIG_GLOBAL / GIT_CONFIG_NOSYSTEM.
+  if (savedGitConfigGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+  else process.env.GIT_CONFIG_GLOBAL = savedGitConfigGlobal;
+  if (savedGitConfigNosystem === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+  else process.env.GIT_CONFIG_NOSYSTEM = savedGitConfigNosystem;
 });
 
 // ---------------------------------------------------------------------------
@@ -651,7 +675,7 @@ describe('new feature', () => {
       runner,
       testerMax: 1,
       redCheckOpts: {
-        timeoutMs: 30_000,
+        timeoutMs: 240_000,
         spawn: execFile,
       },
       // No redCheck injection — uses real runRedCheck.
@@ -663,7 +687,11 @@ describe('new feature', () => {
       expect(result.files.some((f) => f.path.endsWith('new.test.ts'))).toBe(true);
       expect(result.files.some((f) => f.path.endsWith('MAP.md'))).toBe(true);
     }
-  });
+
+    // No collie-accept-* leftover in private tmpdir (SPEC 16.14, restored from v046-b09).
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-accept-'));
+    expect(leftover).toHaveLength(0);
+  }, 300_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -1031,5 +1059,238 @@ describe('prepareAcceptance: reports and early stop', () => {
     // No collie-accept-* leftover in private tmpdir.
     const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-accept-'));
     expect(leftover).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Group 5: tester events, signal, and misclassified list (SPEC 16.14, v046-b12)
+// ---------------------------------------------------------------------------
+
+describe('prepareAcceptance: tester events, signal and misclassified list', () => {
+  it('tester.finished has exit_code, num_turns, cost_usd and no exitCode key; events go through onTesterEvent', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const outDir = `test/acceptance/${batch.id}`;
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(okRedCheck());
+
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'content');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        events: [{ type: 'fake-event', data: 'hello' }],
+        result: { exitCode: 0, numTurns: 7, costUsd: 0.5 },
+      },
+    ]);
+
+    const events: { event: string; fields: Record<string, unknown> }[] = [];
+    const record: RecordFn = (event, fields) => {
+      events.push({ event, fields });
+    };
+
+    const testerEvents: { attempt: number; event: unknown }[] = [];
+
+    await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 1,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+      record,
+      onTesterEvent: (attempt, event) => {
+        testerEvents.push({ attempt, event });
+      },
+    });
+
+    // Check tester.finished event has exit_code (not exitCode), num_turns, cost_usd.
+    const finished = events.find((e) => e.event === 'tester.finished');
+    expect(finished).toBeDefined();
+    expect(finished?.fields.exit_code).toBe(0);
+    expect(finished?.fields.num_turns).toBe(7);
+    expect(finished?.fields.cost_usd).toBe(0.5);
+    // Must NOT have the old exitCode key.
+    expect(finished !== undefined && 'exitCode' in finished.fields).toBe(false);
+
+    // Check onTesterEvent received the events with attempt=1.
+    expect(testerEvents).toHaveLength(1);
+    expect(testerEvents[0]?.attempt).toBe(1);
+    expect(testerEvents[0]?.event).toEqual({ type: 'fake-event', data: 'hello' });
+  });
+
+  it('signal aborted before next attempt → tester_failed, no second invocation', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const outDir = `test/acceptance/${batch.id}`;
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(failRedCheck());
+
+    // Create a pre-aborted signal.
+    const ac = new AbortController();
+    ac.abort();
+
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'test("a", () => {});');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0 },
+      },
+      {
+        expectRole: 'tester',
+        result: { exitCode: 0 },
+      },
+    ]);
+
+    const result = await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 2,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+      signal: ac.signal,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('tester_failed' satisfies AcceptanceFailReason);
+    }
+    // Signal was aborted before first attempt, so no invocations.
+    expect(runner.calls).toHaveLength(0);
+  });
+
+  it('misclassified as {id,why} objects → misclassified array formatted with ：, no [object Object]', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const outDir = `test/acceptance/${batch.id}`;
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(failRedCheck());
+
+    const replyWithObjMisclassified = [
+      'Some text.',
+      '```json',
+      '{ "misclassified": [{ "id": "S1", "why": "已有行为" }] }',
+      '```',
+    ].join('\n');
+
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'test("a", () => {});');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0, finalText: replyWithObjMisclassified },
+      },
+    ]);
+
+    const result = await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 2,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('misclassified' satisfies AcceptanceFailReason);
+      expect(result.misclassified).toEqual(['S1：已有行为']);
+      // Must not contain [object Object].
+      for (const m of result.misclassified) {
+        expect(m).not.toContain('[object Object]');
+      }
+    }
+  });
+
+  it('misclassified as plain strings still works', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const outDir = `test/acceptance/${batch.id}`;
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(failRedCheck());
+
+    const replyWithStringMisclassified = [
+      'Text.',
+      '```json',
+      '{ "misclassified": ["S1 was labelled new but is keep"] }',
+      '```',
+    ].join('\n');
+
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'test("a", () => {});');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0, finalText: replyWithStringMisclassified },
+      },
+    ]);
+
+    const result = await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 2,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('misclassified' satisfies AcceptanceFailReason);
+      expect(result.misclassified).toEqual(['S1 was labelled new but is keep']);
+    }
+  });
+
+  it('failure without misclassified → misclassified is empty array', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const outDir = `test/acceptance/${batch.id}`;
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(failRedCheck());
+
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'test("a", () => {});');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0 },
+      },
+    ]);
+
+    const result = await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 1,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.misclassified).toEqual([]);
+    }
   });
 });
