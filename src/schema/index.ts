@@ -283,6 +283,8 @@ export const EVENT_TYPES = [
   'tester.started',
   'tester.finished',
   'redcheck.result',
+  // v0.46 (SPEC 16.13): CI query error during verdict commit check (startup or after_evidence).
+  'ci.verdict_commit_error',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);

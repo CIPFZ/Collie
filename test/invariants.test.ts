@@ -423,6 +423,11 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(content).toContain('ci.verdict_commit');
   });
 
+  it('src/run.ts contains ci.verdict_commit_error (v046-b11)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    expect(content).toContain('ci.verdict_commit_error');
+  });
+
   it('src/run.ts contains queue.preflight (v045-b01)', () => {
     const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
     expect(content).toContain('queue.preflight');

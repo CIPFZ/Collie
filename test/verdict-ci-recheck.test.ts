@@ -471,3 +471,165 @@ describe('verdict CI recheck after evidence (SPEC 13.18)', () => {
     expect(lastFinished?.verdict).toBe('PASS');
   });
 });
+
+// ---------------------------------------------------------------------------
+// SPEC 16.13 (v046-b11): verdict CI query errors are journaled
+// ---------------------------------------------------------------------------
+
+describe('verdict CI query errors are journaled', () => {
+  let box: Sandbox;
+
+  beforeEach(async () => {
+    box = await Sandbox.create();
+  });
+  afterEach(() => {
+    box.dispose();
+  });
+
+  function ciErrorEvents(events: readonly Event[]): Event[] {
+    return events.filter((e) => e.event === 'ci.verdict_commit_error');
+  }
+
+  it('startup query throws: run finishes normally, journal has ci.verdict_commit_error with when=startup', async () => {
+    // First run: produces verdict.pushed with some sha.
+    await box.run(honest(box));
+    const pushed = box.events().find((e) => e.event === 'verdict.pushed');
+    expect(pushed).toBeDefined();
+    const verdictSha = pushed?.sha as string;
+
+    // Second run: startup CI query for verdict sha throws an error.
+    const throwingFetch: FetchLike = (url) => {
+      const sha = new URL(url).searchParams.get('head_sha') ?? '';
+      if (sha === verdictSha) {
+        return Promise.reject(new Error('network timeout'));
+      }
+      // Default: evidence collection queries succeed.
+      const run = {
+        id: 42,
+        workflow_id: 1,
+        name: 'ci',
+        event: 'push',
+        head_branch: 'main',
+        head_sha: sha,
+        status: 'completed',
+        conclusion: 'success',
+        html_url: 'https://github.com/example/sandbox/actions/runs/42',
+        created_at: '2026-11-18T07:00:00Z',
+      };
+      return Promise.resolve(
+        new Response(JSON.stringify({ total_count: 1, workflow_runs: [run] })),
+      );
+    };
+
+    const r2 = new FakeRunner([uniqueWorkerScene(box, true), fooledReviewerScene(box)]);
+    const exitCode = await box.cli(['run', BATCH], r2, { fetch: throwingFetch });
+
+    // Run should finish normally (PASS).
+    expect(exitCode).toBe(0);
+    const allEvents = box.events();
+    const runFinished = allEvents.filter((e) => e.event === 'run.finished');
+    const lastFinished = runFinished.at(-1);
+    expect(lastFinished?.verdict).toBe('PASS');
+
+    // Journal should have exactly 1 ci.verdict_commit_error with when=startup.
+    const errors = ciErrorEvents(allEvents);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      sha: verdictSha,
+      when: 'startup',
+    });
+    expect(typeof errors[0]?.error).toBe('string');
+    expect(errors[0]?.error).toContain('network timeout');
+  });
+
+  it('after_evidence recheck throws: when=after_evidence, conclusion and exit code unchanged', async () => {
+    // First run: produces verdict.pushed.
+    await box.run(honest(box));
+    const pushed = box.events().find((e) => e.event === 'verdict.pushed');
+    expect(pushed).toBeDefined();
+    const verdictSha = pushed?.sha as string;
+
+    // Second run: startup returns pending (triggering recheck), recheck throws.
+    let verdictCallCount = 0;
+    const recheckThrowsFetch: FetchLike = (url) => {
+      const sha = new URL(url).searchParams.get('head_sha') ?? '';
+      if (sha === verdictSha) {
+        verdictCallCount++;
+        if (verdictCallCount === 1) {
+          // Startup: return pending → triggers recheck after evidence.
+          const run = {
+            id: 100,
+            workflow_id: 1,
+            name: 'ci',
+            event: 'push',
+            head_branch: 'main',
+            head_sha: sha,
+            status: 'in_progress',
+            conclusion: null,
+            html_url: 'https://github.com/example/sandbox/actions/runs/100',
+            created_at: '2026-11-18T07:00:00Z',
+          };
+          return Promise.resolve(
+            new Response(JSON.stringify({ total_count: 1, workflow_runs: [run] })),
+          );
+        }
+        // Recheck: throw.
+        return Promise.reject(new Error('API rate limit'));
+      }
+      // Default: evidence collection queries succeed.
+      const run = {
+        id: 42,
+        workflow_id: 1,
+        name: 'ci',
+        event: 'push',
+        head_branch: 'main',
+        head_sha: sha,
+        status: 'completed',
+        conclusion: 'success',
+        html_url: 'https://github.com/example/sandbox/actions/runs/42',
+        created_at: '2026-11-18T07:00:00Z',
+      };
+      return Promise.resolve(
+        new Response(JSON.stringify({ total_count: 1, workflow_runs: [run] })),
+      );
+    };
+
+    const r2 = new FakeRunner([uniqueWorkerScene(box, true), fooledReviewerScene(box)]);
+    const exitCode = await box.cli(['run', BATCH], r2, { fetch: recheckThrowsFetch });
+
+    // Run should finish normally (PASS).
+    expect(exitCode).toBe(0);
+    const allEvents = box.events();
+    const lastFinished = allEvents.filter((e) => e.event === 'run.finished').at(-1);
+    expect(lastFinished?.verdict).toBe('PASS');
+
+    // Journal should have exactly 1 ci.verdict_commit_error with when=after_evidence.
+    const errors = ciErrorEvents(allEvents);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      sha: verdictSha,
+      when: 'after_evidence',
+    });
+    expect(typeof errors[0]?.error).toBe('string');
+    expect(errors[0]?.error).toContain('API rate limit');
+  });
+
+  it('neither query throws: no ci.verdict_commit_error event', async () => {
+    // First run: produces verdict.pushed.
+    await box.run(honest(box));
+    const pushed = box.events().find((e) => e.event === 'verdict.pushed');
+    expect(pushed).toBeDefined();
+    const verdictSha = pushed?.sha as string;
+
+    // Second run: both startup and recheck succeed normally (startup returns completed success).
+    const normalFetch = buildFetch(verdictSha, [
+      { status: 'completed', conclusion: 'success', branch: 'main' },
+    ]);
+    const r2 = new FakeRunner([uniqueWorkerScene(box, true), fooledReviewerScene(box)]);
+    await box.cli(['run', BATCH], r2, { fetch: normalFetch });
+
+    const allEvents = box.events();
+    const errors = ciErrorEvents(allEvents);
+    expect(errors).toHaveLength(0);
+  });
+});

@@ -6,9 +6,12 @@
 // 5. Commit list excludes docs: issue commits
 // 6. No gaps → gaps is empty array in reviewer.verdict event
 // 7. --continue first run: attempt=1, interrupted_at=null; FIX rerun: attempt=2
+// 8. Rule 9 FIX rerun task carries head_sha and CI run url from ci.resolved
+// 9. Rule 9 FIX rerun task omits CI run url line when run_url is empty
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { FetchLike } from '../src/ci.js';
 import type { FakeSceneContext } from '../src/runner/fake.js';
 import { FakeRunner } from '../src/runner/fake.js';
 import type { Claims, Report, Verdict } from '../src/schema/index.js';
@@ -669,5 +672,228 @@ describe('queue journal correctness (SPEC 13.10, v04-b07)', () => {
     // The first run must have attempt=1 despite the q- journal existing.
     expect(capturedTask).toMatch(/attempt: 1/);
     expect(capturedTask).toMatch(/interrupted_at: null/);
+  });
+
+  it('rule 9 FIX rerun task carries head_sha and CI run url', async () => {
+    // Round 1: worker pushes but CI returns failure → rule 9. ci.resolved has head_sha and run_url.
+    // Round 2: captured task should contain head_sha and CI 运行 lines.
+    let capturedTask = '';
+    // Track the head_sha produced by the worker in round 1 so we can assert it in the task.
+    let round1HeadSha = '';
+
+    const pushingWorkerCaptureSha = (): {
+      expectRole: 'worker';
+      effect: (ctx: FakeSceneContext) => Promise<void>;
+      result: { exitCode: number };
+    } => ({
+      expectRole: 'worker',
+      effect: async ({ cwd }: FakeSceneContext) => {
+        workerSeq++;
+        box.write('feature.txt', `feature ${String(workerSeq)}\n`, cwd);
+        box.write('tests/t000.sh', 'exit 0\n', cwd);
+        const head = await box.commitAll('feat: add feature', cwd);
+        round1HeadSha = head;
+        const claims: Claims = {
+          commits: [head],
+          tests_passed: 1,
+          tests_failed: 0,
+          pushed: true,
+          ci_passed: false,
+          new_deps: [],
+          spec_touched: false,
+        };
+        const report: Report = {
+          schema_version: 1,
+          batch_id: 'v99-b01',
+          head_sha: head,
+          claims,
+          open_questions: [],
+        };
+        box.write(
+          `.collie/batches/v99-b01/report.md`,
+          `# r\n\n## 做了什么\n完成。\n\n## 测试结果\n见。\n\n## 偏离或疑问\n无\n\n## 下一步建议\n无\n\n${FENCE}json\n${JSON.stringify(report, null, 2)}\n${FENCE}\n`,
+          cwd,
+        );
+        await box.commitAll(`report(collie): v99-b01`, cwd);
+        const { git: gitFn } = await import('../src/git.js');
+        await gitFn(cwd, ['push', '-q', 'origin', 'main']);
+      },
+      result: { exitCode: 0 },
+    });
+
+    const capturingPushingWorker = (): {
+      expectRole: 'worker';
+      effect: (ctx: FakeSceneContext) => Promise<void>;
+      result: { exitCode: number };
+    } => ({
+      expectRole: 'worker',
+      effect: async ({ cwd }: FakeSceneContext) => {
+        capturedTask = readFileSync(join(cwd, '.collie', 'batches', 'v99-b01', 'task.md'), 'utf8');
+        workerSeq++;
+        box.write('feature.txt', `feature ${String(workerSeq)}\n`, cwd);
+        box.write('tests/t000.sh', 'exit 0\n', cwd);
+        const head = await box.commitAll('feat: add feature', cwd);
+        const claims: Claims = {
+          commits: [head],
+          tests_passed: 1,
+          tests_failed: 0,
+          pushed: true,
+          ci_passed: false,
+          new_deps: [],
+          spec_touched: false,
+        };
+        const report: Report = {
+          schema_version: 1,
+          batch_id: 'v99-b01',
+          head_sha: head,
+          claims,
+          open_questions: [],
+        };
+        box.write(
+          `.collie/batches/v99-b01/report.md`,
+          `# r\n\n## 做了什么\n完成。\n\n## 测试结果\n见。\n\n## 偏离或疑问\n无\n\n## 下一步建议\n无\n\n${FENCE}json\n${JSON.stringify(report, null, 2)}\n${FENCE}\n`,
+          cwd,
+        );
+        await box.commitAll(`report(collie): v99-b01`, cwd);
+        const { git: gitFn } = await import('../src/git.js');
+        await gitFn(cwd, ['push', '-q', 'origin', 'main']);
+      },
+      result: { exitCode: 0 },
+    });
+
+    // Custom fetch: returns CI failure with a specific run_url for every sha.
+    const ciRunUrl = 'https://github.com/example/sandbox/actions/runs/999';
+    const failureFetch: FetchLike = (url) => {
+      const sha = new URL(url).searchParams.get('head_sha') ?? '';
+      const run = {
+        id: 999,
+        workflow_id: 1,
+        name: 'ci',
+        event: 'push',
+        head_branch: 'main',
+        head_sha: sha,
+        status: 'completed',
+        conclusion: 'failure',
+        html_url: ciRunUrl,
+        created_at: '2026-11-18T07:00:00Z',
+      };
+      return Promise.resolve(
+        new Response(JSON.stringify({ total_count: 1, workflow_runs: [run] })),
+      );
+    };
+
+    const runner = new FakeRunner([
+      pushingWorkerCaptureSha(),
+      unpushedReviewerPassScene(box, 'v99-b01'),
+      capturingPushingWorker(),
+      queueReviewerPassScene(box, 'v99-b01'),
+    ]);
+    await box.cli(['run', '--continue', '--max', '1'], runner, { fetch: failureFetch });
+
+    // Task should contain 降级原因 section with rule 9 and the CI info.
+    expect(capturedTask).toContain('降级原因');
+    expect(capturedTask).toMatch(/规则 9/);
+    expect(capturedTask).toContain(`head_sha：${round1HeadSha}`);
+    expect(capturedTask).toContain(`CI 运行：${ciRunUrl}`);
+  });
+
+  it('rule 9 FIX rerun task omits CI run url line when run_url is empty', async () => {
+    // Round 1: worker doesn't push → rule 9. ci.resolved has empty run_url.
+    // Round 2: captured task should contain head_sha but NOT CI 运行 line.
+    let capturedTask = '';
+    let round1HeadSha = '';
+
+    const unpushedWorkerWithSha = (): {
+      expectRole: 'worker';
+      effect: (ctx: FakeSceneContext) => Promise<void>;
+      result: { exitCode: number };
+    } => ({
+      expectRole: 'worker',
+      effect: async ({ cwd }: FakeSceneContext) => {
+        workerSeq++;
+        box.write('feature.txt', `feature ${String(workerSeq)}\n`, cwd);
+        box.write('tests/t000.sh', 'exit 0\n', cwd);
+        const head = await box.commitAll('feat: add feature', cwd);
+        round1HeadSha = head;
+        const claims: Claims = {
+          commits: [head],
+          tests_passed: 1,
+          tests_failed: 0,
+          pushed: false,
+          ci_passed: false,
+          new_deps: [],
+          spec_touched: false,
+        };
+        const report: Report = {
+          schema_version: 1,
+          batch_id: 'v99-b01',
+          head_sha: head,
+          claims,
+          open_questions: [],
+        };
+        box.write(
+          `.collie/batches/v99-b01/report.md`,
+          `# r\n\n## 做了什么\n完成。\n\n## 测试结果\n见。\n\n## 偏离或疑问\n无\n\n## 下一步建议\n无\n\n${FENCE}json\n${JSON.stringify(report, null, 2)}\n${FENCE}\n`,
+          cwd,
+        );
+        await box.commitAll(`report(collie): v99-b01`, cwd);
+      },
+      result: { exitCode: 0 },
+    });
+
+    const capturingPushingWorker = (): {
+      expectRole: 'worker';
+      effect: (ctx: FakeSceneContext) => Promise<void>;
+      result: { exitCode: number };
+    } => ({
+      expectRole: 'worker',
+      effect: async ({ cwd }: FakeSceneContext) => {
+        capturedTask = readFileSync(join(cwd, '.collie', 'batches', 'v99-b01', 'task.md'), 'utf8');
+        workerSeq++;
+        box.write('feature.txt', `feature ${String(workerSeq)}\n`, cwd);
+        box.write('tests/t000.sh', 'exit 0\n', cwd);
+        const head = await box.commitAll('feat: add feature', cwd);
+        const claims: Claims = {
+          commits: [head],
+          tests_passed: 1,
+          tests_failed: 0,
+          pushed: true,
+          ci_passed: false,
+          new_deps: [],
+          spec_touched: false,
+        };
+        const report: Report = {
+          schema_version: 1,
+          batch_id: 'v99-b01',
+          head_sha: head,
+          claims,
+          open_questions: [],
+        };
+        box.write(
+          `.collie/batches/v99-b01/report.md`,
+          `# r\n\n## 做了什么\n完成。\n\n## 测试结果\n见。\n\n## 偏离或疑问\n无\n\n## 下一步建议\n无\n\n${FENCE}json\n${JSON.stringify(report, null, 2)}\n${FENCE}\n`,
+          cwd,
+        );
+        await box.commitAll(`report(collie): v99-b01`, cwd);
+        const { git: gitFn } = await import('../src/git.js');
+        await gitFn(cwd, ['push', '-q', 'origin', 'main']);
+      },
+      result: { exitCode: 0 },
+    });
+
+    const runner = new FakeRunner([
+      unpushedWorkerWithSha(),
+      unpushedReviewerPassScene(box, 'v99-b01'),
+      capturingPushingWorker(),
+      queueReviewerPassScene(box, 'v99-b01'),
+    ]);
+    await box.cli(['run', '--continue', '--max', '1'], runner);
+
+    // Task should contain head_sha line but NOT CI 运行 line.
+    // When worker doesn't push, ci.resolved run_url is empty.
+    expect(capturedTask).toContain('降级原因');
+    expect(capturedTask).toMatch(/规则 9/);
+    expect(capturedTask).toContain(`head_sha：${round1HeadSha}`);
+    expect(capturedTask).not.toContain('CI 运行');
   });
 });

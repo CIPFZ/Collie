@@ -457,6 +457,13 @@ export function renderFixSection(info: FixInfo): string {
     if (info.downgrade.detail !== undefined) {
       lines.push(`- detail：${info.downgrade.detail}`);
     }
+    // SPEC 16.13 (v046-b11): when rule 9 fired, append head_sha and CI run url from ci.resolved.
+    if (info.ciResolvedHeadSha !== undefined) {
+      lines.push(`- head_sha：${info.ciResolvedHeadSha}`);
+    }
+    if (info.ciResolvedRunUrl !== undefined && info.ciResolvedRunUrl !== '') {
+      lines.push(`- CI 运行：${info.ciResolvedRunUrl}`);
+    }
     lines.push('');
   }
   if (info.gaps.length > 0) {
@@ -615,6 +622,10 @@ export interface FixInfo {
   };
   /** SPEC 13.21 (v04-b16): claim mismatches from the previous run (unresolvable sha etc). */
   claimMismatches?: readonly { field: string; claimed: string; actual: string }[];
+  /** SPEC 16.13 (v046-b11): head_sha from the last ci.resolved, present when rule 9 fired. */
+  ciResolvedHeadSha?: string;
+  /** SPEC 16.13 (v046-b11): run_url from the last ci.resolved, present when rule 9 fired and non-empty. */
+  ciResolvedRunUrl?: string;
 }
 
 export interface BatchHistory {
@@ -817,12 +828,29 @@ export async function batchHistory(
           actual: typeof e.actual === 'string' ? e.actual : '',
         }));
 
+      // SPEC 16.13 (v046-b11): when rule 9 fired, extract head_sha and run_url from last ci.resolved.
+      let ciResolvedHeadSha: string | undefined;
+      let ciResolvedRunUrl: string | undefined;
+      if (downgrade?.rule === RULE_EVIDENCE_MISSING) {
+        const lastCiResolved = batchEvents.findLast((e) => e.event === 'ci.resolved');
+        if (lastCiResolved !== undefined) {
+          if (typeof lastCiResolved.head_sha === 'string') {
+            ciResolvedHeadSha = lastCiResolved.head_sha;
+          }
+          if (typeof lastCiResolved.run_url === 'string') {
+            ciResolvedRunUrl = lastCiResolved.run_url;
+          }
+        }
+      }
+
       fixInfo = {
         gaps,
         failedAcceptance,
         commits,
         downgrade,
         ...(claimMismatches.length > 0 ? { claimMismatches } : {}),
+        ...(ciResolvedHeadSha !== undefined ? { ciResolvedHeadSha } : {}),
+        ...(ciResolvedRunUrl !== undefined ? { ciResolvedRunUrl } : {}),
       };
     } else {
       // Interrupted: BLOCK / crashed / orphaned.
@@ -1171,8 +1199,16 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         verdictCiRecheckSha = lastVerdictSha;
       }
       // rate_limited: don't record, don't warn, don't recheck (SPEC 12.1).
-    } catch {
+    } catch (err: unknown) {
       // Best effort: CI check failure doesn't block startup.
+      // SPEC 16.13 (v046-b11): record ci.verdict_commit_error so journal has a trace.
+      // eslint-disable-next-line no-restricted-syntax -- SPEC 16.13: error truncation bound
+      const ERROR_MAX = 500;
+      rec.record('ci.verdict_commit_error', {
+        sha: lastVerdictSha,
+        when: 'startup',
+        error: String(err instanceof Error ? err.message : err).slice(0, ERROR_MAX),
+      });
     }
   }
 
@@ -1958,8 +1994,16 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
           });
         }
         // Still pending/no_runs after evidence: don't record (SPEC 13.18).
-      } catch {
+      } catch (err: unknown) {
         // Best effort: recheck failure doesn't affect the run.
+        // SPEC 16.13 (v046-b11): record ci.verdict_commit_error so journal has a trace.
+        // eslint-disable-next-line no-restricted-syntax -- SPEC 16.13: error truncation bound
+        const ERROR_MAX_RECHECK = 500;
+        rec.record('ci.verdict_commit_error', {
+          sha: verdictCiRecheckSha,
+          when: 'after_evidence',
+          error: String(err instanceof Error ? err.message : err).slice(0, ERROR_MAX_RECHECK),
+        });
       }
     }
 
