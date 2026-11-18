@@ -136,6 +136,7 @@ describe('exit-codes: the journal of a full run (SPEC 3.6)', () => {
     expect(box.eventTypes()).toEqual([
       'run.started',
       'batch.selected',
+      'r2.commit',
       'batch.task_written',
       'worker.started',
       'worker.finished',
@@ -144,6 +145,7 @@ describe('exit-codes: the journal of a full run (SPEC 3.6)', () => {
       'reviewer.verdict',
       'ci.resolved',
       'evidence.collected',
+      'r2.commit',
       'verdict.pushed',
       'run.finished',
     ]);
