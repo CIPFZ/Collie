@@ -19,7 +19,7 @@
 > 要读的 SPEC 小节号写在条目或情形里，不写在开头的说明里（说明文字不进任何任务书）；验收不数用例个数（夹具里的 `it(` 也会被数进去），改成点名用例组的标题。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b03 已通过（SPEC 14.19、14.21、14.23）；队列从 v046-b04 起，固定版本 `d51e5ac`。分工改造（SPEC 第 16 章）第 3 步接着做的两块是 v046-b04、b05
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b05 已通过（SPEC 14.19~14.24）；队列从 v046-b06 起，固定版本 `e5492d7`。分工改造（SPEC 第 16 章）第 3 步接线之前的三块铺垫是 v046-b06、b07、b08
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -97,6 +97,9 @@
 | 67 | v046-b03 | 红检查：验收测试在没有实现时，新行为的全部失败、要保持的全部通过（不接进队列） | v046-b01 | passed |
 | 68 | v046-b04 | 条目的「情形」写法：backlog 解析情形与接口，测试 agent 只拿情形（不接进队列） | v046-b02 | passed |
 | 69 | v046-b05 | 红检查加静态检查：只多了验收测试的树上 lint 与类型检查必须通过（不接进队列） | v046-b03 | passed |
+| 70 | v046-b06 | 情形与接口的列表允许空行；测试 agent 提示词两处小修（不接进队列） | v046-b04 | pending |
+| 71 | v046-b07 | 配置加 tester_max 与静态检查命令、三个事件类型、test/acceptance 受保护（不接进队列） | v046-b05 | pending |
+| 72 | v046-b08 | 测试 agent 这一步的模块：拉起、红检查、重写、只取走点名的文件（不接进队列） | v046-b06, v046-b07 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -2835,3 +2838,148 @@ v045-b15 之后，只有一条结果消息时返回值有 3 处和以前不同�
 - 为了让测试过而删除或跳过任何测试；改写任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求（本批次的测试可以起真实的 vitest 子进程与真实的 `sh`，别的不行）；新增依赖
+
+## v046-b06 情形与接口的列表允许空行；测试 agent 提示词两处小修（不接进队列）
+
+优先级：70　依赖：v046-b04
+
+操作员读代码并实测：情形列表里两条之间空一行，空行之后的情形被悄悄丢掉，不报错。另外，测试 agent 试跑时把整份 SPEC 读了一遍，汇报里的批次号也填错了。三处都是小修，不动队列。
+
+条目：
+1. 读 SPEC 14.24 里「操作员读代码查出来的」第一条与 16.12 的「v046-b06 小修」。`src/backlog.ts`：「情形」与「接口」两节的列表项之间允许空行。
+   规则：空行跳过；符合格式的列表项接着算进同一个列表；紧跟在一条之后的缩进续行并进那一条（与现在相同）；遇到别的非空行（下一个标签、表格、说明文字）列表结束。
+   「情形」一节里，空行之后出现一条不符合情形格式的无序列表项，报错并带那一行的行号（列表中间出现的本来就报错）。「条目」「额外禁止」两节的列表规则不动。
+   **三条情形、每两条之间空一行：解析出 3 条，编号、类别、文字都对；两条情形之后空一行再跟一条 `- 这不是情形`：报错，行号是这一行；**
+   **「接口」一节两条之间空一行：解析出 2 条**
+2. 读 SPEC 14.24 里同一段的第二、三条。`src/roles/tester.ts` 的 `buildTesterPrompt`：
+   小标题「需要自行阅读的 SPEC 章节」改成「可查阅的文件」，标题下加一句「情形里点名了小节号的，只读那一节；不要通读」，路径照旧逐条列出；
+   「输出」一节加一句，写明汇报末尾 JSON 块里的 `batch_id` 填本批次的批次号（把批次号原样写出来）。
+3. 测试。`test/backlog.test.ts` 新加一组 `describe('backlog: blank lines inside scenario and interface lists', …)`：条目 1 加粗的三种情形，外加「情形之后空一行再是 `接口` 标签 → 两节都解析对」；
+   拒绝的那一条断言报错里的行号。`test/tester.test.ts` 新加一组 `describe('tester: prompt wording (v046-b06)', …)`：新小标题与那句话在、旧小标题不在；`batch_id` 那一句里有批次号。
+   R1 查过现有用例：`test/tester.test.ts` 没有一条断言旧小标题的原文，`includes SPEC paths` 只断言路径字符串，不受影响；
+   `test/backlog-reject.test.ts` 的 `rejects a scenario that does not match the expected format` 测的是列表中间的情形，行为不变；
+   `test/backlog.test.ts` 的 `a batch without scenario/interface sections has no extra keys` 不受影响。已有用例一条都不改；你发现有别的现有用例与本批次冲突，停下，在「偏离或疑问」里写明是哪一条，不要自己改。
+
+本批次只改 `src/backlog.ts`、`src/roles/tester.ts`、`test/backlog.test.ts`、`test/tester.test.ts`。不应改动 `test/invariants.test.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 解析与提示词的测试通过 | `npm test -- test/backlog.test.ts test/backlog-reject.test.ts test/tester.test.ts` | exit 0 |
+| 两组新用例在 | `grep -qF "backlog: blank lines inside scenario and interface lists" test/backlog.test.ts && grep -qF "tester: prompt wording (v046-b06)" test/tester.test.ts` | exit 0 |
+| 旧小标题不在了（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" src/roles/tester.ts \| grep -qF "需要自行阅读的 SPEC 章节"` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `docs/backlog.md`、`AGENT-tester.md`）；改动 `templates/collie.toml`、`.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动「条目」「额外禁止」「验收标准」三节的解析；改变不带「情形」「接口」两节的批次的解析结果
+- 改动 `src/run.ts`、`src/redcheck.ts`、`src/roles/worker.ts`、`src/roles/reviewer.ts`、`src/runner/`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v046-b07 配置加 tester_max 与静态检查命令、三个事件类型、test/acceptance 受保护（不接进队列）
+
+优先级：71　依赖：v046-b05
+
+分工改造第 3 步接线之前的铺垫（SPEC 第 16 章）：把接线要用到的配置项、事件类型和受保护路径先放好。这一批不调用测试 agent，不动队列的流程。
+
+条目：
+1. 读 SPEC 16.12 的「测试 agent 这一步怎么走」。`src/schema/index.ts` 与 `templates/collie.toml`：
+   `[limits]` 加可选的 `tester_max`（正整数，缺省 2，缺省值的写法照 `grace_secs`）；`[verify]` 加可选的 `static`（非空字符串的数组；不写时解析结果里没有这个键）。
+   模板里写上 `tester_max = 2` 与 `static = ["npm run lint", "npm run typecheck"]`，各带一行注释。本仓库的 `.collie/collie.toml` 不许动：它没有这两项，必须照常能加载。
+   **没有这两项的配置能加载，`limits.tester_max` 是 2、`verify` 里没有 `static`；`tester_max = 0` 被拒绝，报错点名 `limits.tester_max`**
+2. `src/schema/index.ts` 的事件类型加三个：`tester.started`、`tester.finished`、`redcheck.result`。这一批只加类型，不在任何地方记录它们。
+3. `src/evidence.ts` 的受保护路径加 `test/acceptance`；`scripts/mutation.ts` 的清单加一项 `protected:test/acceptance`（写法照已有的 9 项），共 43 项。
+   **worker 的提交在 `test/acceptance/` 下新增或改动一个文件：`spec_diff_lines` 大于 0**
+   测试与允许改写的旧用例（只有下面四处，每处在「偏离或疑问」里列出原断言与现断言）：
+   `test/config.test.ts` 的 `has the limits of SPEC 3.1`：期望对象里加 `tester_max: 2`；同一文件的内联配置 `VALID_TOML`：跟着模板加上 `static` 一行（`equals the inline SPEC 3.1 fixture…` 的断言本身不变）；
+   `test/schema.test.ts` 的 `defines the v0.1 event types plus v0.2 and v0.3 types added so far`：个数 37 改成 40，并加三条 `toContain`；
+   `test/mutation.test.ts` 的 `every protected path is in the mutation list`：9 改成 10。
+   R1 查过：`test/cli.test.ts` 里比较 `limits` 的那条两边都取自模板，不受影响；`test/mutation.test.ts` 的 `has at least 42 items` 用的是「不少于」，不用改；
+   没有现有测试在沙箱仓库里往 `test/acceptance/` 写文件。你发现有别的现有用例因此失败，停下，在「偏离或疑问」里写明是哪一条，不要自己改。
+   新用例：`test/config.test.ts` 新加一组 `describe('config: tester_max and verify.static', …)`，含条目 1 加粗的情形、模板里两项的值；
+   `test/evidence.test.ts` 加一条 `counts test/acceptance as protected (SPEC 16.12)`。
+   `test/invariants.test.ts` 加「`src/evidence.ts` 里有 `test/acceptance`」
+
+本批次只改 `src/schema/index.ts`、`src/evidence.ts`、`scripts/mutation.ts`、`templates/collie.toml`、`test/config.test.ts`、`test/schema.test.ts`、`test/evidence.test.ts`、`test/mutation.test.ts`、`test/invariants.test.ts`。
+不应改动 `test/invariants.test.ts` 已有的任何断言。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 配置、事件、取证、变异清单的测试通过 | `npm test -- test/config.test.ts test/schema.test.ts test/evidence.test.ts test/mutation.test.ts` | exit 0 |
+| 配置的新用例组与受保护路径的新用例在 | `grep -qF "config: tester_max and verify.static" test/config.test.ts && grep -qF "counts test/acceptance as protected (SPEC 16.12)" test/evidence.test.ts` | exit 0 |
+| 模板里有两项，本仓库的配置没有被动 | `grep -qE "^tester_max = 2" templates/collie.toml && grep -qE "^static = " templates/collie.toml && ! grep -qE "tester_max\|^static = " .collie/collie.toml` | exit 0 |
+| 变异清单是 43 项 | `npx tsx scripts/mutation.ts --list \| grep -c . \| grep -qx 43` | exit 0 |
+| 变异检查全部被发现，工作区里没有留下报告 | `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" \| tail -n 1 \| grep -qE "^mutation: caught 43 survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` | exit 0 |
+| 不变量同步 | `grep -qF "test/acceptance" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `.collie/collie.toml`）；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/run.ts`、`src/redcheck.ts`、`src/roles/`、`src/runner/`、`src/arbiter.ts`、`src/gate.ts`、`src/backlog.ts`、`src/view.ts`、`src/follow.ts`；在任何地方记录新加的三个事件；在仓库里建 `test/acceptance/` 目录
+- 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言；从变异清单里去掉任何一项
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v046-b08 测试 agent 这一步的模块：拉起、红检查、重写、只取走点名的文件（不接进队列）
+
+优先级：72　依赖：v046-b06, v046-b07
+
+分工改造第 3 步接线之前的铺垫（SPEC 第 16 章）：把「拉起测试 agent → 红检查 → 不过就把原因交回重写 → 只取走点名的文件」做成一个依赖全部由调用方传入的函数。这一批不改 `src/run.ts`，不动队列。
+
+条目：
+1. 读 SPEC 16.12 的「测试 agent 这一步怎么走」前五条与「v046-b08」一段（红检查的接口在 `src/redcheck.ts`）。新文件 `src/acceptance.ts`，导出 `prepareAcceptance(opts)`：
+   `opts` 有 `root`、`headSha`、`batch`、`config`、`runner`、`testerMax`、`redCheckOpts`，以及可选的 `record(事件名, 字段)` 与可选的 `redCheck`（缺省是 `runRedCheck`）。
+   它在系统临时目录下建一个检出于 `headSha` 的 git worktree（目录名以 `collie-accept-` 开头；主仓库有 `node_modules` 就链进去），在里面最多拉起测试 agent `testerMax` 次：
+   每次拉起之后做红检查；过了就结束；不过就把问题清单交给下一次。测试 agent 以非零退出的那一次不做红检查，直接算没过，原因写明退出码。
+   过了之后只取走 `test/acceptance/<批次>/` 下的 `new.test.ts`、`MAP.md`，以及批次有 `[保持]` 情形时的 `keep.test.ts`；
+   批次有 `[保持]` 情形而没有 `keep.test.ts`、或没有 `MAP.md`，算这一次没过。
+   返回 `{ ok: true, attempts, files }`（每个文件有相对仓库根的 `path` 与 `content`）或 `{ ok: false, attempts, problems }`（字符串数组，最后一次的原因）。
+   它不往 `root` 写任何东西、不提交；不论成败、是否抛错，结束时那个 worktree 都要拿掉。给了 `record` 时，每次拉起记 `tester.started` 与 `tester.finished`，每次红检查记 `redcheck.result`，字段见 SPEC 16.12「事件」一条。
+   **第 1 次红检查不过、第 2 次过：测试 agent 一共被拉起 2 次，第 2 次的提示词里有第 1 次每一条问题的原文，返回 `ok` 为 true、`attempts` 为 2；**
+   **`testerMax` 是 2 而两次都不过：测试 agent 恰好被拉起 2 次，返回 `ok` 为 false、`attempts` 为 2，`problems` 是第 2 次的原因；**
+   **测试 agent 另外写了 `src/sneaky.ts` 和输出目录里的 `extra.ts`：返回的 `files` 里没有它们，主仓库 `git status --porcelain` 为空，`git worktree list` 只剩 1 行，系统临时目录里没有留下 `collie-accept-*`**
+2. `src/roles/tester.ts`：`TesterInputSchema` 加可选的 `previous_problems`（非空字符串的数组）；非空时提示词在「情形」之前多一节「上一次没过的原因」，逐条原样列出，并写一句「只改有问题的地方，改完重新自检」。
+   不给或为空数组时，提示词与现在逐字相同。
+3. 新文件 `test/prepare-acceptance.test.ts`，三组：
+   `describe('prepareAcceptance: retry loop', …)`：条目 1 前两处加粗的情形；测试 agent 非零退出的一次；`record` 收到的事件名与先后（两次都拉起时是 started、finished、result 各两条）。红检查用注入的假函数按次给结果。
+   `describe('prepareAcceptance: what is taken from the tree', …)`：条目 1 第三处加粗的情形；有 `[保持]` 情形而没有 `keep.test.ts` → 没过；没有 `[保持]` 情形而测试 agent 写了 `keep.test.ts` → `files` 里没有它；没有 `MAP.md` → 没过；注入的红检查抛错 → 错误照常抛出，worktree 仍被拿掉。
+   `describe('prepareAcceptance: real red check', …)`：一条，不注入 `redCheck`：`FakeRunner` 往工作目录里写一个真实的、两条用例都会失败的 `new.test.ts` 与一份 `MAP.md`，用真实的 `runRedCheck`（真实的 vitest，不带静态命令）→ `ok` 为 true。
+   没有这一条，前两组什么也证明不了：它们的红检查是假的。
+   做法：用 `Sandbox` 建仓库，自己往里提交一份 `AGENT-tester.md`；配置用 `templateConfig()`；测试 agent 用 `FakeRunner`（`files` 写进它拿到的工作目录）。不改 `test/support/sandbox.ts`。
+   `test/tester.test.ts` 新加一组 `describe('tester: previous problems in the prompt', …)`：给了两条 → 两条原文都在、位置在「情形」之前；不给与给空数组 → 提示词与不带这个字段时逐字相同。
+   R1 查过现有用例：`test/tester.test.ts` 的 `accepts a valid input with exactly five fields` 只断言能通过校验，多一个可选字段不影响它；`rejects an extra field (strict object)` 用的键是 `extra`，仍然应当被拒绝。
+   已有用例一条都不改；你发现有别的现有用例与本批次冲突，停下，在「偏离或疑问」里写明是哪一条，不要自己改。
+   `test/invariants.test.ts` 加「`src/acceptance.ts` 里有 `removeWorktree`」与「`src/run.ts` 的非注释行里没有 `acceptance.js`（还没有导入这个模块）」（后一条到接线那一批由那一批改掉）
+
+本批次只改 `src/acceptance.ts`、`src/roles/tester.ts`、`test/prepare-acceptance.test.ts`、`test/tester.test.ts`、`test/invariants.test.ts`。不应改动 `test/invariants.test.ts` 已有的任何断言。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 模块与提示词的测试通过，仓库里没有留下报告 | `npm test -- test/prepare-acceptance.test.ts test/tester.test.ts && ! test -e .vitest` | exit 0 |
+| 模块的三组用例在 | `grep -qF "prepareAcceptance: retry loop" test/prepare-acceptance.test.ts && grep -qF "prepareAcceptance: what is taken from the tree" test/prepare-acceptance.test.ts && grep -qF "prepareAcceptance: real red check" test/prepare-acceptance.test.ts` | exit 0 |
+| 提示词的新用例组在 | `grep -qF "tester: previous problems in the prompt" test/tester.test.ts` | exit 0 |
+| 函数导出了，队列还没有用它（不看注释行） | `grep -qE "export (async )?function prepareAcceptance" src/acceptance.ts && ! grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "acceptance\.js"` | exit 0 |
+| 测试不在系统临时目录留下工作目录 | `d=$(mktemp -d) && TMPDIR=$d npm test -- test/prepare-acceptance.test.ts && ! ls -d "$d"/collie-accept-* >/dev/null 2>&1` | exit 0 |
+| 不变量同步 | `grep -qF "removeWorktree" test/invariants.test.ts && grep -qF "src/acceptance.ts" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `AGENT-tester.md`、`.collie/collie.toml`）；改动 `templates/collie.toml`、`.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/run.ts`、`src/redcheck.ts`、`src/backlog.ts`、`src/schema/index.ts`、`src/evidence.ts`、`src/roles/worker.ts`、`src/roles/reviewer.ts`、`src/runner/`、`src/arbiter.ts`、`src/gate.ts`、`test/support/sandbox.ts`；把这个模块接进队列或加命令行子命令
+- 让 `prepareAcceptance` 往主仓库的工作区写文件、提交或推送；让它取走点名之外的任何文件
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求（「real red check」那一条可以起真实的 vitest 子进程，别的不行）；新增依赖

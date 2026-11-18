@@ -41,6 +41,7 @@
 - `AGENT-*.md`
 - `docs/backlog.md`、`docs/decisions/`
 - `docs/progress.md`
+- `test/acceptance/` 下的文件（验收测试，由测试 Agent 在你之前写好；v046-b07 起受保护）
 - 任何 `.collie/` 下文件（除本批次的 `report.md`）。
   其中 `.collie/collie.toml` 由 R1 放置，你只读；需要改阈值时提出，不要自己改
 
