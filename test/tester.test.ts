@@ -245,3 +245,28 @@ describe('tester: scenarios in the prompt', () => {
     expect(shBlock).toContain('npm run typecheck');
   });
 });
+
+describe('tester: prompt wording (v046-b06)', () => {
+  it('has the new heading "可查阅的文件" in the prompt', () => {
+    const prompt = buildTesterPrompt(validInput());
+    expect(prompt).toContain('## 可查阅的文件');
+  });
+
+  it('has the "不要通读" instruction in the prompt', () => {
+    const prompt = buildTesterPrompt(validInput());
+    expect(prompt).toContain('情形里点名了小节号的，只读那一节；不要通读');
+  });
+
+  it('does not have the old heading "需要自行阅读的 SPEC 章节"', () => {
+    const prompt = buildTesterPrompt(validInput());
+    expect(prompt).not.toContain('需要自行阅读的 SPEC 章节');
+  });
+
+  it('batch_id instruction mentions the actual batch id', () => {
+    const prompt = buildTesterPrompt(validInput({ batch_id: 'v046-b06' }));
+    expect(prompt).toContain('`batch_id`');
+    expect(prompt).toContain('v046-b06');
+    // The sentence should contain the specific batch id
+    expect(prompt).toContain('`v046-b06`');
+  });
+});

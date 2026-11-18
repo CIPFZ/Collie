@@ -110,7 +110,13 @@ export function buildTesterPrompt(input: TesterInput): string {
     `# 测试批次 ${data.batch_id}`,
     scenarioLines.join('\n'),
     interfaceLines.join('\n'),
-    ['## 需要自行阅读的 SPEC 章节', '', ...data.spec_paths.map((p) => `- \`${p}\``)].join('\n'),
+    [
+      '## 可查阅的文件',
+      '',
+      '情形里点名了小节号的，只读那一节；不要通读',
+      '',
+      ...data.spec_paths.map((p) => `- \`${p}\``),
+    ].join('\n'),
     [
       '## 输出',
       '',
@@ -118,6 +124,8 @@ export function buildTesterPrompt(input: TesterInput): string {
       '',
       '在该目录下写以下文件：',
       ...outputFiles,
+      '',
+      `汇报末尾 JSON 块里的 \`batch_id\` 填 \`${data.batch_id}\`。`,
       '',
       '写完后自检：',
       '',

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { loadBacklog, parseBacklog, setBatchStatus } from '../src/backlog.js';
+import { BacklogError, loadBacklog, parseBacklog, setBatchStatus } from '../src/backlog.js';
 import { BatchStatusSchema, type Batch } from '../src/schema/index.js';
 
 const repoRoot = join(import.meta.dirname, '..');
@@ -235,6 +235,116 @@ describe('backlog: scenarios and interfaces', () => {
     // The key must not be present (not even as undefined).
     expect('scenarios' in (batch as object)).toBe(false);
     expect('interfaces' in (batch as object)).toBe(false);
+  });
+});
+
+describe('backlog: blank lines inside scenario and interface lists', () => {
+  /** Build a backlog with custom scenario and interface blocks. */
+  function backlogBlankLines(opts: { scenarioLines: string[]; interfaceLines?: string[] }): string {
+    const iLines = opts.interfaceLines ?? ['- src/feature.ts exportName'];
+    return [
+      '# backlog',
+      '',
+      '## 队列总览',
+      '',
+      '| 优先级 | 批次 | 标题 | 依赖 | 状态 |',
+      '|---|---|---|---|---|',
+      '| 1 | v99-b01 | 示例功能 | — | pending |',
+      '',
+      '## v99-b01 示例功能',
+      '',
+      '优先级：1　依赖：无',
+      '',
+      '条目：',
+      '1. 实现 feature',
+      '',
+      '验收标准：',
+      '',
+      '| 说明 | 命令 | 期望 |',
+      '|---|---|---|',
+      '| 通过 | `npm test` | exit 0 |',
+      '',
+      '情形：',
+      ...opts.scenarioLines,
+      '',
+      '接口：',
+      ...iLines,
+    ].join('\n');
+  }
+
+  it('three scenarios with blank lines between each pair: parses all 3', () => {
+    const text = backlogBlankLines({
+      scenarioLines: ['- S1 [新] 功能 A', '', '- S2 [新] 功能 B', '', '- K1 [保持] 保持 C'],
+    });
+    const batch = parseBacklog(text)[0];
+    expect(batch?.scenarios).toHaveLength(3);
+    expect(batch?.scenarios?.[0]).toEqual({ id: 'S1', kind: 'new', text: '功能 A' });
+    expect(batch?.scenarios?.[1]).toEqual({ id: 'S2', kind: 'new', text: '功能 B' });
+    expect(batch?.scenarios?.[2]).toEqual({ id: 'K1', kind: 'keep', text: '保持 C' });
+  });
+
+  it('two scenarios then blank line then bad bullet: errors with the bad line number', () => {
+    const text = backlogBlankLines({
+      scenarioLines: ['- S1 [新] 功能 A', '- S2 [新] 功能 B', '', '- 这不是情形'],
+    });
+    expect(() => parseBacklog(text)).toThrow(BacklogError);
+    try {
+      parseBacklog(text);
+    } catch (err) {
+      expect(err).toBeInstanceOf(BacklogError);
+      if (err instanceof BacklogError) {
+        const badLineNo = text.split('\n').findIndex((l) => l.includes('- 这不是情形')) + 1;
+        expect(err.line).toBe(badLineNo);
+        expect(err.message).toContain('does not match expected format');
+      }
+    }
+  });
+
+  it('interfaces with blank line between two items: parses both', () => {
+    const text = backlogBlankLines({
+      scenarioLines: ['- S1 [新] 功能 A'],
+      interfaceLines: ['- src/foo.ts fooFn', '', '- src/bar.ts barFn'],
+    });
+    const batch = parseBacklog(text)[0];
+    expect(batch?.interfaces).toEqual(['src/foo.ts fooFn', 'src/bar.ts barFn']);
+  });
+
+  it('scenarios then blank line then 接口 label: both sections parse correctly', () => {
+    const text = [
+      '# backlog',
+      '',
+      '## 队列总览',
+      '',
+      '| 优先级 | 批次 | 标题 | 依赖 | 状态 |',
+      '|---|---|---|---|---|',
+      '| 1 | v99-b01 | 示例功能 | — | pending |',
+      '',
+      '## v99-b01 示例功能',
+      '',
+      '优先级：1　依赖：无',
+      '',
+      '条目：',
+      '1. 实现 feature',
+      '',
+      '验收标准：',
+      '',
+      '| 说明 | 命令 | 期望 |',
+      '|---|---|---|',
+      '| 通过 | `npm test` | exit 0 |',
+      '',
+      '情形：',
+      '- S1 [新] 功能 A',
+      '- S2 [保持] 保持 B',
+      '',
+      '接口：',
+      '- src/feature.ts exportName',
+      '- collie show --flag',
+    ].join('\n');
+    const batch = parseBacklog(text)[0];
+    expect(batch?.scenarios).toHaveLength(2);
+    expect(batch?.scenarios?.[0]).toEqual({ id: 'S1', kind: 'new', text: '功能 A' });
+    expect(batch?.scenarios?.[1]).toEqual({ id: 'S2', kind: 'keep', text: '保持 B' });
+    expect(batch?.interfaces).toEqual(['src/feature.ts exportName', 'collie show --flag']);
   });
 });
 

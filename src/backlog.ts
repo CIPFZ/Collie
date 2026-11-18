@@ -295,6 +295,32 @@ function parseList(
   return { items, end: i };
 }
 
+/** Collects a bulleted list that allows blank lines between items (SPEC 14.24 / v046-b06).
+ *  Used for the 「接口」 section only; 「条目」 and 「额外禁止」 use parseList which stops at blanks. */
+function parseListWithBlanks(
+  body: readonly Line[],
+  start: number,
+  marker: RegExp,
+): { items: string[]; end: number } {
+  const items: string[] = [];
+  let i = skipBlank(body, start);
+  for (; i < body.length; i++) {
+    const text = body[i]?.text ?? '';
+    const trimmed = text.trim();
+    // Skip blank lines inside the list.
+    if (trimmed === '') continue;
+    const match = marker.exec(text);
+    if (match !== null) {
+      items.push((match[1] ?? '').trim());
+    } else if (items.length > 0 && CONTINUATION.test(text)) {
+      items.push(`${items.pop() ?? ''}\n${trimmed}`);
+    } else {
+      break;
+    }
+  }
+  return { items, end: i };
+}
+
 /** Extracts the command from a cell holding exactly one code span (CommonMark rules). */
 function codeSpan(cell: string): string | undefined {
   const fence = /^`+/.exec(cell)?.[0];
@@ -412,7 +438,7 @@ function parseSection(section: Section, source: string): SectionContent {
       i = skipScenarioList(body, i + 1);
     } else if (LABEL_INTERFACES.test(text)) {
       once('interfaces', line.no, '接口');
-      const list = parseList(body, i + 1, BULLET_ITEM);
+      const list = parseListWithBlanks(body, i + 1, BULLET_ITEM);
       content.interfaces = list.items;
       i = list.end;
     } else {
@@ -427,7 +453,8 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
-/** SPEC 16.11: Parses scenarios from the 「情形」 section body. */
+/** SPEC 16.11 + 14.24: Parses scenarios from the 「情形」 section body.
+ *  Blank lines between scenarios are allowed and skipped (v046-b06). */
 function parseScenarios(
   body: readonly Line[],
   start: number,
@@ -441,6 +468,8 @@ function parseScenarios(
     const line = body[i];
     if (line === undefined) break;
     const text = line.text.trim();
+    // Blank lines inside the scenario list are allowed (SPEC 14.24 / v046-b06).
+    if (text === '') continue;
     const match = SCENARIO_LINE.exec(text);
     if (match !== null) {
       const sid = match.groups?.sid ?? '';
@@ -489,15 +518,21 @@ function parseScenarios(
   return scenarios;
 }
 
-/** Advances past the scenario list starting at `start`. */
+/** Advances past the scenario list starting at `start`.
+ *  Mirrors parseScenarios: blank lines and bad bullets inside are handled there. */
 function skipScenarioList(body: readonly Line[], start: number): number {
   let i = skipBlank(body, start);
   for (; i < body.length; i++) {
     const line = body[i];
     if (line === undefined) break;
     const text = line.text.trim();
+    if (text === '') continue;
     if (SCENARIO_LINE.test(text)) continue;
     if (CONTINUATION.test(line.text)) continue;
+    if (/^[-*]\s/.test(text)) {
+      // Bad bullet — parseScenarios already threw, but keep advancing.
+      continue;
+    }
     break;
   }
   return i;
