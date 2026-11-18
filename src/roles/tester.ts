@@ -26,6 +26,8 @@ export const TesterInputSchema = z.strictObject({
   interfaces: z.array(z.string()),
   spec_paths: z.array(z.string().min(1)),
   out_dir: z.string().min(1),
+  /** SPEC 16.12: when non-empty, the prompt includes a section listing previous red-check problems. */
+  previous_problems: z.array(z.string().min(1)).optional(),
 });
 export type TesterInput = z.infer<typeof TesterInputSchema>;
 
@@ -106,8 +108,20 @@ export function buildTesterPrompt(input: TesterInput): string {
   selfCheckCmds.push('npm run lint');
   selfCheckCmds.push('npm run typecheck');
 
+  // SPEC 16.12: when previous_problems is non-empty, insert a section before scenarios.
+  const previousProblemsLines: string[] = [];
+  const prevProblems = data.previous_problems ?? [];
+  if (prevProblems.length > 0) {
+    previousProblemsLines.push('## 上一次没过的原因', '');
+    for (const problem of prevProblems) {
+      previousProblemsLines.push(`- ${problem}`);
+    }
+    previousProblemsLines.push('', '只改有问题的地方，改完重新自检');
+  }
+
   const sections = [
     `# 测试批次 ${data.batch_id}`,
+    ...(previousProblemsLines.length > 0 ? [previousProblemsLines.join('\n')] : []),
     scenarioLines.join('\n'),
     interfaceLines.join('\n'),
     [

@@ -270,3 +270,33 @@ describe('tester: prompt wording (v046-b06)', () => {
     expect(prompt).toContain('`v046-b06`');
   });
 });
+
+describe('tester: previous problems in the prompt', () => {
+  it('given two problems: both appear verbatim, before 情形 section', () => {
+    const problems = ['[new] test A: expected to fail but passed', '[keep] test B: timeout'];
+    const prompt = buildTesterPrompt(validInput({ previous_problems: problems }));
+    expect(prompt).toContain(problems[0]);
+    expect(prompt).toContain(problems[1]);
+    expect(prompt).toContain('## 上一次没过的原因');
+    expect(prompt).toContain('只改有问题的地方，改完重新自检');
+    // The problems section must come before the 情形 section.
+    const problemsIdx = prompt.indexOf('## 上一次没过的原因');
+    const scenariosIdx = prompt.indexOf('## 情形');
+    expect(problemsIdx).toBeGreaterThanOrEqual(0);
+    expect(scenariosIdx).toBeGreaterThan(problemsIdx);
+  });
+
+  it('not given: prompt is identical to no previous_problems field', () => {
+    const withField = buildTesterPrompt(validInput());
+    const withoutField = buildTesterPrompt(validInput());
+    expect(withField).toBe(withoutField);
+    expect(withField).not.toContain('上一次没过的原因');
+  });
+
+  it('given empty array: prompt is identical to no previous_problems field', () => {
+    const base = buildTesterPrompt(validInput());
+    const withEmpty = buildTesterPrompt(validInput({ previous_problems: [] }));
+    expect(withEmpty).toBe(base);
+    expect(withEmpty).not.toContain('上一次没过的原因');
+  });
+});

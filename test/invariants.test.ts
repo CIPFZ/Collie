@@ -606,4 +606,24 @@ describe('structural invariants (SPEC 3.2)', () => {
       'items should not appear in non-comment code lines of src/roles/tester.ts (v046-b04)',
     ).toBe(false);
   });
+
+  it('src/acceptance.ts contains removeWorktree (v046-b08)', () => {
+    const content = readFileSync(join(ROOT, 'src/acceptance.ts'), 'utf8');
+    expect(content).toContain('removeWorktree');
+  });
+
+  it('src/run.ts non-comment lines do not contain acceptance.js (v046-b08)', () => {
+    const lines = readFileSync(join(ROOT, 'src/run.ts'), 'utf8').split('\n');
+    const codeLines = lines.filter(
+      (l) =>
+        !l.trimStart().startsWith('//') &&
+        !l.trimStart().startsWith('*') &&
+        !l.trimStart().startsWith('/*'),
+    );
+    const hasAcceptance = codeLines.some((l) => l.includes('acceptance.js'));
+    expect(
+      hasAcceptance,
+      'acceptance.js should not appear in non-comment code lines of src/run.ts (v046-b08)',
+    ).toBe(false);
+  });
 });
