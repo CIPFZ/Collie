@@ -1726,4 +1726,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b08 · r-20261118040112 · FIX（reviewer 原判 PASS，规则 9 降级）
+
+- 时间：2026-11-18T04:25:47.927Z
+- 裁定：规则 9，ci_conclusion=failure
+- 提交：`777ce2a`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1308 passed, 0 failed
+  - `npm test -- test/prepare-acceptance.test.ts test/tester.test.ts && ! test -e .vitest` → exit 0，38 passed, 0 failed
+  - `grep -qF "prepareAcceptance: retry loop" test/prepare-acceptance.test.ts && grep -qF "prepareAcceptance: what is taken from the tree" test/prepare-acceptance.test.ts && grep -qF "prepareAcceptance: real red check" test/prepare-acceptance.test.ts` → exit 0，exit 0
+  - `grep -qF "tester: previous problems in the prompt" test/tester.test.ts` → exit 0，exit 0
+  - `grep -qE "export (async )?function prepareAcceptance" src/acceptance.ts && ! grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "acceptance\.js"` → exit 0，exit 0
+  - `d=$(mktemp -d) && TMPDIR=$d npm test -- test/prepare-acceptance.test.ts && ! ls -d "$d"/collie-accept-* >/dev/null 2>&1` → exit 0，10 passed, 0 failed
+  - `grep -qF "removeWorktree" test/invariants.test.ts && grep -qF "src/acceptance.ts" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：failure，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44236283128
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
