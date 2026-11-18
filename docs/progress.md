@@ -1920,4 +1920,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b14 · r-20261118133242 · PASS
+
+- 时间：2026-11-18T14:00:50.899Z
+- 裁定：规则 10，All 9 verification commands pass. Worker commits do not touch any protected paths (docs/progress.md change is from R2's own progress commit 15d88b0). r2Commit() helper consolidates 8 commit sites, collectR2Shas() collects from 4 journal event types, and protected-path diff uses sha-based filtering. commits_actual listing unchanged. New test file has 10 tests across 2 describe groups covering all required scenarios. test/exit-codes.test.ts was minimally updated per FIX gap authorization. CI status unknown — CI 以 R2 取证为准.
+- 提交：`ee15654` `2db3aec`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1368 passed, 0 failed
+  - `npm test -- test/r2-commits.test.ts test/evidence.test.ts test/schema.test.ts` → exit 0，117 passed, 0 failed
+  - `grep -qF "rule 2 counts every commit that R2 did not make" test/r2-commits.test.ts && grep -qF "R2 own commits stay out of the count" test/r2-commits.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -cE "\bcommit\(root" | grep -qx 1` → exit 0，exit 0
+  - `grep -qF "r2.commit" src/schema/index.ts` → exit 0，exit 0
+  - `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" | tail -n 1 | grep -qE "^mutation: caught 43 survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` → exit 0，exit 0
+  - `grep -qF "r2.commit" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44316128921
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
