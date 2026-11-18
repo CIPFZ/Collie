@@ -75,7 +75,10 @@ export async function runLadder(opts: LadderOptions): Promise<void> {
 export async function computeFingerprint(root: string): Promise<string> {
   const head = await revParse(root, 'HEAD');
   // `git diff HEAD` shows tracked-file content changes (staged + unstaged vs HEAD).
-  const diff = await git(root, ['diff', 'HEAD']);
+  // SPEC 16.14: disable autoRefreshIndex so git does not create .git/index.lock
+  // or rewrite .git/index; GIT_OPTIONAL_LOCKS=0 (set in git.ts) covers git-status
+  // but not the index refresh inside git-diff when timestamps differ.
+  const diff = await git(root, ['-c', 'diff.autoRefreshIndex=false', 'diff', 'HEAD']);
   const diffHash = createHash('sha256').update(diff).digest('hex');
   // Untracked files: (path, size, mtime) — captures new/changed untracked content.
   const ws = await status(root);
