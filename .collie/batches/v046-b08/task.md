@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-run_id: r-20261118042552
+run_id: r-20261118044003
 batch_id: v046-b08
 base_sha: c475eaa11ad0caf9eaced1edda535b2316304274
-created_at: 2026-11-18T04:25:53.035Z
-attempt: 2
+created_at: 2026-11-18T04:40:04.016Z
+attempt: 3
 interrupted_at: null
 issued_by: collie
 ---
@@ -79,7 +79,6 @@ issued_by: collie
 
 ### 上一轮代码提交
 
-- `eacde6dc99b158ffd3b2ed3663b459636681ef19`
 - `777ce2a6316797555c64728e39b15900df953ab5`
 
 这些提交已在审核范围内，只补缺口，不要重做。
