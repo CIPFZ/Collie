@@ -1829,4 +1829,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b11 · r-20261118071451 · PASS
+
+- 时间：2026-11-18T07:35:31.333Z
+- 裁定：规则 10，All 8 acceptance commands pass. All 3 items implemented correctly: rule 9 rerun task carries head_sha and CI run url from ci.resolved; ci.verdict_commit_error event recorded on startup/after_evidence query exceptions without affecting run conclusion; tests cover all specified scenarios. No protected files modified, no forbidden files touched, no new dependencies. CI conclusion unknown (no credentials); CI 以 R2 取证为准.
+- 提交：`fe5c114`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1334 passed, 0 failed
+  - `npm test -- test/queue-journal.test.ts test/verdict-ci-recheck.test.ts test/schema.test.ts` → exit 0，100 passed, 0 failed
+  - `grep -qF "rule 9 FIX rerun task carries head_sha and CI run url" test/queue-journal.test.ts` → exit 0，exit 0
+  - `grep -qF "verdict CI query errors are journaled" test/verdict-ci-recheck.test.ts` → exit 0，exit 0
+  - `grep -qF "ci.verdict_commit_error" src/schema/index.ts && grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qF "ci.verdict_commit_error"` → exit 0，exit 0
+  - `grep -qF "ci.verdict_commit_error" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44259094979
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
