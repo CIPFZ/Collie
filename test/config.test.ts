@@ -44,9 +44,11 @@ fix_max = 2
 dry_k = 2
 ci_wait_secs = 1800
 ci_poll_secs = 30
+tester_max = 2
 
 [verify]
 commands = ["npm run lint", "npm run typecheck", "npm test"]
+static = ["npm run lint", "npm run typecheck"]
 
 [ci]
 provider = "github-actions"
@@ -124,6 +126,7 @@ describe('config: template config (SPEC 3.1 values)', () => {
       ci_poll_secs: 30,
       grace_secs: 20,
       min_free_mb: 1024,
+      tester_max: 2,
     });
   });
 
@@ -262,6 +265,50 @@ describe('config: validation errors carry field paths', () => {
     expect(err.issues).toHaveLength(1);
     expect(err.issues[0]?.path).toBe('');
     expect(err.message).toMatch(/line 2/);
+  });
+});
+
+describe('config: tester_max and verify.static', () => {
+  it('defaults tester_max to 2 when absent from config', () => {
+    // VALID_TOML does not have tester_max; .collie/collie.toml also omits it.
+    const text = VALID_TOML.replace(/tester_max = 2\n/, '');
+    const parsed = parseConfig(text, 'inline.toml');
+    expect(parsed.limits.tester_max).toBe(2);
+  });
+
+  it('rejects tester_max = 0 with an error naming limits.tester_max', () => {
+    const text = replaceLine(VALID_TOML, 'tester_max = 2', 'tester_max = 0');
+    const err = configError(text);
+    expect(err.issues.map((i) => i.path)).toEqual(['limits.tester_max']);
+  });
+
+  it('accepts tester_max = 5 (positive integer)', () => {
+    const text = replaceLine(VALID_TOML, 'tester_max = 2', 'tester_max = 5');
+    const parsed = parseConfig(text, 'inline.toml');
+    expect(parsed.limits.tester_max).toBe(5);
+  });
+
+  it('template has tester_max = 2', () => {
+    const config = templateConfig();
+    expect(config.limits.tester_max).toBe(2);
+  });
+
+  it('template has verify.static with lint and typecheck', () => {
+    const config = templateConfig();
+    expect(config.verify.static).toEqual(['npm run lint', 'npm run typecheck']);
+  });
+
+  it('verify.static is absent when not configured', () => {
+    const text = VALID_TOML.replace(/static = \[.*\]\n/, '');
+    const parsed = parseConfig(text, 'inline.toml');
+    expect(parsed.verify.static).toBeUndefined();
+  });
+
+  it('.collie/collie.toml loads without tester_max or verify.static', () => {
+    // The repository config has neither field; it must still load fine.
+    const config = loadConfig(repoRoot);
+    expect(config.limits.tester_max).toBe(2);
+    expect(config.verify.static).toBeUndefined();
   });
 });
 

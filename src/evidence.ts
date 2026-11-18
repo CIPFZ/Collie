@@ -37,6 +37,7 @@ export const PROTECTED_PATHS: readonly string[] = [
   'docs/decisions',
   'docs/progress.md',
   '.collie/collie.toml',
+  'test/acceptance',
 ];
 
 /**

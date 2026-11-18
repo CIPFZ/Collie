@@ -55,7 +55,7 @@ export function testFilesFor(file: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Mutation list — 42 items (SPEC 15.1, v045-b13: rule 4 removed)
+// Mutation list — 43 items (SPEC 15.1, v045-b13: rule 4 removed; v046-b07: test/acceptance)
 // ---------------------------------------------------------------------------
 
 export const MUTATIONS: MutationItem[] = [
@@ -276,7 +276,7 @@ export const MUTATIONS: MutationItem[] = [
     replacement: 'return { pass: true, reasons };',
   },
 
-  // ── Protected paths (9) ──────────────────────────────────────────────
+  // ── Protected paths (10) ──────────────────────────────────────────────
   {
     name: 'protected:SPEC.md',
     file: 'src/evidence.ts',
@@ -329,6 +329,12 @@ export const MUTATIONS: MutationItem[] = [
     name: 'protected:.collie/collie.toml',
     file: 'src/evidence.ts',
     original: "  '.collie/collie.toml',\n",
+    replacement: '',
+  },
+  {
+    name: 'protected:test/acceptance',
+    file: 'src/evidence.ts',
+    original: "  'test/acceptance',\n",
     replacement: '',
   },
 ];

@@ -26,6 +26,13 @@ export const DEFAULT_GRACE_SECS = 20;
 // eslint-disable-next-line no-restricted-syntax -- SPEC 14.1: disk free threshold default, named constant
 export const DEFAULT_MIN_FREE_MB = 1024;
 
+/**
+ * SPEC 16.12: default tester_max — how many times the red-check loop may run
+ * per batch run.  Used when the field is absent from collie.toml.
+ */
+// eslint-disable-next-line no-restricted-syntax -- SPEC 16.12: tester max attempts default, named constant
+export const DEFAULT_TESTER_MAX = 2;
+
 /** JSON value, the only payload an NDJSON event line can round-trip losslessly (SPEC 3.6). */
 export type JsonValue =
   string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -123,6 +130,8 @@ export const LimitsSchema = z.strictObject({
   grace_secs: z.number().int().positive().optional().default(DEFAULT_GRACE_SECS),
   /** SPEC 14.1: minimum free disk space (MB) for the preflight check; optional, defaults to 1024. */
   min_free_mb: z.number().int().positive().optional().default(DEFAULT_MIN_FREE_MB),
+  /** SPEC 16.12: max red-check attempts per batch run; optional, defaults to 2. */
+  tester_max: z.number().int().positive().optional().default(DEFAULT_TESTER_MAX),
 });
 export type Limits = z.infer<typeof LimitsSchema>;
 
@@ -148,6 +157,8 @@ export const CollieConfigSchema = z.strictObject({
   limits: LimitsSchema,
   verify: z.strictObject({
     commands: z.array(NonEmptyString),
+    /** SPEC 16.12: optional static-check commands for red check; absent when not configured. */
+    static: z.array(NonEmptyString).optional(),
   }),
   ci: z.strictObject({
     provider: z.literal('github-actions'),
@@ -268,6 +279,10 @@ export const EVENT_TYPES = [
   'queue.preflight',
   // v0.45 (SPEC 14.1): reviewer tool audit; fields outcome / extra? / missing?.
   'audit.result',
+  // v0.46 (SPEC 16.12): tester agent lifecycle and red-check result.
+  'tester.started',
+  'tester.finished',
+  'redcheck.result',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);

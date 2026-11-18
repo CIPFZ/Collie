@@ -583,6 +583,13 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(content).toContain('staticCommands');
   });
 
+  it('src/evidence.ts has test/acceptance in PROTECTED_PATHS (v046-b07)', () => {
+    const content = readFileSync(join(ROOT, 'src/evidence.ts'), 'utf8');
+    // SPEC 16.12: test/acceptance is a protected path; worker commits touching it
+    // trigger spec_diff_lines > 0 and arbiter rule 2.
+    expect(content).toContain('test/acceptance');
+  });
+
   it('src/roles/tester.ts non-comment lines do not contain items (v046-b04)', () => {
     const lines = readFileSync(join(ROOT, 'src/roles/tester.ts'), 'utf8').split('\n');
     // SPEC 16.11: TesterInput uses scenarios/interfaces, not items.

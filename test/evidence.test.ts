@@ -168,6 +168,12 @@ describe('evidence: protected files and dependencies', () => {
     expect((await collect(head)).evidence.spec_diff_lines).toBe(1);
   });
 
+  it('counts test/acceptance as protected (SPEC 16.12)', async () => {
+    write('test/acceptance/v99/new.test.ts', 'test\n');
+    const head = await commitAll('tamper');
+    expect((await collect(head)).evidence.spec_diff_lines).toBe(1);
+  });
+
   it('ignores ordinary source changes and the report envelope', async () => {
     write('src.ts', 'x\n');
     write('.collie/batches/v99/report.md', 'r\n');
