@@ -1861,4 +1861,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：1（error）
+
+### v046-b12 · r-20261118122241 · PASS
+
+- 时间：2026-11-18T12:31:29.570Z
+- 裁定：规则 10，All 9 acceptance commands pass. Structural and behavioral requirements for all 3 items verified via diff review and test execution. No protected files modified, no forbidden files changed, no new dependencies, no existing assertions deleted or rewritten. CI以R2取证为准。
+- 提交：`bf74064` `dbc2f96`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1351 passed, 0 failed
+  - `npm test -- test/prepare-acceptance.test.ts test/tester.test.ts test/redcheck.test.ts` → exit 0，78 passed, 0 failed
+  - `e=$(mktemp) && printf '[commit]\n\tgpgsign = true\n[user]\n\tsigningkey = 0000000000000000\n' > "$e" && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/prepare-acceptance.test.ts` → exit 0，24 passed, 0 failed
+  - `grep -qF "prepareAcceptance: tester events, signal and misclassified list" test/prepare-acceptance.test.ts && grep -qF "tester: run options are forwarded" test/tester.test.ts && grep -qF "runRedCheck: leaves nothing behind" test/redcheck.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/acceptance.ts | grep -qF "exit_code" && ! grep -vE "^\s*(//|\*|/\*)" src/acceptance.ts | grep -qF "exitCode: result.exitCode"` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "acceptance\.js"` → exit 0，exit 0
+  - `grep -qF "onTesterEvent" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44281448987
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
