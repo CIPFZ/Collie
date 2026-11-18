@@ -98,7 +98,7 @@
 | 68 | v046-b04 | 条目的「情形」写法：backlog 解析情形与接口，测试 agent 只拿情形（不接进队列） | v046-b02 | passed |
 | 69 | v046-b05 | 红检查加静态检查：只多了验收测试的树上 lint 与类型检查必须通过（不接进队列） | v046-b03 | passed |
 | 70 | v046-b06 | 情形与接口的列表允许空行；测试 agent 提示词两处小修（不接进队列） | v046-b04 | passed |
-| 71 | v046-b07 | 配置加 tester_max 与静态检查命令、三个事件类型、test/acceptance 受保护（不接进队列） | v046-b05 | pending |
+| 71 | v046-b07 | 配置加 tester_max 与静态检查命令、三个事件类型、test/acceptance 受保护（不接进队列） | v046-b05 | passed |
 | 72 | v046-b08 | 测试 agent 这一步的模块：拉起、红检查、重写、只取走点名的文件（不接进队列） | v046-b06, v046-b07 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。

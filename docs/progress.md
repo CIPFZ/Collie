@@ -1705,4 +1705,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b07 · r-20261118033352 · PASS
+
+- 时间：2026-11-18T04:01:07.962Z
+- 裁定：规则 10，All 9 acceptance commands pass. All 3 items implemented correctly: tester_max with positive-int validation and default 2, verify.static as optional string array, 3 event types in EVENT_TYPES only, test/acceptance in PROTECTED_PATHS and mutation list (43 items). No protected paths modified, no forbidden files touched, no new dependencies. CI以R2取证为准。
+- 提交：`97d79b0`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1293 passed, 0 failed
+  - `npm test -- test/config.test.ts test/schema.test.ts test/evidence.test.ts test/mutation.test.ts` → exit 0，159 passed, 0 failed
+  - `grep -qF "config: tester_max and verify.static" test/config.test.ts && grep -qF "counts test/acceptance as protected (SPEC 16.12)" test/evidence.test.ts` → exit 0，exit 0
+  - `grep -qE "^tester_max = 2" templates/collie.toml && grep -qE "^static = " templates/collie.toml && ! grep -qE "tester_max|^static = " .collie/collie.toml` → exit 0，exit 0
+  - `npx tsx scripts/mutation.ts --list | grep -c . | grep -qx 43` → exit 0，exit 0
+  - `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" | tail -n 1 | grep -qE "^mutation: caught 43 survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` → exit 0，exit 0
+  - `grep -qF "test/acceptance" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44232627823
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
