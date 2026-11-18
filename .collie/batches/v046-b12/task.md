@@ -1,11 +1,11 @@
 ---
 schema_version: 1
-run_id: r-20261118091441
+run_id: r-20261118122241
 batch_id: v046-b12
 base_sha: d0df1a1e7439d960840c52f446e28d271fce132d
-created_at: 2026-11-18T09:14:42.416Z
-attempt: 1
-interrupted_at: null
+created_at: 2026-11-18T12:22:45.949Z
+attempt: 2
+interrupted_at: r-20261118091441 escalated run.finished@2026-11-18T10:06:16.304Z
 issued_by: collie
 ---
 
@@ -63,3 +63,10 @@ issued_by: collie
 完成后写 `.collie/batches/v046-b12/report.md`：固定四段（做了什么 / 测试结果 / 偏离或疑问 / 下一步建议）
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v046-b12` 为提交信息单独提交并推送该文件。
+
+## 上一轮中断
+
+中断信息：`r-20261118091441 escalated run.finished@2026-11-18T10:06:16.304Z`
+上一轮结论：no valid report: /data/workspace/Collie/.collie/batches/v046-b12/report.md: cannot read report: ENOENT: no such file or directory, open '/data/workspace/Collie/.collie/batches/v046-b12/report.md'
+
+上一轮的提交仍在审核范围内，按上面的结论只补缺口。
