@@ -1899,4 +1899,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b14 · r-20261118124914 · FIX
+
+- 时间：2026-11-18T13:32:38.442Z
+- 裁定：规则 10，npm test (verification #3) exits 1. test/exit-codes.test.ts 'records the v0.1 event sequence in order' fails because two r2.commit events are now emitted in the journal but the expected sequence was not updated. All other verifications pass. CI status unknown — CI 以 R2 取证为准.
+- 提交：`ee15654`
+- 验收命令：8/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 1，1367 passed, 1 failed, 1 test files failed
+  - `npm test -- test/r2-commits.test.ts test/evidence.test.ts test/schema.test.ts` → exit 0，117 passed, 0 failed
+  - `grep -qF "rule 2 counts every commit that R2 did not make" test/r2-commits.test.ts && grep -qF "R2 own commits stay out of the count" test/r2-commits.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -cE "\bcommit\(root" | grep -qx 1` → exit 0，exit 0
+  - `grep -qF "r2.commit" src/schema/index.ts` → exit 0，exit 0
+  - `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" | tail -n 1 | grep -qE "^mutation: caught 43 survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` → exit 0，exit 0
+  - `grep -qF "r2.commit" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：failure，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44311625612
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
