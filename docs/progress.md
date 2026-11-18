@@ -1789,4 +1789,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b09 · r-20261118063548 · PASS
+
+- 时间：2026-11-18T07:00:00.580Z
+- 裁定：规则 10，All 8 acceptance commands pass. Diff covers 6 test files within task scope. No protected or forbidden paths modified. No new dependencies. Git identity via env vars in beforeEach/afterEach, private per-test TMPDIR, inline config for item 2, sandbox keep-runs for item 3 — all verified by both acceptance commands and direct test file runs. Two afterAll leftover assertions were removed (structural redundancy with per-test privateTmpDir cleanup); 2 in-test leftover assertions properly changed to privateTmpDir. CI: R2 takes precedence. remote_has_head false pending report commit push.
+- 提交：`a29b87c`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1317 passed, 0 failed
+  - `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test` → exit 0，1317 passed, 0 failed
+  - `d=$(mktemp -d) && mkdir "$d/collie-accept-other" "$d/collie-redcheck-other" && TMPDIR=$d npm test -- test/prepare-acceptance.test.ts test/redcheck.test.ts && test -d "$d/collie-accept-other" && test -d "$d/collie-redcheck-other"` → exit 0，33 passed, 0 failed
+  - `grep -cE "loadConfig\((repoRoot|ROOT|join\(import\.meta\.dirname)" test/config.test.ts | grep -qx 1` → exit 0，exit 0
+  - `d=$(mktemp -d) && COLLIE_TEST_KEEP_RUNS=$d npm test -- test/queue-limit.test.ts && find "$d" -name events.ndjson | grep -q . && find "$d" -name TEST_NAME | grep -q .` → exit 0，4 passed, 0 failed
+  - `grep -qF "sandbox: COLLIE_TEST_KEEP_RUNS" test/sandbox-keep.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44253548089
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
