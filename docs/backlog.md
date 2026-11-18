@@ -17,9 +17,11 @@
 > 对照没做过的结论不写进规格（「变异检查 44 项全部被发现」里有 9 项是测试文件加载失败）。
 > R1 签发自查（v045-b15 / v046-b03 后，SPEC 14.21、14.23）：签批次前先查现有测试里谁守着要改的行为，在条目里写「R1 查过」哪几条；
 > 要读的 SPEC 小节号写在条目或情形里，不写在开头的说明里（说明文字不进任何任务书）；验收不数用例个数（夹具里的 `it(` 也会被数进去），改成点名用例组的标题。
+> R1 签发自查（v046-b07 / b08 后，SPEC 14.25）：条目里举例时不拿本仓库的现状当例子（「本仓库的配置就没有这两项」被写成了断言）；
+> 新测试文件要建 git 仓库、用临时目录的，验收里加一条「没有 git 全局身份、系统临时目录里有别人的同名前缀目录」时也通过的命令：CI 的机器和开发的机器不一样，worker 看不到 CI。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b05 已通过（SPEC 14.19~14.24）；队列从 v046-b06 起，固定版本 `e5492d7`。分工改造（SPEC 第 16 章）第 3 步接线之前的三块铺垫是 v046-b06、b07、b08
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b07 已通过（SPEC 14.19~14.25）；v046-b08 是 `blocked`（代码已在 main 上，它新加的一条测试让 CI 变红，见 SPEC 14.25）；队列从 v046-b09 起，固定版本 `c475eaa`
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -100,6 +102,9 @@
 | 70 | v046-b06 | 情形与接口的列表允许空行；测试 agent 提示词两处小修（不接进队列） | v046-b04 | passed |
 | 71 | v046-b07 | 配置加 tester_max 与静态检查命令、三个事件类型、test/acceptance 受保护（不接进队列） | v046-b05 | passed |
 | 72 | v046-b08 | 测试 agent 这一步的模块：拉起、红检查、重写、只取走点名的文件（不接进队列） | v046-b06, v046-b07 | blocked |
+| 73 | v046-b09 | 测试只依赖自己带的环境：git 身份、私有临时目录、不绑本仓库配置；沙箱可留 journal | v046-b06, v046-b07 | pending |
+| 74 | v046-b10 | prepareAcceptance 收尾：带回测试 agent 的回复、类别标错不再重拉（不接进队列） | v046-b09 | pending |
+| 75 | v046-b11 | R2 诊断信息：规则 9 重跑的 task 带 CI 链接；查裁定提交 CI 出异常时记事件 | v046-b09 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -2983,3 +2988,138 @@ v045-b15 之后，只有一条结果消息时返回值有 3 处和以前不同�
 - 为了让测试过而删除或跳过任何测试；改写任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求（「real red check」那一条可以起真实的 vitest 子进程，别的不行）；新增依赖
+
+## v046-b09 测试只依赖自己带的环境：git 身份、私有临时目录、不绑本仓库配置；沙箱可留 journal
+
+优先级：73　依赖：v046-b06, v046-b07
+
+主分支的 CI 自 `777ce2a` 起是红的：v046-b08 新加的一条测试用到了机器的 git 全局身份，开发的机器有，CI 的机器没有。这一批把它修绿，并收掉另外两处同类的依赖。只改测试，不改 `src/`。
+
+条目：
+1. 读 SPEC 16.13 的第一段与 14.25 开头关于 CI 的那一段。`test/prepare-acceptance.test.ts`：文件里的每一次 `git commit` 都用测试自己设的身份，不用机器的全局配置
+   （可以改用 `Sandbox`，也可以让辅助函数设的身份在整个用例期间有效；用完还原环境变量）。
+   同一文件与 `test/redcheck.test.ts`：各自建一个私有的临时目录（在系统临时目录下），把 `process.env.TMPDIR` 指过去，结束时还原并删掉；
+   「没有 `collie-accept-*` / `collie-redcheck-*` 残留」的断言只看这个私有目录。两个文件里别的断言不改。
+   **没有任何 git 全局身份时（`GIT_CONFIG_GLOBAL` 指向一个空文件、`GIT_CONFIG_NOSYSTEM=1`），`test/prepare-acceptance.test.ts` 全部通过；**
+   **系统临时目录里事先有别人的 `collie-accept-other` 与 `collie-redcheck-other` 两个目录时，这两个测试文件全部通过，跑完那两个目录还在**
+2. `test/config.test.ts`：v046-b07 加的 `.collie/collie.toml loads without tester_max or verify.static` 断言的是本仓库配置里现在没有这两项，
+   R1 之后要往本仓库配置里加它们。把这一条改成用内联配置（从 `VALID_TOML` 里去掉这两行）证明「没有这两项的配置能加载，`limits.tester_max` 是 2、`verify` 里没有 `static`」，不读本仓库的配置。
+   `test/invariants.test.ts`：v046-b01 那条不变量旁边加一条，数出现的次数：`test/config.test.ts` 里从仓库根加载配置（`loadConfig(repoRoot)` 这一类）的恰好一处。
+   允许改写的旧用例只有上面点名的这一条，在「偏离或疑问」里列出原断言与现断言。
+   **做完之后的样子：往本仓库的 `.collie/collie.toml` 里加 `tester_max = 3` 与 `static = ["npm run lint"]`，`npm test` 仍然全过。这一条由操作员在仓库副本里验证，你不要改 `.collie/collie.toml`**
+3. `test/support/sandbox.ts`：设了环境变量 `COLLIE_TEST_KEEP_RUNS=<目录>` 时，`dispose()` 在删除沙箱之前把沙箱仓库的 `.collie/runs/` 整个复制到 `<目录>/<沙箱目录名>/runs/`，
+   并在 `<目录>/<沙箱目录名>/TEST_NAME` 里写下当前用例的全名（取不到就写空）。沙箱里没有 `.collie/runs/` 时只写 `TEST_NAME`。不设这个环境变量时行为与现在完全一样。复制出错不许让用例失败。
+   新文件 `test/sandbox-keep.test.ts`，一组 `describe('sandbox: COLLIE_TEST_KEEP_RUNS', …)`：设了 → 用假 runner 跑一次 `run` 之后 `dispose()`，目标目录里有 `events.ndjson` 与 `TEST_NAME`；
+   不设 → 什么也不留。用例自己设、自己还原这个环境变量，目标目录用完删掉。
+   R1 查过：`test/support/sandbox.ts` 的 `dispose()` 现在只还原两个 git 环境变量并删除目录；没有现有用例断言 `dispose()` 之后沙箱外有什么。
+
+本批次只改 `test/prepare-acceptance.test.ts`、`test/redcheck.test.ts`、`test/config.test.ts`、`test/invariants.test.ts`、`test/support/sandbox.ts`、`test/sandbox-keep.test.ts`。不应改动 `test/invariants.test.ts` 已有的任何断言。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 没有 git 全局身份时全部测试通过 | `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test` | exit 0 |
+| 临时目录里有别人的同名前缀目录时，两个文件通过，别人的目录还在 | `d=$(mktemp -d) && mkdir "$d/collie-accept-other" "$d/collie-redcheck-other" && TMPDIR=$d npm test -- test/prepare-acceptance.test.ts test/redcheck.test.ts && test -d "$d/collie-accept-other" && test -d "$d/collie-redcheck-other"` | exit 0 |
+| config.test.ts 里从仓库根加载配置的恰好一处 | `grep -cE "loadConfig\((repoRoot\|ROOT\|join\(import\.meta\.dirname)" test/config.test.ts \| grep -qx 1` | exit 0 |
+| 留 journal 的开关管用 | `d=$(mktemp -d) && COLLIE_TEST_KEEP_RUNS=$d npm test -- test/queue-limit.test.ts && find "$d" -name events.ndjson \| grep -q . && find "$d" -name TEST_NAME \| grep -q .` | exit 0 |
+| 开关的用例组在 | `grep -qF "sandbox: COLLIE_TEST_KEEP_RUNS" test/sandbox-keep.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `.collie/collie.toml`）；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`；改动 `src/`、`scripts/`、`templates/` 下任何文件
+- 为了让测试过而删除或跳过任何测试；改写条目 2 点名之外的任何已有断言（条目 1 里两处「没有残留」的断言只许改它看的目录）
+- 在测试里改机器的 git 全局配置，或往仓库自己的 `.git/config` 里写身份
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v046-b10 prepareAcceptance 收尾：带回测试 agent 的回复、类别标错不再重拉（不接进队列）
+
+优先级：74　依赖：v046-b09
+
+操作员用真实的运行器调了 `prepareAcceptance`：情形的类别标错时，测试 agent 照手册没有作弊、在汇报里请方案设计者改类别，但这句话调用方拿不到，第 2 次拉起也注定白跑。不动队列。
+
+条目：
+1. 读 SPEC 16.13 的「`prepareAcceptance` 的收尾」一段（流程在 16.12）。`src/acceptance.ts`：成功与失败两种返回值都加 `reports`（字符串数组，每次拉起的测试 agent 的最终回复原文，没有就是空串，按先后）；
+   失败的返回值加 `reason`：`'red_check'`（红检查没过或缺文件）、`'tester_failed'`（最后一次是测试 agent 非零退出）、`'misclassified'`。
+   红检查没过，而这一次测试 agent 最终回复的最后一个 JSON 围栏块里 `misclassified` 是非空数组时：不再拉起下一次，直接返回，`reason` 是 `'misclassified'`，`problems` 是这一次红检查的原因。
+   最终回复里没有 JSON 块、解析不了、没有这个字段或是空数组，都按没有声明处理，照常重拉。红检查过了的，不看这个字段。
+   **`testerMax` 是 2，第 1 次红检查没过且回复的 JSON 里 `misclassified` 列了一条：测试 agent 只被拉起 1 次，返回 `ok` 为 false、`attempts` 为 1、`reason` 为 `misclassified`，`reports` 有 1 条且就是那份回复；**
+   **同样的红检查结果，但回复里没有 JSON 块：照常拉起第 2 次**
+2. 同一文件：交给测试 agent 的要读的文件是 `SPEC.md` 与 `CONSTRAINTS.md` 两份；建工作目录的那一步失败时，已经建出来的目录与 git 里登记的 worktree 也要清理掉，错误照常抛出；
+   测试 agent 以非零退出时，下一次拉起的「上一次没过的原因」里有一条写明上一次的退出码。
+3. `test/prepare-acceptance.test.ts` 新加一组 `describe('prepareAcceptance: reports and early stop', …)`：条目 1 加粗的两种情形；`reports` 在成功时也有、条数等于拉起次数；
+   三种 `reason` 各一条；JSON 里 `misclassified` 是空数组 → 照常重拉；非零退出之后第 2 次的提示词里有退出码；交给测试 agent 的提示词里两份文件都在；
+   建工作目录失败（给一个不存在的 `headSha`）→ 抛错，`git worktree list` 只有 1 行，私有临时目录里没有 `collie-accept-*`。
+   R1 查过现有用例：这个文件里的假测试 agent 返回的是 `{ exitCode: 0 }`，没有最终回复，所以现有的重拉用例（`first red check fails, second passes…`、`testerMax=2, both fail…`、`record receives events…`）不会被提前结束影响；
+   现有用例对返回值都是逐个字段断言，多出两个字段不影响它们。已有用例一条都不改；你发现有别的现有用例与本批次冲突，停下，在「偏离或疑问」里写明是哪一条，不要自己改。
+   `test/invariants.test.ts` 加「`src/acceptance.ts` 里有 `misclassified`」
+
+本批次只改 `src/acceptance.ts`、`test/prepare-acceptance.test.ts`、`test/invariants.test.ts`。不应改动 `test/invariants.test.ts` 已有的任何断言。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 没有 git 全局身份时模块的测试通过 | `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/prepare-acceptance.test.ts` | exit 0 |
+| 新的一组用例在 | `grep -qF "prepareAcceptance: reports and early stop" test/prepare-acceptance.test.ts` | exit 0 |
+| 两份要读的文件都给了（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/acceptance.ts \| grep -qF "CONSTRAINTS.md"` | exit 0 |
+| 队列还没有用它（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "acceptance\.js"` | exit 0 |
+| 不变量同步 | `grep -qF "misclassified" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `AGENT-tester.md`）；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/run.ts`、`src/redcheck.ts`、`src/roles/`、`src/runner/`、`src/backlog.ts`、`src/schema/index.ts`、`src/evidence.ts`、`test/support/sandbox.ts`；把这个模块接进队列
+- 按红检查的原因文字去猜类别标错（只看测试 agent 自己在 JSON 里的声明）；让 `prepareAcceptance` 往主仓库的工作区写文件、提交或推送
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局身份；新增依赖
+
+## v046-b11 R2 诊断信息：规则 9 重跑的 task 带 CI 链接；查裁定提交 CI 出异常时记事件
+
+优先级：75　依赖：v046-b09
+
+v046-b08 被规则 9 降级之后重跑了两次，task 里只有一句 `ci_conclusion=failure`，worker 不知道是哪次 CI 运行。另外，R2 查上一条裁定提交的 CI 时出了异常是悄悄吞掉的，一条偶发的测试失败因此无从查起。
+这一批只加信息，不改任何判定。改 R2。
+
+条目：
+1. 读 SPEC 16.13 的「R2 的两处诊断信息」一段与 14.25 里关于后两次重跑的那一条。`src/run.ts`：上一次运行被规则 9 降级时，重跑的 task「降级原因」一节在规则与原因之后多两行，
+   取自上一次运行 journal 里最后一条 `ci.resolved`：`- head_sha：<sha>` 与 `- CI 运行：<run_url>`（`run_url` 为空就不写这一行；没有 `ci.resolved` 就两行都不写）。别的规则降级时这一节不变。
+   **上一次运行规则 9、`ci.resolved` 的 `conclusion` 是 `failure` 且带 `run_url`：重跑的 task 里有那个 `head_sha` 与那条链接**
+2. `src/run.ts` 与 `src/schema/index.ts`：事件类型加 `ci.verdict_commit_error`。启动时查上一条裁定提交的 CI、取证之后复查，这两处捕获到异常时各记一条：
+   `sha`、`when`（`startup` 或 `after_evidence`）、`error`（错误信息，限 500 字符）。别的行为不变：异常仍然不让这次运行失败，也不改它的结论与退出码。
+   **启动时那次查询抛错：这次运行照常走完、结论与退出码和不抛错时相同，journal 里有 1 条 `ci.verdict_commit_error`、`when` 是 `startup`**
+3. 测试。`test/queue-journal.test.ts` 加一条 `rule 9 FIX rerun task carries head_sha and CI run url`（条目 1 加粗的情形），再加一条 `run_url` 为空时没有「CI 运行」那一行；
+   `test/verdict-ci-recheck.test.ts` 新加一组 `describe('verdict CI query errors are journaled', …)`：条目 2 加粗的情形；复查时抛错 → `when` 是 `after_evidence`，结论与退出码不变；两处都不抛错 → 没有这个事件。
+   允许改写的旧用例只有一处：`test/schema.test.ts` 的 `defines the v0.1 event types plus v0.2 and v0.3 types added so far`，个数 40 改成 41，并加一条 `toContain`；在「偏离或疑问」里写明。
+   R1 查过：`test/queue-journal.test.ts` 的 `rule 9 FIX rerun task contains 降级原因 with rule and reason` 只断言含「降级原因」与「规则 9」，多两行不影响它；
+   `test/verdict-ci-recheck.test.ts` 现有 8 条都没有让查询抛错，不会多出新事件。你发现有别的现有用例与本批次冲突，停下，在「偏离或疑问」里写明是哪一条，不要自己改。
+   `test/invariants.test.ts` 加「`src/run.ts` 里有 `ci.verdict_commit_error`」
+
+本批次只改 `src/run.ts`、`src/schema/index.ts`、`test/queue-journal.test.ts`、`test/verdict-ci-recheck.test.ts`、`test/schema.test.ts`、`test/invariants.test.ts`。不应改动 `test/invariants.test.ts` 已有的任何数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 队列日志、CI 复查、事件类型的测试通过 | `npm test -- test/queue-journal.test.ts test/verdict-ci-recheck.test.ts test/schema.test.ts` | exit 0 |
+| task 带 CI 链接的用例在 | `grep -qF "rule 9 FIX rerun task carries head_sha and CI run url" test/queue-journal.test.ts` | exit 0 |
+| 异常记事件的用例组在 | `grep -qF "verdict CI query errors are journaled" test/verdict-ci-recheck.test.ts` | exit 0 |
+| 新事件进了类型清单与 R2（不看注释行） | `grep -qF "ci.verdict_commit_error" src/schema/index.ts && grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qF "ci.verdict_commit_error"` | exit 0 |
+| 不变量同步 | `grep -qF "ci.verdict_commit_error" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/acceptance.ts`、`src/redcheck.ts`、`src/roles/`、`src/runner/`、`src/view.ts`、`src/follow.ts`；改动任何一条规则的判定、`fix_max` 的计数、重跑的条件
+- 让 CI 查询的异常影响这次运行的结论或退出码
+- 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局身份；新增依赖
