@@ -1687,4 +1687,22 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b06 · r-20261118032107 · PASS
+
+- 时间：2026-11-18T03:33:48.008Z
+- 裁定：规则 10，All 6 acceptance commands pass. Scenario and interface blank-line handling implemented correctly in src/backlog.ts; tester prompt wording updated in src/roles/tester.ts; new test groups cover all required cases. No protected files modified, no dependencies added, no existing assertions changed. CI conclusion unknown — to be verified by R2.
+- 提交：`32044c9`
+- 验收命令：6/6 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1281 passed, 0 failed
+  - `npm test -- test/backlog.test.ts test/backlog-reject.test.ts test/tester.test.ts` → exit 0，78 passed, 0 failed
+  - `grep -qF "backlog: blank lines inside scenario and interface lists" test/backlog.test.ts && grep -qF "tester: prompt wording (v046-b06)" test/tester.test.ts` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/roles/tester.ts | grep -qF "需要自行阅读的 SPEC 章节"` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44230497678
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
