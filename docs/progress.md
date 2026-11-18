@@ -1809,4 +1809,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b10 · r-20261118070005 · PASS
+
+- 时间：2026-11-18T07:14:47.234Z
+- 裁定：规则 10，All 8 acceptance commands pass. All 3 task items fully implemented: reports field on both ok/fail paths, reason enum with 3 values, misclassified early-stop from tester JSON declaration, CONSTRAINTS.md added to spec_paths, worktree cleanup on addWorktree failure, exit code propagated to next prompt. 9 new tests in the required describe group cover all specified scenarios and pass. No existing tests modified. No protected files or forbidden files changed. No new dependencies. CI status unknown (no credentials), deferred to R2.
+- 提交：`41dd2bd`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1327 passed, 0 failed
+  - `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/prepare-acceptance.test.ts` → exit 0，19 passed, 0 failed
+  - `grep -qF "prepareAcceptance: reports and early stop" test/prepare-acceptance.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/acceptance.ts | grep -qF "CONSTRAINTS.md"` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "acceptance\.js"` → exit 0，exit 0
+  - `grep -qF "misclassified" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44256379258
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
