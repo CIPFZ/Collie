@@ -1068,6 +1068,59 @@ function findLastVerdictPushFailedSha(root: string): string | undefined {
   return failedSha;
 }
 
+/**
+ * SPEC 16.14: R2 commits and records an `r2.commit` event in one step.
+ * Every R2 commit except rescue (wip(collie):) goes through this function.
+ * Rescue commits are not R2's own product — they package the worker's leftovers.
+ */
+async function r2Commit(
+  root: string,
+  subject: string,
+  paths: readonly string[],
+  rec: Recorder,
+): Promise<string> {
+  const sha = await commit(root, subject, paths);
+  rec.record('r2.commit', { sha, subject });
+  return sha;
+}
+
+/**
+ * SPEC 16.14: collects all shas that R2 itself produced, from every journal
+ * on this machine. Used by collectEvidence to skip R2 commits in the
+ * protected-path diff (instead of matching by commit-message prefix).
+ *
+ * Sources:
+ * - `r2.commit` → sha
+ * - `batch.task_written` → commit  (backward compat with older journals)
+ * - `verdict.pushed` → sha
+ * - `verdict.push_failed` → sha
+ */
+function collectR2Shas(root: string): Set<string> {
+  const shas = new Set<string>();
+  const runsDir = join(root, RUNS_RELATIVE_DIR);
+  if (!existsSync(runsDir)) return shas;
+  const journal = createJournal(root);
+  for (const dir of readdirSync(runsDir).sort()) {
+    if (!RunIdSchema.safeParse(dir).success || !existsSync(join(runsDir, dir, EVENTS_FILE_NAME)))
+      continue;
+    for (const event of journal.replay(dir)) {
+      if (event.event === 'r2.commit' && typeof event.sha === 'string') {
+        shas.add(event.sha);
+      }
+      if (event.event === 'batch.task_written' && typeof event.commit === 'string') {
+        shas.add(event.commit);
+      }
+      if (event.event === 'verdict.pushed' && typeof event.sha === 'string') {
+        shas.add(event.sha);
+      }
+      if (event.event === 'verdict.push_failed' && typeof event.sha === 'string') {
+        shas.add(event.sha);
+      }
+    }
+  }
+  return shas;
+}
+
 /** Runs one batch end to end. Never throws for agent misbehaviour; only for Collie's own failures. */
 export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   const { root, batchId, runId } = ctx;
@@ -1307,7 +1360,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
       }
     }
-    await commit(root, `progress: ${batchId} ${decision.final}`, escalateEnvelopes);
+    await r2Commit(root, `progress: ${batchId} ${decision.final}`, escalateEnvelopes, rec);
 
     // SPEC 12.1: push the verdict commit to remote (escalation path).
     try {
@@ -1395,7 +1448,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     });
     writeTask(root, batch, task);
     const relTask = taskPath('', batchId);
-    const taskSha = await commit(root, `docs: issue ${batchId} task envelope`, [relTask]);
+    const taskSha = await r2Commit(root, `docs: issue ${batchId} task envelope`, [relTask], rec);
     rec.record('batch.task_written', { path: relTask, commit: taskSha });
 
     // SPEC 11.7: record worker.resumed event when this is a subsequent attempt.
@@ -1730,7 +1783,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       // SPEC 12.2: --continue mode updates the backlog status column.
       // FIX verdicts skip backlog update (the --continue loop retries).
 
-      await commit(root, `progress: ${batchId} ${decision.final}`, fixEnvelopes);
+      await r2Commit(root, `progress: ${batchId} ${decision.final}`, fixEnvelopes, rec);
 
       // SPEC 12.1: push the verdict commit to remote.
       try {
@@ -1880,6 +1933,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       updateHeartbeat(root, { phase: 'ci', updated_at: ctx.now().toISOString() });
 
       // R2's own measurements, also on the committed head_sha tree.
+      // SPEC 16.14: collect R2's own commit shas from journals for protected-path diff.
+      const r2Shas = collectR2Shas(root);
       const collected = await collectEvidence({
         root,
         verifyCwd: tree,
@@ -1897,6 +1952,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         ...(ctx.clock === undefined ? {} : { clock: ctx.clock }),
         // SPEC 13.9: token is read once in run.ts and passed through.
         ...(ciTokenValue === undefined ? {} : { ciToken: ciTokenValue }),
+        // SPEC 16.14: sha-based R2 commit identification for protected-path diff.
+        r2Shas,
       });
       if (collected.ciWait?.timedOut === true) {
         rec.record('ci.wait_timeout', {
@@ -2126,7 +2183,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
       }
     }
-    await commit(root, `progress: ${batchId} ${decision.final}`, envelopes);
+    await r2Commit(root, `progress: ${batchId} ${decision.final}`, envelopes, rec);
 
     // SPEC 12.1: push the verdict commit to remote.
     try {
@@ -2187,7 +2244,12 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         workerExitCode,
         workerStopReason,
       });
-      await commit(root, `progress: ${batchId} ${decision.final}`, [relative(root, progressPath)]);
+      await r2Commit(
+        root,
+        `progress: ${batchId} ${decision.final}`,
+        [relative(root, progressPath)],
+        rec,
+      );
       // SPEC 12.1 (v03-b01-fix): exception-path commits are not pushed at
       // this point.  The next startup's verdict.push_failed catch-up handles
       // the normal-path failure; exception-path commits stay local until a
@@ -2679,7 +2741,12 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
           // status to 'pending' so selectNextBatch picks it up again.
           updateBacklogToDisk(root, currentBatchId, 'pending', queueRec);
           try {
-            await commit(root, `progress: ${currentBatchId} rule1_retry`, [BACKLOG_RELATIVE_PATH]);
+            await r2Commit(
+              root,
+              `progress: ${currentBatchId} rule1_retry`,
+              [BACKLOG_RELATIVE_PATH],
+              queueRec,
+            );
           } catch {
             // Best effort: the status was written to disk even if commit fails.
           }
@@ -2713,9 +2780,12 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
         // Reset backlog to 'pending' so selectNextBatch picks it up again.
         updateBacklogToDisk(root, currentBatchId, 'pending', queueRec);
         try {
-          await commit(root, `progress: ${currentBatchId} interrupt_retry`, [
-            BACKLOG_RELATIVE_PATH,
-          ]);
+          await r2Commit(
+            root,
+            `progress: ${currentBatchId} interrupt_retry`,
+            [BACKLOG_RELATIVE_PATH],
+            queueRec,
+          );
         } catch {
           // Best effort: the status was written to disk even if commit fails.
         }
@@ -2767,7 +2837,12 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
     // Exceeded fix_max: escalate → update status to blocked and stop.
     updateBacklogToDisk(root, currentBatchId, 'blocked', queueRec);
     try {
-      await commit(root, `progress: ${currentBatchId} fix_max`, [BACKLOG_RELATIVE_PATH]);
+      await r2Commit(
+        root,
+        `progress: ${currentBatchId} fix_max`,
+        [BACKLOG_RELATIVE_PATH],
+        queueRec,
+      );
     } catch {
       // Best effort: the status was written to disk even if commit fails.
     }

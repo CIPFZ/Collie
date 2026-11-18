@@ -90,6 +90,12 @@ export interface EvidenceInput {
   clock?: Clock;
   /** SPEC 13.9: pre-resolved CI token; run.ts reads it from token_file and passes it here. */
   ciToken?: string;
+  /**
+   * SPEC 16.14: shas of commits R2 made itself, collected from journal events.
+   * Protected-path diff skips these instead of using commit-message prefixes.
+   * When omitted, falls back to prefix-based filtering (backward compat).
+   */
+  r2Shas?: ReadonlySet<string>;
 }
 
 export interface CollectedEvidence {
@@ -190,14 +196,27 @@ export async function collectEvidence(input: EvidenceInput): Promise<CollectedEv
   // and from the per-commit diffs for arbiter rules 2 and 3.
   const workerCommits = commits.filter((c) => !isR2Commit(c.subject));
 
+  // SPEC 16.14: protected-path diff skips commits whose sha is in r2Shas
+  // (collected from journal events). Falls back to prefix-based filtering
+  // when r2Shas is not provided (backward compat for direct callers).
+  const r2ShaSet = input.r2Shas;
+  const isR2ForDiff =
+    r2ShaSet !== undefined
+      ? (sha: string): boolean => r2ShaSet.has(sha)
+      : (_sha: string, subject: string): boolean => isR2Commit(subject);
+  const commitsForDiff = commits.filter((c) => !isR2ForDiff(c.sha, c.subject));
+
   // SPEC 11.7 (v03-b03-fix): protected-path diff is computed per worker commit,
   // skipping R2 commits entirely. This replaces the prior two-range approach
   // (baseSha..taskSha with PROTECTED_MINUS_R2, then taskSha..headSha with
   // PROTECTED_PATHS) because it is both simpler and more correct: any R2 commit
   // (not just progress) is excluded, and rescue-committed SPEC.md changes still
   // count because rescue commits have the "wip(collie):" prefix, not an R2 prefix.
+  // SPEC 16.14: protected-path diff uses commitsForDiff (sha-based when
+  // r2Shas provided, prefix-based otherwise). commits_actual still uses
+  // workerCommits (prefix-based) — the listing is unchanged per SPEC.
   let specDiffLines = 0;
-  for (const c of workerCommits) {
+  for (const c of commitsForDiff) {
     const stat = await diffStat(root, `${c.sha}^`, c.sha, PROTECTED_PATHS);
     specDiffLines += stat.added + stat.deleted;
   }

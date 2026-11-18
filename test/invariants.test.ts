@@ -656,4 +656,23 @@ describe('structural invariants (SPEC 3.2)', () => {
       'acceptance.js should not appear in non-comment code lines of src/run.ts (v046-b08)',
     ).toBe(false);
   });
+
+  it('src/run.ts non-comment lines have exactly one direct commit(root call (v046-b14)', () => {
+    const lines = readFileSync(join(ROOT, 'src/run.ts'), 'utf8').split('\n');
+    // SPEC 16.14: all R2 commits go through r2Commit(); only the helper itself
+    // calls commit(root... directly. Filter out comment lines (铁律 26).
+    const codeLines = lines.filter(
+      (l) =>
+        !l.trimStart().startsWith('//') &&
+        !l.trimStart().startsWith('*') &&
+        !l.trimStart().startsWith('/*'),
+    );
+    const directCalls = codeLines.filter((l) => /\bcommit\(root\b/.test(l));
+    expect(directCalls).toHaveLength(1);
+  });
+
+  it('src/schema/index.ts has r2.commit event type (v046-b14)', () => {
+    const content = readFileSync(join(ROOT, 'src/schema/index.ts'), 'utf8');
+    expect(content).toContain('r2.commit');
+  });
 });

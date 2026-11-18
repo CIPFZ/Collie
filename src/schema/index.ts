@@ -285,6 +285,9 @@ export const EVENT_TYPES = [
   'redcheck.result',
   // v0.46 (SPEC 16.13): CI query error during verdict commit check (startup or after_evidence).
   'ci.verdict_commit_error',
+  // v0.46 (SPEC 16.14): R2 records every commit it makes (sha + subject); used to
+  // identify R2 commits by sha instead of by message prefix.
+  'r2.commit',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);
