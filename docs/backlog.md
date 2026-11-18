@@ -19,9 +19,10 @@
 > 要读的 SPEC 小节号写在条目或情形里，不写在开头的说明里（说明文字不进任何任务书）；验收不数用例个数（夹具里的 `it(` 也会被数进去），改成点名用例组的标题。
 > R1 签发自查（v046-b07 / b08 后，SPEC 14.25）：条目里举例时不拿本仓库的现状当例子（「本仓库的配置就没有这两项」被写成了断言）；
 > 新测试文件要建 git 仓库、用临时目录的，验收里加一条「没有 git 全局身份、系统临时目录里有别人的同名前缀目录」时也通过的命令：CI 的机器和开发的机器不一样，worker 看不到 CI。
+> R1 签发自查（v046-b09 后，SPEC 14.26）：条目里允许「改某条断言看的对象」时，同时写明「不许删这条断言」，并在指令里请操作员把被守的那一处撤掉、看测试变不变红（两条残留检查被删，reviewer 判为合理）。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b07 已通过（SPEC 14.19~14.25）；v046-b08 是 `blocked`（代码已在 main 上，它新加的一条测试让 CI 变红，见 SPEC 14.25）；队列从 v046-b09 起，固定版本 `c475eaa`
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b11 已通过（SPEC 14.19~14.26）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；队列从 v046-b12 起，固定版本 `8e95868`
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -105,6 +106,10 @@
 | 73 | v046-b09 | 测试只依赖自己带的环境：git 身份、私有临时目录、不绑本仓库配置；沙箱可留 journal | v046-b06, v046-b07 | passed |
 | 74 | v046-b10 | prepareAcceptance 收尾：带回测试 agent 的回复、类别标错不再重拉（不接进队列） | v046-b09 | passed |
 | 75 | v046-b11 | R2 诊断信息：规则 9 重跑的 task 带 CI 链接；查裁定提交 CI 出异常时记事件 | v046-b09 | passed |
+| 76 | v046-b12 | 接线前的铺垫补齐：测试 agent 的事件与中止、类别标错清单；三处测试小修（不接进队列） | v046-b10 | pending |
+| 77 | v046-b13 | 活性指纹不占索引锁：R2 在 worker 工作期间不改写 .git/index | v046-b09 | pending |
+| 78 | v046-b14 | R2 凭提交号认自己的提交：规则 2 不再按提交说明的开头跳过 | v046-b11 | pending |
+| 79 | v046-b15 | 接线第一块：带情形的批次在写 task 信封之前先拉起测试 agent | v046-b12, v046-b14 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -3123,3 +3128,192 @@ v046-b08 被规则 9 降级之后重跑了两次，task 里只有一句 `ci_conc
 - 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局身份；新增依赖
+
+## v046-b12 接线前的铺垫补齐：测试 agent 的事件与中止、类别标错清单；三处测试小修（不接进队列）
+
+优先级：76　依赖：v046-b10
+
+把测试 agent 接进队列之前，`src/acceptance.ts` 与 `src/roles/tester.ts` 还缺几样接线要用的东西；另有三处测试的小修。这一批不改 `src/run.ts`。
+
+条目：
+1. 读 SPEC 16.14 的「铺垫补齐」一段。`src/roles/tester.ts` 的 `runTester` 加第五个可选参数 `opts`：`signal`、`onEvent`、`redact`，原样交给运行器（写法照 `src/roles/reviewer.ts` 的 `runReviewer`）。
+   `src/acceptance.ts` 的 `prepareAcceptance`：`opts` 加可选的 `signal`、`onTesterEvent(attempt, event)`、`redact`，交给 `runTester`；`signal` 已经中止时不再拉起下一次，按 `tester_failed` 结束。
+   `tester.started` 的字段是 `attempt`、`model`、`max_turns`；`tester.finished` 的字段是 `attempt`、`exit_code`，以及运行器给了的 `num_turns`、`cost_usd`、`duration_ms`、`usage`
+   （写法照 `src/run.ts` 里记 `reviewer.finished` 的那一段）；现在的 `exitCode` 改名为 `exit_code`。
+   **假测试 agent 的返回值带 `numTurns: 7`、`costUsd: 0.5`：`tester.finished` 里有 `exit_code: 0`、`num_turns: 7`、`cost_usd: 0.5`，没有 `exitCode` 这个键；每次拉起的事件都经 `onTesterEvent` 送出，第一个参数是第几次**
+2. 同一文件：类别标错的声明，数组里的每一项可以是字符串，也可以是 `{ id, why }`；失败的返回值加 `misclassified`（字符串数组：字符串原样，对象转成 `<id>：<why>`；没有声明时是空数组）。
+   **回复的 JSON 里是 `"misclassified": [{ "id": "S1", "why": "已有行为" }]`：返回值的 `misclassified` 是 `['S1：已有行为']`，不出现 `[object Object]`**
+3. 测试。新用例放进点名的组里：`test/prepare-acceptance.test.ts` 新加 `describe('prepareAcceptance: tester events, signal and misclassified list', …)`（条目 1、2 加粗的情形；`signal` 中止 → 不再重拉、`reason` 是 `tester_failed`；字符串写法照旧能用）；
+   `test/tester.test.ts` 新加 `describe('tester: run options are forwarded', …)`。另有三处小修：
+   甲、`test/redcheck.test.ts`：测试自己建的目录换一个不以 `collie-redcheck-` 开头的名字；每条用例结束、删除私有临时目录之前，断言里面没有 `collie-redcheck-*`。
+   新加一组 `describe('runRedCheck: leaves nothing behind', …)`，至少一条：真实跑一次之后私有临时目录里没有 `collie-redcheck-*`。`test/prepare-acceptance.test.ts` 里被 v046-b09 删掉的那条残留检查同样补回（只看私有目录）。
+   乙、`test/prepare-acceptance.test.ts` 的建仓库辅助函数：整个用例期间把 `GIT_CONFIG_GLOBAL` 换成自己写的文件、`GIT_CONFIG_NOSYSTEM` 设为 1，用完还原（照 `test/support/sandbox.ts` 的做法），不再读机器的全局 git 配置。
+   丙、这两个文件里真实起 vitest 子进程的用例：交给 `runRedCheck` 的 `timeoutMs` 改成 240 秒（现在 `test/redcheck.test.ts` 里是 60 秒，`test/prepare-acceptance.test.ts` 里是 30 秒），用例自己的超时设成 300 秒（慢机器上一个子进程要 60 到 120 秒）。注入假子进程的用例不动。
+   R1 查过现有用例：`record receives events in the right order for two attempts` 只断言事件名，改字段名不影响它；`misclassified in reply JSON → …` 用的是字符串写法，仍然应当通过。
+   已有断言一条都不改、不删（甲是补回断言，丙只改时限的数值）；你发现有别的现有用例与本批次冲突，停下，在「偏离或疑问」里写明是哪一条，不要自己改。
+   `test/invariants.test.ts` 加「`src/acceptance.ts` 里有 `onTesterEvent`」
+
+本批次只改 `src/acceptance.ts`、`src/roles/tester.ts`、`test/prepare-acceptance.test.ts`、`test/tester.test.ts`、`test/redcheck.test.ts`、`test/invariants.test.ts`。不应改动 `test/invariants.test.ts` 已有的任何断言。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 三个文件的测试通过 | `npm test -- test/prepare-acceptance.test.ts test/tester.test.ts test/redcheck.test.ts` | exit 0 |
+| 全局 git 配置开了提交签名、没有身份时，模块的测试通过 | `e=$(mktemp) && printf '[commit]\n\tgpgsign = true\n[user]\n\tsigningkey = 0000000000000000\n' > "$e" && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/prepare-acceptance.test.ts` | exit 0 |
+| 三组新用例在 | `grep -qF "prepareAcceptance: tester events, signal and misclassified list" test/prepare-acceptance.test.ts && grep -qF "tester: run options are forwarded" test/tester.test.ts && grep -qF "runRedCheck: leaves nothing behind" test/redcheck.test.ts` | exit 0 |
+| 事件字段改了名（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/acceptance.ts \| grep -qF "exit_code" && ! grep -vE "^\s*(//\|\*\|/\*)" src/acceptance.ts \| grep -qF "exitCode: result.exitCode"` | exit 0 |
+| 队列还没有用它（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "acceptance\.js"` | exit 0 |
+| 不变量同步 | `grep -qF "onTesterEvent" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `AGENT-tester.md`）；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/run.ts`、`src/redcheck.ts`、`src/ladder.ts`、`src/evidence.ts`、`src/runner/`、`src/schema/index.ts`、`test/support/sandbox.ts`；把这个模块接进队列
+- 为了让测试过而删除或跳过任何测试；改写或删去任何已有断言
+- 在测试里改机器的 git 全局配置
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v046-b13 活性指纹不占索引锁：R2 在 worker 工作期间不改写 .git/index
+
+优先级：77　依赖：v046-b09
+
+一条偶发的测试失败留下了 journal：沙箱里的假 worker 提交时报 `Unable to create '.git/index.lock': File exists`。worker 工作期间，R2 自己每 500 毫秒算一次活性指纹（`src/ladder.ts` 的 `computeFingerprint`：`git diff HEAD` 加 `git status`）。
+R1 的推断（读代码得出，没有实跑）：`git diff HEAD` 在碰到时间戳变了、内容没变的文件时会顺手刷新索引，那一下要拿索引锁，`GIT_OPTIONAL_LOCKS=0` 管不住它。改 R2，只动指纹这一处。
+
+条目：
+1. 读 SPEC 14.26 里「偶发失败查到了直接原因」一段与 16.14 的「活性指纹不占索引锁」。**先写测试，再改代码**：新文件 `test/fingerprint-lock.test.ts`，一组 `describe('fingerprint: never rewrites the git index', …)`，用 `Sandbox` 建仓库：
+   提交一个文件；把它的修改时间改到别的时刻、内容不变（让索引里的时间戳对不上）；记下 `.git/index` 的 inode 与修改时间；连调 5 次 `computeFingerprint`；断言 `.git/index` 的 inode 与修改时间都没变，过程中 `.git/index.lock` 没有出现过。
+   **这条测试在现有代码上应该失败。它要是通过了，说明 R1 的推断不成立：停下，不要改 `src/ladder.ts`，在「偏离或疑问」里写明你看到的（包括你另外查到的、谁会占这把锁）**
+2. `src/ladder.ts` 的 `computeFingerprint`：改成不创建 `.git/index.lock`、不改写 `.git/index` 的写法（比如给 `git diff` 关掉自动刷新索引，或者换成不刷新索引的底层命令；用哪种你定，在汇报里写明选了什么、为什么）。
+   指纹仍然对内容敏感：被跟踪的文件内容变了，指纹必须变；HEAD 变了，指纹必须变；未跟踪的文件多了或变了，指纹必须变。只有时间戳变、内容没变时，指纹变不变都可以，在汇报里写明实际是哪一种。
+3. 同一个测试文件再加三条，守条目 2 的三种「必须变」；`test/scenario-g.test.ts` 里已有的 `computeFingerprint: content-sensitive` 一组不许改，必须照常通过。
+   R1 查过：现有测试里直接调 `computeFingerprint` 的只有 `test/scenario-g.test.ts` 那一组；别的测试经由 `LivenessMonitor` 间接用到它，或者注入了假的指纹函数。
+   你发现有别的现有用例与本批次冲突，停下，在「偏离或疑问」里写明是哪一条，不要自己改。
+
+本批次只改 `src/ladder.ts` 与 `test/fingerprint-lock.test.ts`。不应改动 `test/invariants.test.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 指纹的两组测试通过 | `npm test -- test/fingerprint-lock.test.ts test/scenario-g.test.ts` | exit 0 |
+| 新的一组用例在，且用的是沙箱 | `grep -qF "fingerprint: never rewrites the git index" test/fingerprint-lock.test.ts && grep -qF "Sandbox" test/fingerprint-lock.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/git.ts`、`src/run.ts`、`src/evidence.ts`、`src/acceptance.ts`、`src/runner/`、`src/roles/`；改动活性检测的阈值、轮询间隔与判定（只改指纹怎么算）
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b14 R2 凭提交号认自己的提交：规则 2 不再按提交说明的开头跳过
+
+优先级：78　依赖：v046-b11
+
+R2 取证时数「受保护路径被改了多少行」，会跳过提交说明以 `docs: issue `、`progress: `、`report(collie): `、`ops: ` 开头的提交（`src/evidence.ts`）。
+R1 读代码的推断（没有实跑）：worker 的提交只要用了这四种开头之一，它对 SPEC、backlog、验收测试的改动就不计入，规则 2 不会命中。验收测试靠规则 2 保护，接线之前要堵上。改 R2。
+
+条目：
+1. 读 SPEC 16.14 的「R2 凭提交号认自己的提交」一段。**先写测试，再改代码**：新文件 `test/r2-commits.test.ts`，第一组 `describe('rule 2 counts every commit that R2 did not make', …)`，用 `Sandbox` 与 `FakeRunner` 跑真实的 `run`：
+   假 worker 的一个提交改了 `SPEC.md`，提交说明分别以四种开头之一起头（各一条）→ 结论是 BLOCK、规则 2；
+   假 worker 用 `docs: issue v99-b01 task envelope` 这个说明提交了 `test/acceptance/v99-b01/new.test.ts` → BLOCK、规则 2。
+   **这一组在现有代码上应该失败（结论不是规则 2）。它要是通过了，说明 R1 的推断不成立：停下，不要改 `src/`，在「偏离或疑问」里写明你看到的**
+2. `src/run.ts`、`src/evidence.ts`、`src/schema/index.ts`：事件类型加 `r2.commit`（`sha`、`subject`）。R2 自己的每一次提交都经同一个辅助函数做「提交并记一条 `r2.commit`」；
+   `src/run.ts` 里现在直接调 `commit(` 的 8 处都改用它，之后整个文件里直接调 `commit(root` 的只剩辅助函数里的一处。救援提交（`wip(collie):`）不经过它、不记这个事件。
+   取证：受保护路径的改动行数对 `base_sha..head_sha` 里的每个提交都数，只跳过 `r2Shas` 里的提交；`r2Shas` 由 `src/run.ts` 从本机全部 journal 里收集：
+   `r2.commit` 的 `sha`、`batch.task_written` 的 `commit`、`verdict.pushed` 与 `verdict.push_failed` 的 `sha`。提交说明以什么开头不再影响这个数。`commits_actual` 的列法不变。
+   **同一个批次先 FIX 再 PASS：范围里有 R2 自己的裁定提交（它改了 `docs/progress.md`，是受保护路径），第 2 次的 `spec_diff_lines` 仍是 0、结论 PASS**
+3. 同一个测试文件第二组 `describe('R2 own commits stay out of the count', …)`：条目 2 加粗的情形；规则 1 自动重跑、中断后自动重跑这两条路径各一条（重跑的那一次不被规则 2 拦）；
+   一次运行结束后，`git log` 里 R2 的提交个数等于 journal 里 `r2.commit` 的条数；两次运行之间把 `.collie/runs/` 删掉 → 第 2 次被规则 2 拦下（记下这是已知的保守行为）。
+   允许改写的旧用例只有一处：`test/schema.test.ts` 的 `defines the v0.1 event types plus v0.2 and v0.3 types added so far`，个数 41 改成 42，并加一条 `toContain`；在「偏离或疑问」里写明。
+   R1 查过：`test/evidence.test.ts` 没有用例手工造带这四种开头的提交再期望它被跳过；`test/invariants.test.ts` 的 `src/evidence.ts contains report(collie) in R2 commit prefixes (v03-b03-fix)` 仍然成立（开头的清单留着给 `commits_actual` 用）；
+   FIX 重跑、规则 1 重跑、中断重跑的现有场景测试用的都是真实的 journal，应当照常通过。你发现有别的现有用例因此失败，停下，在「偏离或疑问」里写明是哪一条，不要自己改。
+   `test/invariants.test.ts` 加「`src/run.ts` 的非注释行里直接调 `commit(root` 的恰好一处」与「`src/schema/index.ts` 里有 `r2.commit`」
+
+本批次只改 `src/run.ts`、`src/evidence.ts`、`src/schema/index.ts`、`test/r2-commits.test.ts`、`test/schema.test.ts`、`test/invariants.test.ts`。不应改动 `test/invariants.test.ts` 已有的任何数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 新测试与取证、事件类型的测试通过 | `npm test -- test/r2-commits.test.ts test/evidence.test.ts test/schema.test.ts` | exit 0 |
+| 两组用例在 | `grep -qF "rule 2 counts every commit that R2 did not make" test/r2-commits.test.ts && grep -qF "R2 own commits stay out of the count" test/r2-commits.test.ts` | exit 0 |
+| R2 的提交都走同一处（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -cE "\bcommit\(root" \| grep -qx 1` | exit 0 |
+| 新事件进了类型清单 | `grep -qF "r2.commit" src/schema/index.ts` | exit 0 |
+| 变异检查全部被发现，工作区里没有留下报告 | `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" \| tail -n 1 \| grep -qE "^mutation: caught 43 survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` | exit 0 |
+| 不变量同步 | `grep -qF "r2.commit" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`、`scripts/mutation.ts`
+- 改动 `src/arbiter.ts`、`src/gate.ts`、`src/acceptance.ts`、`src/ladder.ts`、`src/roles/`、`src/runner/`、`src/view.ts`、`src/follow.ts`；改动受保护路径的清单、任何一条规则的判定、`commits_actual` 的列法
+- 把救援提交记成 R2 的提交；让提交说明的开头继续影响受保护路径的计数
+- 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b15 接线第一块：带情形的批次在写 task 信封之前先拉起测试 agent
+
+优先级：79　依赖：v046-b12, v046-b14
+
+分工改造第 3 步的接线（SPEC 第 16 章）：带「情形」的批次，R2 在写 task 信封之前先调 `prepareAcceptance`，过了就把验收测试和信封一起提交，没过就上报停下。不带情形的批次什么都不变。改 R2。
+
+条目：
+1. 读 SPEC 16.14 的「接线第一块」六条（`prepareAcceptance` 的参数与返回值在 `src/acceptance.ts`，流程的来历在 16.12）。`src/run.ts`：照那六条做。几处写明：
+   配置检查在写 heartbeat 之前，报错走配置无效时的同一条路径（退出码 1）；`RunContext` 加可选的 `redCheck`（原样交给 `prepareAcceptance`，测试用）与 `testerSignal`（给了就用它代替内部的计时，做法照 `workerSignal`）；
+   测试 agent 的事件流用 `appendStream` 写进 `tester.stream.ndjson`；信封提交与上报的裁定提交都经 v046-b14 的那个辅助函数（记 `r2.commit`）；
+   上报时的说明文字写「上报：验收测试没有准备好 — <原因>」，不带「无 report」。
+   `src/heartbeat.ts` 的阶段加 `tester`；`src/schema/index.ts` 与 `templates/collie.toml` 加 `limits.redcheck_secs`（正整数，可选，缺省 600，写法照 `tester_max`；模板里写 `redcheck_secs = 600` 带一行注释）。本仓库的 `.collie/collie.toml` 不许动。
+   **带情形的批次、红检查一次就过：运行器被调用的先后是 tester、worker、reviewer；`docs: issue` 那一个提交里同时有 `task.md`、`new.test.ts`、`MAP.md`；journal 里 `tester.started`、`tester.finished`、`redcheck.result` 都在 `batch.task_written` 之前；这次运行的结论与不带情形时一样由 worker 与 reviewer 决定**
+   **不带情形的批次：运行器只被调用 worker、reviewer 两次，journal 里没有 `tester.` 与 `redcheck.` 开头的事件，没有 `tester.stream.ndjson`**
+2. 没过与越界的三种结局，都不拉起 worker 与 reviewer：
+   红检查两次都不过 → 退出码 20，`escalated` 的原因以 `red_check_failed` 开头，`.collie/batches/<批次>/tester.md` 在裁定提交里，`--continue` 下批次记 `blocked`、队列以 `blocked` 结束；
+   测试 agent 声明了类别标错 → 只拉起 1 次，原因以 `misclassified` 开头，`tester.md` 里有它的回复与声明的清单；
+   测试 agent 往主工作区写了文件 → 原因以 `tester_touched_main_tree` 开头并列出那个文件，`git log` 里没有任何提交含验收测试或那个文件，那个文件还留在工作区里。
+   另：`testerSignal` 中止 → 原因以 `tester_failed` 开头；配置里没有 `[agent.tester]` → 退出码 1，标准错误点名 `[agent.tester]`，没有新提交，批次状态不变；
+   **同一个批次先 FIX 再 PASS：测试 agent 只在第 1 次被拉起，整个队列里运行器被调用的先后是 tester、worker、reviewer、worker、reviewer**
+3. 新文件 `test/tester-step.test.ts`，用 `Sandbox`、`FakeRunner` 与注入的 `redCheck`（沙箱里的 backlog 自己写一个带情形的批次并提交；假测试 agent 在它拿到的工作目录里写文件），三组：
+   `describe('tester step: runs before the task envelope', …)`（条目 1 加粗的两种情形）；
+   `describe('tester step: failures stop the batch', …)`（条目 2 的五种结局各一条）；
+   `describe('tester step: skipped when the tests are already in the tree', …)`（条目 2 加粗的情形；HEAD 的树里事先就有 `new.test.ts` 时一次也不拉起）。
+   允许改写的旧用例只有下面四处，每处在「偏离或疑问」里列出原断言与现断言：
+   `test/config.test.ts` 的 `has the limits of SPEC 3.1`（期望对象加 `redcheck_secs: 600`）与内联配置 `VALID_TOML`（跟着模板加一行）；`test/schema.test.ts` 的夹具 `validConfig.limits`（加这个字段，类型要求）；
+   `test/invariants.test.ts` 的 `src/run.ts non-comment lines do not contain acceptance.js (v046-b08)`：改成断言 `src/run.ts` 引用了 `acceptance.js`，名字相应改掉。
+   R1 查过：`test/heartbeat.test.ts` 没有钉死阶段的清单；`test/cli.test.ts` 比较 `limits` 的那条两边都取自模板；现有测试的沙箱 backlog 都不带情形，所以现有的场景测试都走不到新的一步。
+   你发现有别的现有用例因此失败，停下，在「偏离或疑问」里写明是哪一条，不要自己改。
+   `test/invariants.test.ts` 另加「`src/run.ts` 里有 `tester.stream.ndjson`」
+
+本批次只改 `src/run.ts`、`src/heartbeat.ts`、`src/schema/index.ts`、`templates/collie.toml`、`test/tester-step.test.ts`、`test/config.test.ts`、`test/schema.test.ts`、`test/invariants.test.ts`。
+类型检查因为 heartbeat 多了一个阶段而要求改这之外的文件时，可以改，在「偏离或疑问」里逐个列出。不应改动 `test/invariants.test.ts` 已有的任何数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 没有 git 全局身份时全部测试通过 | `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test` | exit 0 |
+| 接线、配置、事件类型的测试通过 | `npm test -- test/tester-step.test.ts test/config.test.ts test/schema.test.ts test/heartbeat.test.ts` | exit 0 |
+| 三组用例在 | `grep -qF "tester step: runs before the task envelope" test/tester-step.test.ts && grep -qF "tester step: failures stop the batch" test/tester-step.test.ts && grep -qF "tester step: skipped when the tests are already in the tree" test/tester-step.test.ts` | exit 0 |
+| 队列用上了这个模块（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "acceptance\.js"` | exit 0 |
+| 模板里有新配置项，本仓库的配置没有被动 | `grep -qE "^redcheck_secs = 600" templates/collie.toml && ! grep -qE "redcheck_secs\|agent\.tester" .collie/collie.toml` | exit 0 |
+| 变异检查全部被发现，工作区里没有留下报告 | `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" \| tail -n 1 \| grep -qE "^mutation: caught 43 survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` | exit 0 |
+| 不变量同步 | `grep -qF "tester.stream.ndjson" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `.collie/collie.toml`、`AGENT-tester.md`、`AGENT-worker.md`）；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/acceptance.ts`、`src/redcheck.ts`、`src/roles/`、`src/runner/`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/backlog.ts`、`src/view.ts`、`src/follow.ts`；改动任何一条规则的判定、`fix_max` 的计数、队列自动重跑的条件
+- 改变不带情形的批次的任何行为；在仓库里建 `test/acceptance/` 目录；替测试 agent 还原或删除它写到主工作区里的文件
+- 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner、真实的 vitest 子进程或真实网络请求；用到机器的 git 全局配置；新增依赖

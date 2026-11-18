@@ -1383,6 +1383,7 @@ v0.4 是否记为收口、下一步做什么，提请所有者裁定；`docs/ops
 第十二次队列（2026-11-17）之后：裁定见 14.23；分工改造第 3 步接着做的两块见 16.11（v046-b04、b05）。
 第十三次队列（2026-11-17）之后：裁定见 14.24；接线之前定下来的做法与三块铺垫见 16.12（v046-b06、b07、b08）。
 第十四次队列（2026-11-18）之后：裁定见 14.25；修补见 16.13（v046-b09、b10、b11）。主分支的 CI 自 `777ce2a` 起是红的，v046-b09 修。
+第十五次队列（2026-11-18）之后：裁定见 14.26；接线第一块与它之前的三处见 16.14（v046-b12~b15）。主分支的 CI 自 `a29b87c` 起回到成功。
 
 ### 14.1 开跑前检查与 audit 并进队列（v045-b01，改 R2）
 
@@ -1999,6 +2000,46 @@ R1 定的：
 - `AGENT-worker.md` 加一段：规则 9 的 FIX 是 CI 那台机器上的失败，环境和本机不同；复现不了就写明，不要只重写汇报。`AGENT-tester.md` 的汇报 JSON 加 `misclassified`。
 - 「同一个 `head_sha` 再次被规则 9 降级时不再重跑、直接上报」是改队列的规则，提请所有者裁定（`docs/decisions/OPEN.md` 的 D10）。
 
+### 14.26 第十五次队列的裁定（2026-11-18）
+
+队列 q-20261118063544（`--max 3`，固定版本 `c475eaa`，1 小时，退出码 0）：v046-b09、b10、b11 都是第 1 次 PASS，放行 3 次，打扰 0 次。
+
+- **主分支的 CI 自 `a29b87c`（v046-b09 的代码提交）起回到成功。** R1 从 GitHub 公开页面核对：Run 375~384 全部成功，Run 374 及之前的 12 次失败。
+- **v046-b08**：v046-b09 的 `head_sha` 含它的全部代码，R2 在这棵树上取到了 lint、类型检查、全量测试与 CI 全过。按 14.25 的约定，它的代码算数，状态保持 `blocked`。
+- R1（读汇报、读代码、跑仓库里已有的检查）：lint 与类型检查通过；三批的专项验收在 HEAD 上逐条通过；受保护路径只有 backlog 的 3 个状态格；没有跳过的测试。
+  被删掉的断言有 5 条：3 条是条目点名允许的；另 2 条是 v046-b09 删的（两个测试文件末尾「没有残留目录」的检查），条目只许改它看的目录、不许删。
+  worker 没有写明，reviewer 列了出来却判为合理。操作员实测其中一条删了以后真的守不住了（见下）。
+- 操作员（动手的核对）：往本仓库配置里加两个新配置项，全量测试全过（上一轮会挂 1 条）；撤掉身份修复，没有 git 身份时那个文件 19 条全挂；4 份全量测试同时跑，不再互相干扰；
+  `prepareAcceptance` 真跑两组：类别标错的那一组只拉起 1 次就以 `misclassified` 停下，测试 agent 在 JSON 里自己声明了，还写明「断言没有写弱」；正常的一组 1 次过。
+  v046-b10、b11 的改动各撤掉一次，测试变红；规则 9 重跑的 task 里 `head_sha` 与 CI 链接两行都在。
+
+**偶发失败查到了直接原因。** 操作员带着留 journal 的开关加负载跑了 12 份全量测试，一条都没有失败。R1 在自己的机器上带着开关跑了 5 次：前两次全过；后三次都有失败，分两类。
+- 第 3 次：`test/why.test.ts` 的 2 条（同一个沙箱）。留下的 journal 里，第 2 次运行的假 worker 在提交时失败，原文是
+  `git commit … failed (exit 128): fatal: Unable to create '…/.git/index.lock': File exists. Another git process seems to be running in this repository`。
+  运行因此意外地以上报结束。这和前两轮三条失败的共同点（14.25）对得上；那三次没有留下 journal，不能肯定是同一个原因。
+- 谁占着锁，是 R1 读代码的推断，没有实跑：worker 工作期间 R2 自己并发执行的 git 命令只有活性检测的指纹，每 500 毫秒一次 `git diff HEAD` 与 `git status`。
+  R2 给所有 git 命令设了 `GIT_OPTIONAL_LOCKS=0`，这个变量管得住 `git status`；R1 记得它管不住 `git diff` 在碰到「时间戳变了、内容没变」的文件时顺手刷新索引，那一下要拿索引锁。请操作员核对。
+- 推断成立的话，这不只是测试的问题：真实运行里 R2 每半秒也在 worker 的仓库里跑这条命令，worker 的 `git add` / `git commit` 可能撞上。真实的 worker 看到报错会重试，所以没有表现为失败。撞过几次，请操作员从历史事件流里数。修：v046-b13。
+- 之后 R1 又带着开关跑了 2 次（没有 git 全局身份的环境）：两次各有 1 条同样的失败，journal 里都是 `index.lock`，分别在 `test/queue-limit.test.ts`（前两轮失败过的那一条）与 `test/reviewer-rerun.test.ts`。
+  三份 journal 的共同点：都是同一个沙箱里的第 2 次运行，假 worker 一上来就提交。
+- 另一类是时限：真实起 vitest 子进程的用例，给的时限是 30 或 60 秒，而 R1 的机器上一个子进程要 20 到 120 秒。5 次全量测试里这类失败出现了 4 条（`test/redcheck.test.ts` 2 条、`test/prepare-acceptance.test.ts` 2 条）。这是机器慢，把时限放宽（并进 v046-b12）。
+
+**R1 读代码查出一处，接线之前必须修。** R2 凭提交说明的开头认「自己的提交」：取证数受保护路径的改动时，跳过提交说明以 `docs: issue `、`progress: `、`report(collie): `、`ops: ` 开头的提交。
+worker 的提交只要用了这四种开头之一，它对 SPEC、backlog、验收测试的改动就不计入，规则 2 不会命中；没有测试覆盖这种情形。
+这是读 `src/evidence.ts` 得出的，没有实跑，请操作员核对。到现在没有 worker 这么做过的迹象，reviewer 读 diff 时也仍然看得到这些改动。
+验收测试靠规则 2 保护，所以要在第一个带情形的批次之前修：v046-b14。
+
+操作员读代码查出来的：
+- `test/redcheck.test.ts` 改用私有临时目录之后，不再检查 `runRedCheck` 有没有留下目录：把它的清理去掉，23 条照样全过。并进 v046-b12。
+- `test/prepare-acceptance.test.ts` 的建仓库辅助函数只设了身份，仍然会读到机器的全局 git 配置。R1 用已有的测试复现：全局配置开了提交签名时，这个文件就失败；用 `Sandbox` 的测试文件不受影响。并进 v046-b12。
+- `misclassified` 的写法三处不一致：手册规定每项是 `{ id, why }`，代码按字符串转，测试夹具用的是字符串。现在只判断非空，不影响行为。并进 v046-b12。
+- v046-b11 之后，查裁定提交的 CI 被限流时也会记一条 `ci.verdict_commit_error`；重跑的 task 在提交清单为空时仍写「这些提交已在审核范围内」。都不影响结论，不改。
+
+R1 定的：
+- 固定版本前移到 `8e95868`（v046-b11 的裁定提交，与 HEAD 的 `src/`、`test/` 相同，锁文件没变）。规则 9 重跑的 task 带 CI 链接、查裁定提交 CI 出异常时记事件，从第十六次队列起生效。
+- 追加 v046-b12~b15（16.14），第十六次队列的 `批次上限` 填 4。
+- 本仓库的 `.collie/collie.toml` 这一轮仍不加新配置项：v046-b15 还要再加一个，等接线进了固定版本一起加。
+
 ## 15. 守规则的测试要经得起删（变异检查，v045-b07）
 
 来源：所有者 2026-11-16 让 R1 对照开源项目 agent-autoloop 找可借鉴的做法。它有一份手写的「删掉一个判断」清单，每删一处测试必须变红，漏过一处就算失败。
@@ -2127,7 +2168,7 @@ v045-b07 的实现比 15.1 宽了几处（操作员读代码指出；第一条 R
 | --- | --- | --- |
 | 1 | 配置解耦（16.5）。已签发：v046-b01，见 16.9 | R1 把 reviewer 的 `max_turns` 从 60 改成 100 |
 | 2 | 受保护路径加上 `.github/`、`eslint.config.js`、`vitest.config.ts`，变异清单同步。等 `docs/decisions/OPEN.md` 的 D9；`test/acceptance/` 这一项挪到第 3 步的 v046-b04 | 原 D1 落地 |
-| 3 | 测试 agent（16.10~16.13）：角色模块、红检查、「情形」写法、静态检查、空行、配置与受保护路径都已通过（v046-b02~b07）；`prepareAcceptance` 的代码在主分支上但批次被 CI 拦下（v046-b08）；修补已签发（v046-b09~b11）；接进队列的批次在它们之后签 | 接进队列的批次通过之后，带「情形」的批次按新流程走 |
+| 3 | 测试 agent（16.10~16.14）：角色模块、红检查、「情形」写法、配置与受保护路径、`prepareAcceptance` 及其收尾都已通过（v046-b02~b11，b08 的代码随 b09 取证）；接线第一块与它之前的三处已签发（v046-b12~b15）；接线第二块（worker 的任务书、没通过时拿掉验收测试、花费的显示）在它们之后签 | 接线第二块通过、固定版本前移之后，带「情形」的批次按新流程走 |
 | 4 | worker 一侧：task 里写明验收测试的位置；「测试写错了」的上报路径 | R1 改 worker 手册 |
 | 5 | 需求审查：reviewer 的输入、输出与手册重写；不再重跑验收；仲裁用的实测数字一律取 R2 自己的 | R1 改铁律 2、4、6 与 `ROLES.md` |
 | 6 | 变异检查进每批必过的检查 | 原 D2 落地 |
@@ -2279,3 +2320,37 @@ reviewer 的手册写明信封提交里新增的 `test/acceptance/` 文件不是
 **R2 的两处诊断信息（v046-b11，改 R2）。**
 - 规则 9 降级之后重跑的 task：「降级原因」一节加上上一次运行的 `ci.resolved` 里的 `head_sha` 与 CI 运行的链接（有的话）。worker 看不到 CI 的日志，但至少知道是哪个提交、哪次运行。
 - 启动时查上一条裁定提交的 CI、取证之后复查，这两处出了异常现在是悄悄吞掉。改为记一条 `ci.verdict_commit_error`（`sha`、`when`、`error`），别的行为不变：异常仍然不影响这次运行。
+
+### 16.14 接线第一块与它之前的三处（v046-b12~b15）
+
+依据见 14.26。四批的先后：b12 → b13 → b14 → b15。
+
+**铺垫补齐（v046-b12，不改 R2）。** 接线要用、现在还缺的：
+- `runTester(runner, cfg, input, cwd, opts?)`：`opts` 可带 `signal`、`onEvent`、`redact`，原样交给运行器。
+- `prepareAcceptance` 的 `opts` 多三个可选项：`signal`（中止了就按测试 agent 失败结束，不再重拉）、`onTesterEvent(attempt, event)`（每次拉起的事件流）、`redact`。
+- 事件的字段向 reviewer 的两个事件看齐：`tester.started` 带 `attempt`、`model`、`max_turns`；`tester.finished` 带 `attempt`、`exit_code`，以及运行器给了的 `num_turns`、`cost_usd`、`duration_ms`、`usage`。现在的 `exitCode` 改名为 `exit_code`。
+- 类别标错的声明：数组里的每一项可以是字符串，也可以是 `{ id, why }`（手册的写法）。失败的返回值多一个 `misclassified`（字符串数组，对象转成 `<id>：<why>`；没有声明时是空数组）。
+- 测试三处：`runRedCheck` 的清理重新有断言守着；`test/prepare-acceptance.test.ts` 建仓库时换掉机器的全局 git 配置；真实起 vitest 子进程的用例把时限放宽。
+
+**活性指纹不占索引锁（v046-b13，改 R2）。** R2 在 worker 工作期间执行的 git 命令，不得创建 `.git/index.lock`，也不得改写 `.git/index`。指纹仍要对内容敏感：被跟踪的文件内容变了，指纹就变。
+
+**R2 凭提交号认自己的提交（v046-b14，改 R2）。**
+- R2 每次自己提交之后记一条 `r2.commit`（`sha`、`subject`）。救援提交（`wip(collie):`）不记：它装的是 worker 留下的改动，照旧算 worker 的产出。
+- 取证数受保护路径的改动行数时，对 `base_sha..head_sha` 里的每个提交都数，只跳过本机 journal 里记为 R2 提交的那些：
+  `r2.commit` 的 `sha`，以及为了认得旧 journal 而保留的 `batch.task_written` 的 `commit`、`verdict.pushed` 与 `verdict.push_failed` 的 `sha`。提交说明以什么开头不再起作用。
+- `commits_actual` 的列法不变（仍按开头过滤，它只用于展示与声称的比对）。
+- 代价：journal 不在本机时（换了一台机器接着跑同一个批次），R2 自己早先的裁定提交会被数进去，规则 2 会误拦。偏保守，接受。
+
+**接线第一块（v046-b15，改 R2）。** 带情形的批次在写 task 信封之前多一步；不带情形的批次，行为与现在逐个事件相同。
+1. 开跑前：配置里没有 `[agent.tester]` → 这次运行以配置错误结束（退出码 1，报错点名 `[agent.tester]` 与批次号），不写 heartbeat、不写信封、不改批次状态。
+2. HEAD 的树里已经有 `test/acceptance/<批次>/new.test.ts` → 跳过这一步（FIX 重跑就是这种情况）。
+3. 否则 heartbeat 的阶段记 `tester`，调 `prepareAcceptance`：`headSha` 是当时的 HEAD；重写上限取 `limits.tester_max`；红检查的静态命令取 `verify.static`（没有就不带）；
+   红检查每条命令的时限取新配置项 `limits.redcheck_secs`（可选，缺省 600）；事件记进 journal；测试 agent 的事件流写进这次运行目录下的 `tester.stream.ndjson`（脱敏与 reviewer 的相同）；
+   整步的时长上限是 `limits.wallclock_secs`，到时中止。
+4. 返回之后先看主工作区：`git status --porcelain` 必须为空。不为空 → 上报 `tester_touched_main_tree`（列出文件）；验收测试与那些文件都不进任何提交，R2 不替它还原，留给人看。
+5. 过了：把取走的文件写进主工作区，和 `task.md` 放在同一个 `docs: issue` 提交里，然后照常拉起 worker。
+6. 没过：把每次的回复、最后的原因、类别标错的声明写进 `.collie/batches/<批次>/tester.md`，走现有的上报路径：原因是 `red_check_failed`、`tester_failed`、`misclassified` 之一，
+   `tester.md` 随那个裁定提交一起提交，批次记 `blocked`，退出码 20，队列停下、不自动重跑。worker 与 reviewer 都不拉起。
+
+这一批不做、留给接线第二块的：worker 任务书里的情形、接口与「验收测试在哪、不许改」三节；批次没通过就结束时把 `test/acceptance/<批次>/` 从树里拿掉；`why` 与 `report` 显示测试 agent 的轮数与花费；
+reviewer 手册里「信封提交里的验收测试不是 worker 的改动」那一句。所以在第二块通过、固定版本前移之前，R1 仍不签带情形的批次，本仓库的配置也不加 `[agent.tester]`。
