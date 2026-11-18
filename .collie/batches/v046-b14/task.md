@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-run_id: r-20261118124914
+run_id: r-20261118133242
 batch_id: v046-b14
 base_sha: fc004bd856dd1b2e6341595aeda1b5baacb3d276
-created_at: 2026-11-18T12:49:15.058Z
-attempt: 1
+created_at: 2026-11-18T13:32:43.278Z
+attempt: 2
 interrupted_at: null
 issued_by: collie
 ---
@@ -62,3 +62,19 @@ issued_by: collie
 完成后写 `.collie/batches/v046-b14/report.md`：固定四段（做了什么 / 测试结果 / 偏离或疑问 / 下一步建议）
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v046-b14` 为提交信息单独提交并推送该文件。
+
+## 上一轮判 FIX
+
+### Gaps
+
+- test/exit-codes.test.ts:134 'records the v0.1 event sequence in order' fails: the new r2.commit events (task commit + verdict commit) change the event sequence from 12 to 14 entries. Worker must flag this in '偏离或疑问' per task instructions ('你发现有别的现有用例因此失败，停下'), then request R1 guidance on whether to update this test (since only test/schema.test.ts was explicitly allowed to be changed). npm test must pass for the batch to be accepted.
+
+### 未通过的验收命令
+
+- `npm test` → exit 1
+
+### 上一轮代码提交
+
+- `ee156545c47f1a095ecfd5b7f8f53efee7e786b8`
+
+这些提交已在审核范围内，只补缺口，不要重做。
