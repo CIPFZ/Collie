@@ -25,11 +25,16 @@ export interface AcceptanceFile {
   content: string;
 }
 
+/** Why prepareAcceptance failed (SPEC 16.13). */
+export type AcceptanceFailReason = 'red_check' | 'tester_failed' | 'misclassified';
+
 /** Successful result: red check passed. */
 export interface AcceptanceOk {
   ok: true;
   attempts: number;
   files: AcceptanceFile[];
+  /** Final reply text from each tester invocation, in order. Empty string when none. */
+  reports: string[];
 }
 
 /** Failed result: all attempts exhausted or tester crashed. */
@@ -37,6 +42,10 @@ export interface AcceptanceFail {
   ok: false;
   attempts: number;
   problems: string[];
+  /** Why it failed (SPEC 16.13). */
+  reason: AcceptanceFailReason;
+  /** Final reply text from each tester invocation, in order. Empty string when none. */
+  reports: string[];
 }
 
 export type AcceptanceResult = AcceptanceOk | AcceptanceFail;
@@ -70,6 +79,32 @@ export interface PrepareAcceptanceOpts {
 const WORKTREE_PREFIX = 'collie-accept-';
 
 /**
+ * Extracts the `misclassified` array from the last JSON fence block in `text`.
+ * Returns the array if it is non-empty, `undefined` otherwise.
+ * Any parse failure (no fence, bad JSON, missing/wrong field) returns `undefined`.
+ */
+function extractMisclassified(text: string): string[] | undefined {
+  // Find all ```json ... ``` fence blocks.
+  const fenceRe = /```json\s*\n([\s\S]*?)```/g;
+  let lastJsonBlock: string | undefined;
+  let m: RegExpExecArray | null;
+  while ((m = fenceRe.exec(text)) !== null) {
+    lastJsonBlock = m[1];
+  }
+  if (lastJsonBlock === undefined) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(lastJsonBlock);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+    const obj = parsed as Record<string, unknown>;
+    const arr = obj.misclassified;
+    if (!Array.isArray(arr) || arr.length === 0) return undefined;
+    return arr.map(String);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Runs the tester agent and red check loop in a temporary worktree.
  *
  * Returns the accepted files or the problems from the last attempt.
@@ -84,7 +119,21 @@ export async function prepareAcceptance(opts: PrepareAcceptanceOpts): Promise<Ac
   // mkdtempSync creates the directory; git worktree add needs it not to exist.
   rmSync(worktreeDir, { recursive: true, force: true });
 
-  await addWorktree(root, worktreeDir, headSha);
+  try {
+    await addWorktree(root, worktreeDir, headSha);
+  } catch (err: unknown) {
+    // SPEC 16.13: clean up directory AND git worktree registration on failure.
+    try {
+      await removeWorktree(root, worktreeDir);
+    } catch {
+      try {
+        rmSync(worktreeDir, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
+    }
+    throw err;
+  }
   try {
     // If the main repo has node_modules, symlink them into the worktree
     // (unless the worktree already has them, e.g. from a symlink in the repo).
@@ -99,6 +148,10 @@ export async function prepareAcceptance(opts: PrepareAcceptanceOpts): Promise<Ac
     let previousProblems: string[] = [];
     let lastProblems: string[] = [];
     let attempts = 0;
+    /** Tracks last failure reason for the return value (SPEC 16.13). */
+    let lastFailReason: AcceptanceFailReason = 'red_check';
+    /** Collects final reply text from each tester invocation (SPEC 16.13). */
+    const reports: string[] = [];
 
     for (let i = 0; i < testerMax; i++) {
       attempts++;
@@ -109,7 +162,7 @@ export async function prepareAcceptance(opts: PrepareAcceptanceOpts): Promise<Ac
         batch_id: batch.id,
         scenarios,
         interfaces: batch.interfaces ?? [],
-        spec_paths: ['SPEC.md'],
+        spec_paths: ['SPEC.md', 'CONSTRAINTS.md'],
         out_dir: outDir,
         ...(previousProblems.length > 0 ? { previous_problems: previousProblems } : {}),
       };
@@ -120,10 +173,16 @@ export async function prepareAcceptance(opts: PrepareAcceptanceOpts): Promise<Ac
 
       record?.('tester.finished', { attempt: attempts, exitCode: result.exitCode });
 
+      // Collect report (final reply text; empty string when absent).
+      reports.push(result.finalText ?? '');
+
       // Non-zero exit: this attempt failed, no red check.
       if (result.exitCode !== 0) {
-        lastProblems = [`tester exited with code ${String(result.exitCode)}`];
-        // Non-zero exit: skip red check, go to next iteration (or finish).
+        const exitMsg = `tester exited with code ${String(result.exitCode)}`;
+        lastProblems = [exitMsg];
+        lastFailReason = 'tester_failed';
+        // SPEC 16.13: next attempt's previous_problems includes the exit code.
+        previousProblems = [...previousProblems, exitMsg];
         continue;
       }
 
@@ -144,17 +203,34 @@ export async function prepareAcceptance(opts: PrepareAcceptanceOpts): Promise<Ac
         if (!collectResult.ok) {
           lastProblems = collectResult.problems;
           previousProblems = collectResult.problems;
+          lastFailReason = 'red_check';
           continue;
         }
-        return { ok: true, attempts, files: collectResult.files };
+        return { ok: true, attempts, files: collectResult.files, reports };
       }
 
-      // Red check didn't pass — format problems for next iteration.
+      // Red check didn't pass — check for misclassified declaration (SPEC 16.13).
+      const replyText = result.finalText ?? '';
+      const misclassified = extractMisclassified(replyText);
+      if (misclassified !== undefined) {
+        // Tester declared misclassified items — stop early, don't retry.
+        lastProblems = redResult.problems.map((p) => `[${p.file}] ${p.testName}: ${p.reason}`);
+        return {
+          ok: false,
+          attempts,
+          problems: lastProblems,
+          reason: 'misclassified',
+          reports,
+        };
+      }
+
+      // Format problems for next iteration.
       lastProblems = redResult.problems.map((p) => `[${p.file}] ${p.testName}: ${p.reason}`);
       previousProblems = lastProblems;
+      lastFailReason = 'red_check';
     }
 
-    return { ok: false, attempts, problems: lastProblems };
+    return { ok: false, attempts, problems: lastProblems, reason: lastFailReason, reports };
   } finally {
     // Always remove the worktree, even on error.
     try {

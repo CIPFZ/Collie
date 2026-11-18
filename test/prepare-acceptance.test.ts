@@ -21,7 +21,12 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { prepareAcceptance, type RecordFn, type RedCheckFn } from '../src/acceptance.js';
+import {
+  prepareAcceptance,
+  type RecordFn,
+  type RedCheckFn,
+  type AcceptanceFailReason,
+} from '../src/acceptance.js';
 import { git, revParse } from '../src/git.js';
 import type { RunRedCheckOpts, RunRedCheckResult } from '../src/redcheck.js';
 import { FakeRunner } from '../src/runner/fake.js';
@@ -658,5 +663,373 @@ describe('new feature', () => {
       expect(result.files.some((f) => f.path.endsWith('new.test.ts'))).toBe(true);
       expect(result.files.some((f) => f.path.endsWith('MAP.md'))).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Group 4: reports, reasons, and early stop (SPEC 16.13, v046-b10)
+// ---------------------------------------------------------------------------
+
+describe('prepareAcceptance: reports and early stop', () => {
+  it('misclassified in reply JSON → tester called once, reason=misclassified, reports has 1 entry', async () => {
+    // testerMax=2, first red check fails, reply has misclassified → no second attempt.
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const outDir = `test/acceptance/${batch.id}`;
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(failRedCheck());
+    const replyWithMisclassified = [
+      'Some text here.',
+      '```json',
+      '{ "misclassified": ["S1 was labelled new but is keep"] }',
+      '```',
+    ].join('\n');
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'test("a", () => {});');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0, finalText: replyWithMisclassified },
+      },
+    ]);
+
+    const result = await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 2,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts).toBe(1);
+    if (!result.ok) {
+      expect(result.reason).toBe('misclassified' satisfies AcceptanceFailReason);
+      expect(result.reports).toHaveLength(1);
+      expect(result.reports[0]).toBe(replyWithMisclassified);
+      expect(result.problems.length).toBeGreaterThan(0);
+    }
+    // Tester was only called once despite testerMax=2.
+    expect(runner.calls).toHaveLength(1);
+  });
+
+  it('red check fails, reply has no JSON block → retries normally', async () => {
+    // Same scenario but reply has no JSON fence → second attempt runs.
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const outDir = `test/acceptance/${batch.id}`;
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(failRedCheck());
+    const replyNoJson = 'I wrote the tests but they did not pass red check.';
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'test("a", () => {});');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0, finalText: replyNoJson },
+      },
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'test("a", () => {});');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0, finalText: replyNoJson },
+      },
+    ]);
+
+    const result = await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 2,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts).toBe(2);
+    // Both attempts ran.
+    expect(runner.calls).toHaveLength(2);
+  });
+
+  it('reports present on success, length equals attempts', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const outDir = `test/acceptance/${batch.id}`;
+    let callCount = 0;
+    const fakeRedCheck: RedCheckFn = () => {
+      callCount++;
+      return Promise.resolve(callCount === 1 ? failRedCheck() : okRedCheck());
+    };
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'content');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0, finalText: 'reply one' },
+      },
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'content');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0, finalText: 'reply two' },
+      },
+    ]);
+
+    const result = await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 2,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.reports).toHaveLength(2);
+      expect(result.reports[0]).toBe('reply one');
+      expect(result.reports[1]).toBe('reply two');
+    }
+  });
+
+  it('reason=red_check when both red checks fail', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const outDir = `test/acceptance/${batch.id}`;
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(failRedCheck());
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'test("a", () => {});');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0 },
+      },
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'test("a", () => {});');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0 },
+      },
+    ]);
+
+    const result = await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 2,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('red_check' satisfies AcceptanceFailReason);
+    }
+  });
+
+  it('reason=tester_failed when tester exits non-zero', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(okRedCheck());
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        result: { exitCode: 42 },
+      },
+    ]);
+
+    const result = await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 1,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('tester_failed' satisfies AcceptanceFailReason);
+      expect(result.reports).toHaveLength(1);
+      expect(result.reports[0]).toBe('');
+    }
+  });
+
+  it('misclassified as empty array → retries normally', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const outDir = `test/acceptance/${batch.id}`;
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(failRedCheck());
+    const replyEmptyMisclassified = ['```json', '{ "misclassified": [] }', '```'].join('\n');
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'test("a", () => {});');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0, finalText: replyEmptyMisclassified },
+      },
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'test("a", () => {});');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0, finalText: replyEmptyMisclassified },
+      },
+    ]);
+
+    const result = await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 2,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts).toBe(2);
+    expect(runner.calls).toHaveLength(2);
+  });
+
+  it('non-zero exit → next prompt has the exit code', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const outDir = `test/acceptance/${batch.id}`;
+    let callCount = 0;
+    const fakeRedCheck: RedCheckFn = () => {
+      callCount++;
+      return Promise.resolve(callCount === 1 ? failRedCheck() : okRedCheck());
+    };
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        result: { exitCode: 7 },
+      },
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'content');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0, finalText: 'ok second time' },
+      },
+    ]);
+
+    await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 2,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+    });
+
+    // The second call's prompt should mention exit code 7.
+    expect(runner.calls).toHaveLength(2);
+    const secondPrompt = runner.calls[1]?.prompt ?? '';
+    expect(secondPrompt).toContain('7');
+    expect(secondPrompt).toContain('exited');
+  });
+
+  it('tester prompt includes both SPEC.md and CONSTRAINTS.md', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const outDir = `test/acceptance/${batch.id}`;
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(okRedCheck());
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'content');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: { exitCode: 0 },
+      },
+    ]);
+
+    await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 1,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+    });
+
+    expect(runner.calls).toHaveLength(1);
+    const prompt = runner.calls[0]?.prompt ?? '';
+    expect(prompt).toContain('SPEC.md');
+    expect(prompt).toContain('CONSTRAINTS.md');
+  });
+
+  it('addWorktree fails (bad headSha) → error thrown, worktree list has 1 line, no collie-accept-* leftover', async () => {
+    const { root } = await createTestRepo();
+    const batch = testBatch();
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(okRedCheck());
+    const runner = new FakeRunner([]);
+
+    await expect(
+      prepareAcceptance({
+        root,
+        headSha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        batch,
+        config,
+        runner,
+        testerMax: 1,
+        redCheckOpts: dummyRedCheckOpts(),
+        redCheck: fakeRedCheck,
+      }),
+    ).rejects.toThrow();
+
+    // git worktree list should have only 1 line.
+    const worktreeOut = await git(root, ['worktree', 'list']);
+    expect(worktreeOut.trim().split('\n')).toHaveLength(1);
+
+    // No collie-accept-* leftover in private tmpdir.
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-accept-'));
+    expect(leftover).toHaveLength(0);
   });
 });
