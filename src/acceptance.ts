@@ -46,6 +46,8 @@ export interface AcceptanceFail {
   reason: AcceptanceFailReason;
   /** Final reply text from each tester invocation, in order. Empty string when none. */
   reports: string[];
+  /** Category misclassifications declared by the tester (SPEC 16.14). String items verbatim; {id,why} items as `<id>：<why>`. Empty when none declared. */
+  misclassified: string[];
 }
 
 export type AcceptanceResult = AcceptanceOk | AcceptanceFail;
@@ -70,6 +72,12 @@ export interface PrepareAcceptanceOpts {
   redCheckOpts: RunRedCheckOpts;
   record?: RecordFn;
   redCheck?: RedCheckFn;
+  /** AbortSignal: when aborted, the next tester invocation is skipped and the loop ends with tester_failed (SPEC 16.14). */
+  signal?: AbortSignal;
+  /** Called for each tester event from every invocation (SPEC 16.14). First arg is the attempt number (1-based). */
+  onTesterEvent?: (attempt: number, event: unknown) => void;
+  /** Secret values to redact from tester event streams (SPEC 16.14). */
+  redact?: readonly string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +89,7 @@ const WORKTREE_PREFIX = 'collie-accept-';
 /**
  * Extracts the `misclassified` array from the last JSON fence block in `text`.
  * Returns the array if it is non-empty, `undefined` otherwise.
+ * Each item may be a string (kept verbatim) or `{ id, why }` (formatted as `<id>：<why>`).
  * Any parse failure (no fence, bad JSON, missing/wrong field) returns `undefined`.
  */
 function extractMisclassified(text: string): string[] | undefined {
@@ -98,7 +107,16 @@ function extractMisclassified(text: string): string[] | undefined {
     const obj = parsed as Record<string, unknown>;
     const arr = obj.misclassified;
     if (!Array.isArray(arr) || arr.length === 0) return undefined;
-    return arr.map(String);
+    return arr.map((item: unknown) => {
+      if (typeof item === 'string') return item;
+      if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+        const o = item as Record<string, unknown>;
+        if (typeof o.id === 'string' && typeof o.why === 'string') {
+          return `${o.id}：${o.why}`;
+        }
+      }
+      return String(item);
+    });
   } catch {
     return undefined;
   }
@@ -152,8 +170,19 @@ export async function prepareAcceptance(opts: PrepareAcceptanceOpts): Promise<Ac
     let lastFailReason: AcceptanceFailReason = 'red_check';
     /** Collects final reply text from each tester invocation (SPEC 16.13). */
     const reports: string[] = [];
+    /** Last extracted misclassified list (SPEC 16.14). */
+    const lastMisclassified: string[] = [];
+
+    const testerCfg = config.agent.tester;
 
     for (let i = 0; i < testerMax; i++) {
+      // SPEC 16.14: if signal is already aborted, stop — do not start the next attempt.
+      if (opts.signal?.aborted === true) {
+        lastFailReason = 'tester_failed';
+        lastProblems = ['signal aborted before attempt'];
+        break;
+      }
+
       attempts++;
 
       // Build tester input. The batch must have scenarios (caller ensured).
@@ -167,11 +196,48 @@ export async function prepareAcceptance(opts: PrepareAcceptanceOpts): Promise<Ac
         ...(previousProblems.length > 0 ? { previous_problems: previousProblems } : {}),
       };
 
-      record?.('tester.started', { attempt: attempts });
+      record?.('tester.started', {
+        attempt: attempts,
+        ...(testerCfg !== undefined ? { model: testerCfg.model } : {}),
+        ...(testerCfg !== undefined ? { max_turns: testerCfg.max_turns } : {}),
+      });
 
-      const result = await runTester(runner, config, testerInput, worktreeDir);
+      // SPEC 16.14: forward signal, onTesterEvent wrapper, and redact to runTester.
+      const currentAttempt = attempts;
+      const testerOnEvent = opts.onTesterEvent;
+      const result = await runTester(runner, config, testerInput, worktreeDir, {
+        ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+        ...(testerOnEvent !== undefined
+          ? {
+              onEvent: (event: unknown) => {
+                testerOnEvent(currentAttempt, event);
+              },
+            }
+          : {}),
+        ...(opts.redact !== undefined && opts.redact.length > 0 ? { redact: opts.redact } : {}),
+      });
 
-      record?.('tester.finished', { attempt: attempts, exitCode: result.exitCode });
+      record?.('tester.finished', {
+        attempt: attempts,
+        exit_code: result.exitCode,
+        ...(result.numTurns !== undefined ? { num_turns: result.numTurns } : {}),
+        ...(result.costUsd !== undefined ? { cost_usd: result.costUsd } : {}),
+        ...(result.durationMs !== undefined ? { duration_ms: result.durationMs } : {}),
+        ...(result.usage !== undefined
+          ? {
+              usage: {
+                input_tokens: result.usage.inputTokens,
+                output_tokens: result.usage.outputTokens,
+                ...(result.usage.cacheCreationInputTokens !== undefined
+                  ? { cache_creation_input_tokens: result.usage.cacheCreationInputTokens }
+                  : {}),
+                ...(result.usage.cacheReadInputTokens !== undefined
+                  ? { cache_read_input_tokens: result.usage.cacheReadInputTokens }
+                  : {}),
+              },
+            }
+          : {}),
+      });
 
       // Collect report (final reply text; empty string when absent).
       reports.push(result.finalText ?? '');
@@ -221,6 +287,7 @@ export async function prepareAcceptance(opts: PrepareAcceptanceOpts): Promise<Ac
           problems: lastProblems,
           reason: 'misclassified',
           reports,
+          misclassified,
         };
       }
 
@@ -230,7 +297,14 @@ export async function prepareAcceptance(opts: PrepareAcceptanceOpts): Promise<Ac
       lastFailReason = 'red_check';
     }
 
-    return { ok: false, attempts, problems: lastProblems, reason: lastFailReason, reports };
+    return {
+      ok: false,
+      attempts,
+      problems: lastProblems,
+      reason: lastFailReason,
+      reports,
+      misclassified: lastMisclassified,
+    };
   } finally {
     // Always remove the worktree, even on error.
     try {

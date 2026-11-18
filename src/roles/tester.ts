@@ -163,6 +163,11 @@ export async function runTester(
   cfg: CollieConfig,
   input: TesterInput,
   cwd: string,
+  opts: {
+    signal?: AbortSignal;
+    onEvent?: (event: unknown) => void;
+    redact?: readonly string[];
+  } = {},
 ): Promise<RunResult> {
   const testerCfg = cfg.agent.tester;
   if (testerCfg === undefined) {
@@ -179,5 +184,8 @@ export async function runTester(
     allowedTools: [...testerCfg.allowed_tools],
     cwd,
     maxTurns: testerCfg.max_turns,
+    ...(opts.signal === undefined ? {} : { signal: opts.signal }),
+    ...(opts.onEvent === undefined ? {} : { onEvent: opts.onEvent }),
+    ...(opts.redact !== undefined && opts.redact.length > 0 ? { redact: [...opts.redact] } : {}),
   });
 }
