@@ -41,6 +41,8 @@ ci_wait_secs = 1800     # SPEC 3.1；R2 取证前等待 head_sha 的 CI 出结�
 ci_poll_secs = 30       # 等待期间查询 CI 的间隔（v01-b05 2c 裁定）
 # SPEC 16.12；红检查循环每批次最多跑几次（正整数，可选，缺省 2）
 tester_max = 2
+# SPEC 16.14；红检查每条命令的时限（秒，正整数，可选，缺省 600）
+redcheck_secs = 600
 
 [verify]
 # SPEC 3.1；reviewer 必跑的全局命令，批次级命令在 task 中追加

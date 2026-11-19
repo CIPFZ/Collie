@@ -53,6 +53,7 @@ const validConfig: CollieConfig = {
     grace_secs: 20,
     min_free_mb: 1024,
     tester_max: 2,
+    redcheck_secs: 600,
   },
   verify: { commands: ['npm run lint', 'npm run typecheck', 'npm test'] },
   ci: { provider: 'github-actions', expected_branch: 'main' },

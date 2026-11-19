@@ -45,6 +45,7 @@ dry_k = 2
 ci_wait_secs = 1800
 ci_poll_secs = 30
 tester_max = 2
+redcheck_secs = 600
 
 [verify]
 commands = ["npm run lint", "npm run typecheck", "npm test"]
@@ -127,6 +128,7 @@ describe('config: template config (SPEC 3.1 values)', () => {
       grace_secs: 20,
       min_free_mb: 1024,
       tester_max: 2,
+      redcheck_secs: 600,
     });
   });
 

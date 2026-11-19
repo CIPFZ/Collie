@@ -9,7 +9,7 @@ import { z } from 'zod';
 export const HEARTBEAT_RELATIVE_PATH = join('.collie', 'heartbeat.json');
 
 /** SPEC 11.3: phase of the current run, updated as the pipeline progresses. */
-export const HeartbeatPhaseSchema = z.enum(['worker', 'reviewer', 'ci', 'arbiter']);
+export const HeartbeatPhaseSchema = z.enum(['tester', 'worker', 'reviewer', 'ci', 'arbiter']);
 export type HeartbeatPhase = z.infer<typeof HeartbeatPhaseSchema>;
 
 export const HeartbeatSchema = z.strictObject({

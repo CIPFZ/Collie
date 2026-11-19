@@ -178,9 +178,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     const pushLines = lines
       .map((line, i) => ({ line, i }))
       .filter(({ line }) => line.includes('await push('));
-    // SPEC 12.1: expect exactly 5 push calls after v04-b16 (3 from v03-b01-fix + 1 for fix_max + 1 for unresolvable sha FIX).
+    // SPEC 12.1: expect exactly 6 push calls after v046-b15 (3 from v03-b01-fix + 1 for fix_max + 1 for unresolvable sha FIX + 1 for tester escalation).
     expect(pushLines.length).toBeGreaterThanOrEqual(1);
-    expect(pushLines.length).toBeLessThanOrEqual(5);
+    expect(pushLines.length).toBeLessThanOrEqual(6);
     for (const { line, i } of pushLines) {
       const start = Math.max(0, i - 5);
       const context = lines.slice(start, i).join('\n');
@@ -647,7 +647,7 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(content).not.toContain('lastMisclassified');
   });
 
-  it('src/run.ts non-comment lines do not contain acceptance.js (v046-b08)', () => {
+  it('src/run.ts non-comment lines reference acceptance.js (v046-b15)', () => {
     const lines = readFileSync(join(ROOT, 'src/run.ts'), 'utf8').split('\n');
     const codeLines = lines.filter(
       (l) =>
@@ -658,8 +658,8 @@ describe('structural invariants (SPEC 3.2)', () => {
     const hasAcceptance = codeLines.some((l) => l.includes('acceptance.js'));
     expect(
       hasAcceptance,
-      'acceptance.js should not appear in non-comment code lines of src/run.ts (v046-b08)',
-    ).toBe(false);
+      'acceptance.js should appear in non-comment code lines of src/run.ts (v046-b15)',
+    ).toBe(true);
   });
 
   it('src/run.ts non-comment lines have exactly one direct commit(root call (v046-b14)', () => {
@@ -679,5 +679,10 @@ describe('structural invariants (SPEC 3.2)', () => {
   it('src/schema/index.ts has r2.commit event type (v046-b14)', () => {
     const content = readFileSync(join(ROOT, 'src/schema/index.ts'), 'utf8');
     expect(content).toContain('r2.commit');
+  });
+
+  it('src/run.ts has tester.stream.ndjson (v046-b15)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    expect(content).toContain('tester.stream.ndjson');
   });
 });

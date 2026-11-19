@@ -14,7 +14,7 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { arbitrate, type ArbiterDecision } from './arbiter.js';
 import { BACKLOG_RELATIVE_PATH, loadBacklog, setBatchStatus } from './backlog.js';
 import { queryCi, type Clock, type FetchLike } from './ci.js';
@@ -49,6 +49,7 @@ import { readVerdict, runReviewer, verdictPath } from './roles/reviewer.js';
 import { buildTask, readReport, runWorker, taskPath, writeTask } from './roles/worker.js';
 import { CLAUDE_SDK_PACKAGE } from './runner/claude.js';
 import type { AgentRunner, RunHandle } from './runner/index.js';
+import { prepareAcceptance, type RedCheckFn } from './acceptance.js';
 import type {
   Acceptance,
   Batch,
@@ -83,6 +84,9 @@ export const STREAM_FILE_NAME = 'stream.ndjson';
 
 /** Raw event stream from the reviewer (SPEC 12.1), same format and redaction as worker. */
 export const REVIEWER_STREAM_FILE_NAME = 'reviewer.stream.ndjson';
+
+/** Raw event stream from the tester (SPEC 16.14), same format and redaction as worker. */
+export const TESTER_STREAM_FILE_NAME = 'tester.stream.ndjson';
 
 /**
  * Dependencies approved by SPEC 2.2 and ADR-002, plus the platform SDK of the
@@ -119,6 +123,10 @@ export interface RunContext {
   err?: (text: string) => void;
   /** Override for tests; when set, disables the internal wallclock timer. */
   workerSignal?: AbortSignal;
+  /** Override for tests; when set, used as the tester step's abort signal (SPEC 16.14). */
+  testerSignal?: AbortSignal;
+  /** Override for tests; injectable red-check function passed to prepareAcceptance (SPEC 16.14). */
+  redCheck?: RedCheckFn;
   /** Time source for the CI wait; tests pass a fake one. */
   clock?: Clock;
   /** Injected delay for the signal ladder grace periods (SPEC 11.6: tests must not wait >2s). */
@@ -1129,6 +1137,17 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
   const journal = createJournal(root);
   const rec = new Recorder(journal, runId, batchId, ctx.now);
 
+  // SPEC 16.14 step 1: batches with scenarios require [agent.tester].
+  // Check before heartbeat — on failure, exit code 1 without writing heartbeat,
+  // envelope, or changing batch status.
+  const hasScenarios = (batch.scenarios ?? []).length > 0;
+  if (hasScenarios && config.agent.tester === undefined) {
+    ctx.err?.(
+      `[agent.tester] is required to run batch ${batchId} (has scenarios) but is missing from config\n`,
+    );
+    return { final: 'BLOCK', exitCode: EXIT_CODES.ERROR };
+  }
+
   // SPEC 12.1 (v03-b01-fix): catch-up push for a failed verdict commit.
   // Must run BEFORE orphan detection (11.3) and rescue (11.4) so that a rescue
   // commit is never accidentally pushed to remote.
@@ -1432,6 +1451,202 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       }
     }
 
+    // v02-e-drill: build the redact set from token_file content and CI env vars.
+    // The runner masks these in the event stream but never reads config or env itself.
+    // Shared by both the tester step and the worker step.
+    const redact: string[] = [];
+    const ciTokenValue = readCiToken(config, root);
+    if (ciTokenValue !== undefined) redact.push(ciTokenValue);
+    for (const key of ['GITHUB_TOKEN', 'GH_TOKEN'] as const) {
+      const val = process.env[key];
+      if (val !== undefined && val !== '') redact.push(val);
+    }
+
+    // SPEC 16.14: tester step — batches with scenarios run the tester agent before
+    // writing the task envelope. Not-with-scenarios batches skip entirely.
+    const acceptanceTestPath = `test/acceptance/${batchId}/new.test.ts`;
+    let testerFiles: { path: string; content: string }[] = [];
+    if (hasScenarios) {
+      // SPEC 16.14 step 2: skip if HEAD already has the acceptance test (FIX rerun).
+      let headHasAcceptanceTest = false;
+      try {
+        await git(root, ['cat-file', '-e', `HEAD:${acceptanceTestPath}`]);
+        headHasAcceptanceTest = true;
+      } catch {
+        // Not in tree — normal, run the tester step.
+      }
+
+      if (!headHasAcceptanceTest) {
+        // SPEC 16.14 step 3: heartbeat phase = tester.
+        updateHeartbeat(root, { phase: 'tester', updated_at: ctx.now().toISOString() });
+
+        // Build the tester abort signal: use ctx.testerSignal if injected, else
+        // create a wallclock-based timer from limits.wallclock_secs.
+        const testerAbort =
+          ctx.testerSignal ?? AbortSignal.timeout(config.limits.wallclock_secs * MS_PER_SECOND);
+
+        const redCheckSecsValue = config.limits.redcheck_secs;
+        const headShaForTester = await revParse(root, 'HEAD');
+
+        const testerResult = await prepareAcceptance({
+          root,
+          headSha: headShaForTester,
+          batch,
+          config,
+          runner: ctx.runner,
+          testerMax: config.limits.tester_max,
+          redCheckOpts: {
+            timeoutMs: redCheckSecsValue * MS_PER_SECOND,
+            spawn: execFile,
+            ...(config.verify.static !== undefined ? { staticCommands: config.verify.static } : {}),
+          },
+          record: (event, fields) => {
+            rec.record(event as EventType, fields as Record<string, Event[string]>);
+          },
+          ...(ctx.redCheck !== undefined ? { redCheck: ctx.redCheck } : {}),
+          signal: testerAbort,
+          onTesterEvent: (_attempt, event) => {
+            appendStream(root, runId, event, TESTER_STREAM_FILE_NAME);
+          },
+          ...(redact.length > 0 ? { redact } : {}),
+        });
+
+        // SPEC 16.14 step 4: check main workspace — git status --porcelain must be empty.
+        const mainStatus = await status(root);
+        if (!mainStatus.clean) {
+          const touchedFiles = mainStatus.entries.map((e) => e.path);
+          const testerTouchReason = `tester_touched_main_tree: ${touchedFiles.join(', ')}`;
+          // Do NOT clean up the files — leave them for human inspection.
+          // No commits are made for the tester's files.
+          return await escalate(testerTouchReason, baseSha);
+        }
+
+        if (testerResult.ok) {
+          // SPEC 16.14 step 5: collect the files to include in the task envelope commit.
+          testerFiles = testerResult.files.map((f) => ({ path: f.path, content: f.content }));
+        } else {
+          // SPEC 16.14 step 6: failure — write tester.md and escalate.
+          const testerMdLines: string[] = ['# Tester report', ''];
+          for (let i = 0; i < testerResult.reports.length; i++) {
+            testerMdLines.push(`## Attempt ${String(i + 1)}`, '');
+            testerMdLines.push(testerResult.reports[i] ?? '(no reply)');
+            testerMdLines.push('');
+          }
+          testerMdLines.push('## Reason', '');
+          testerMdLines.push(testerResult.reason);
+          testerMdLines.push('');
+          if (testerResult.reason === 'misclassified' && testerResult.misclassified.length > 0) {
+            testerMdLines.push('## Misclassified', '');
+            for (const item of testerResult.misclassified) {
+              testerMdLines.push(`- ${item}`);
+            }
+            testerMdLines.push('');
+          }
+          if (testerResult.problems.length > 0) {
+            testerMdLines.push('## Problems', '');
+            for (const p of testerResult.problems) {
+              testerMdLines.push(`- ${p}`);
+            }
+            testerMdLines.push('');
+          }
+
+          const testerMdPath = join(root, '.collie', 'batches', batchId, 'tester.md');
+          mkdirSync(dirname(testerMdPath), { recursive: true });
+          writeFileSync(testerMdPath, testerMdLines.join('\n'));
+
+          // The escalation reason depends on the failure type.
+          let escalateReason: string;
+          if (testerResult.reason === 'red_check') {
+            escalateReason = `red_check_failed: ${testerResult.problems.join('; ')}`;
+          } else if (testerResult.reason === 'misclassified') {
+            escalateReason = `misclassified: ${testerResult.misclassified.join('; ')}`;
+          } else {
+            escalateReason = `tester_failed: ${testerResult.problems.join('; ')}`;
+          }
+
+          // Include tester.md in the verdict/escalation commit.
+          const testerMdRel = join('.collie', 'batches', batchId, 'tester.md');
+          // We need a custom escalation path that includes tester.md in the commit.
+          rec.record('escalated', { reason: `上报：验收测试没有准备好 — ${escalateReason}` });
+          const escalationReason = `上报：验收测试没有准备好 — ${escalateReason}`;
+          const decision = escalationDecision(escalationReason);
+
+          let evidence = emptyEvidence();
+          try {
+            const commits = await log(root, baseSha, 'HEAD');
+            let remoteHasHead = false;
+            try {
+              remoteHasHead = await remoteContains(
+                root,
+                ctx.remote,
+                config.ci.expected_branch,
+                await revParse(root, 'HEAD'),
+              );
+            } catch {
+              // Best effort
+            }
+            evidence = {
+              ...evidence,
+              commits_actual: commits.map((c) => c.sha),
+              remote_has_head: remoteHasHead,
+            };
+          } catch {
+            // Best effort
+          }
+
+          const progressPath = writeProgress(root, {
+            batchId,
+            runId,
+            at: ctx.now().toISOString(),
+            decision,
+            evidence,
+            workerExitCode,
+            workerStopReason,
+          });
+          const escalateEnvelopes = [relative(root, progressPath), testerMdRel];
+          if (ctx.updateBacklogStatus === true) {
+            const backlogFile = join(root, BACKLOG_RELATIVE_PATH);
+            try {
+              const backlogText = readFileSync(backlogFile, 'utf8');
+              const result = setBatchStatus(backlogText, batchId, 'blocked');
+              if (result.changed) {
+                writeFileSync(backlogFile, result.text);
+                escalateEnvelopes.push(BACKLOG_RELATIVE_PATH);
+                rec.record('batch.status', {
+                  batch_id: batchId,
+                  from: result.from ?? '',
+                  to: 'blocked',
+                });
+              } else {
+                rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
+              }
+            } catch {
+              rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
+            }
+          }
+          await r2Commit(root, `progress: ${batchId} ${decision.final}`, escalateEnvelopes, rec);
+
+          // SPEC 12.1: push the verdict commit to remote (tester escalation path).
+          try {
+            await push(root, ctx.remote, config.ci.expected_branch);
+            const pushSha = await revParse(root, 'HEAD');
+            rec.record('verdict.pushed', {
+              sha: pushSha,
+              remote: ctx.remote,
+              branch: config.ci.expected_branch,
+            });
+          } catch (pushError) {
+            rec.record('verdict.push_failed', {
+              sha: await revParse(root, 'HEAD').catch(() => 'unknown'),
+              error: message(pushError),
+            });
+          }
+
+          return finish('BLOCK', { escalation: escalateReason, decision });
+        }
+      }
+    }
+
     const task = buildTask(batch, {
       run_id: runId,
       base_sha: baseSha,
@@ -1448,7 +1663,15 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     });
     writeTask(root, batch, task);
     const relTask = taskPath('', batchId);
-    const taskSha = await r2Commit(root, `docs: issue ${batchId} task envelope`, [relTask], rec);
+    // SPEC 16.14 step 5: write tester files to main workspace and include in commit.
+    const commitPaths = [relTask];
+    for (const f of testerFiles) {
+      const absPath = join(root, f.path);
+      mkdirSync(dirname(absPath), { recursive: true });
+      writeFileSync(absPath, f.content);
+      commitPaths.push(f.path);
+    }
+    const taskSha = await r2Commit(root, `docs: issue ${batchId} task envelope`, commitPaths, rec);
     rec.record('batch.task_written', { path: relTask, commit: taskSha });
 
     // SPEC 11.7: record worker.resumed event when this is a subsequent attempt.
@@ -1602,16 +1825,6 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       removeKillHandlers?.();
       killGuard(guardPid);
     };
-
-    // v02-e-drill: build the redact set from token_file content and CI env vars.
-    // The runner masks these in the event stream but never reads config or env itself.
-    const redact: string[] = [];
-    const ciTokenValue = readCiToken(config, root);
-    if (ciTokenValue !== undefined) redact.push(ciTokenValue);
-    for (const key of ['GITHUB_TOKEN', 'GH_TOKEN'] as const) {
-      const val = process.env[key];
-      if (val !== undefined && val !== '') redact.push(val);
-    }
 
     try {
       const result = await runWorker(ctx.runner, config, batch, root, {

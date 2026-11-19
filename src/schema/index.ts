@@ -33,6 +33,13 @@ export const DEFAULT_MIN_FREE_MB = 1024;
 // eslint-disable-next-line no-restricted-syntax -- SPEC 16.12: tester max attempts default, named constant
 export const DEFAULT_TESTER_MAX = 2;
 
+/**
+ * SPEC 16.14: default redcheck_secs — per-command timeout for the red check.
+ * Used when the field is absent from collie.toml.
+ */
+// eslint-disable-next-line no-restricted-syntax -- SPEC 16.14: red check timeout default, named constant
+export const DEFAULT_REDCHECK_SECS = 600;
+
 /** JSON value, the only payload an NDJSON event line can round-trip losslessly (SPEC 3.6). */
 export type JsonValue =
   string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -132,6 +139,8 @@ export const LimitsSchema = z.strictObject({
   min_free_mb: z.number().int().positive().optional().default(DEFAULT_MIN_FREE_MB),
   /** SPEC 16.12: max red-check attempts per batch run; optional, defaults to 2. */
   tester_max: z.number().int().positive().optional().default(DEFAULT_TESTER_MAX),
+  /** SPEC 16.14: per-command red-check timeout in seconds; optional, defaults to 600. */
+  redcheck_secs: z.number().int().positive().optional().default(DEFAULT_REDCHECK_SECS),
 });
 export type Limits = z.infer<typeof LimitsSchema>;
 
