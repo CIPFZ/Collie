@@ -1294,3 +1294,205 @@ describe('prepareAcceptance: tester events, signal and misclassified list', () =
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Group 6: abort and runner errors (SPEC 16.15, v046-b16)
+// ---------------------------------------------------------------------------
+
+describe('prepareAcceptance: abort and runner errors', () => {
+  it('runner throws while signal is aborted → ok false, attempts 1, reason tester_failed, one invocation, cleanup done', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(okRedCheck());
+
+    // AbortController that aborts during the first (and only) effect.
+    const ac = new AbortController();
+
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        effect: () => {
+          // Abort the signal mid-run, so throwIfAborted fires after the effect.
+          ac.abort();
+        },
+        result: OK_RESULT,
+      },
+      // Second scene should NOT be consumed.
+      {
+        expectRole: 'tester',
+        result: OK_RESULT,
+      },
+    ]);
+
+    const events: { event: string; fields: Record<string, unknown> }[] = [];
+    const record: RecordFn = (event, fields) => {
+      events.push({ event, fields });
+    };
+
+    const result = await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 2,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+      record,
+      signal: ac.signal,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts).toBe(1);
+    if (!result.ok) {
+      expect(result.reason).toBe('tester_failed' satisfies AcceptanceFailReason);
+    }
+    // Runner called only once.
+    expect(runner.calls).toHaveLength(1);
+
+    // Record has tester.started and tester.finished, finished has error.
+    const startedEvents = events.filter((e) => e.event === 'tester.started');
+    const finishedEvents = events.filter((e) => e.event === 'tester.finished');
+    expect(startedEvents).toHaveLength(1);
+    expect(finishedEvents).toHaveLength(1);
+    expect(finishedEvents[0]?.fields.error).toBeDefined();
+    expect(typeof finishedEvents[0]?.fields.error).toBe('string');
+
+    // No collie-accept-* leftover in private tmpdir.
+    const leftover = readdirSync(privateTmpDir).filter((n) => n.startsWith('collie-accept-'));
+    expect(leftover).toHaveLength(0);
+  });
+
+  it('runner throws normal error on attempt 1, attempt 2 succeeds → ok true, attempts 2, prompt has error info', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const outDir = `test/acceptance/${batch.id}`;
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(okRedCheck());
+
+    const runner = new FakeRunner([
+      // Attempt 1: runner throws a normal error.
+      {
+        expectRole: 'tester',
+        error: new Error('model API 503'),
+      },
+      // Attempt 2: succeeds.
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'content');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        result: OK_RESULT,
+      },
+    ]);
+
+    const result = await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 2,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.attempts).toBe(2);
+    // The second call's prompt should mention the error from attempt 1.
+    expect(runner.calls).toHaveLength(2);
+    const secondPrompt = runner.calls[1]?.prompt ?? '';
+    expect(secondPrompt).toContain('model API 503');
+  });
+
+  it('runner throws twice → tester_failed, attempts 2, problems has error info', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const fakeRedCheck: RedCheckFn = () => Promise.resolve(okRedCheck());
+
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        error: new Error('error one'),
+      },
+      {
+        expectRole: 'tester',
+        error: new Error('error two'),
+      },
+    ]);
+
+    const result = await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 2,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts).toBe(2);
+    if (!result.ok) {
+      expect(result.reason).toBe('tester_failed' satisfies AcceptanceFailReason);
+      expect(result.problems.some((p) => p.includes('error two'))).toBe(true);
+    }
+  });
+
+  it('onTesterEvent receives attempt=2 on second invocation', async () => {
+    const { root, headSha } = await createTestRepo();
+    const batch = testBatch();
+    const outDir = `test/acceptance/${batch.id}`;
+    let callCount = 0;
+    const fakeRedCheck: RedCheckFn = () => {
+      callCount++;
+      return Promise.resolve(callCount === 1 ? failRedCheck() : okRedCheck());
+    };
+
+    const runner = new FakeRunner([
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'content');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        events: [{ type: 'ev1' }],
+        result: OK_RESULT,
+      },
+      {
+        expectRole: 'tester',
+        effect: ({ cwd }) => {
+          mkdirSync(join(cwd, outDir), { recursive: true });
+          writeFileSync(join(cwd, outDir, 'new.test.ts'), 'content');
+          writeFileSync(join(cwd, outDir, 'MAP.md'), '# MAP\n');
+        },
+        events: [{ type: 'ev2' }],
+        result: OK_RESULT,
+      },
+    ]);
+
+    const testerEvents: { attempt: number; event: unknown }[] = [];
+
+    await prepareAcceptance({
+      root,
+      headSha,
+      batch,
+      config,
+      runner,
+      testerMax: 2,
+      redCheckOpts: dummyRedCheckOpts(),
+      redCheck: fakeRedCheck,
+      onTesterEvent: (attempt, event) => {
+        testerEvents.push({ attempt, event });
+      },
+    });
+
+    // Should have events from both invocations.
+    expect(testerEvents).toHaveLength(2);
+    expect(testerEvents[0]?.attempt).toBe(1);
+    expect(testerEvents[1]?.attempt).toBe(2);
+  });
+});
