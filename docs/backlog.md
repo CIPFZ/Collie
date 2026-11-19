@@ -24,7 +24,7 @@
 > 条目里不写「发现别的现有用例失败一律停下」，写「只许做新行为直接要求的最小改动并逐条列出，拿不准才停下」（b14 照「停下」把代码推了上去，主分支红了 26 分钟）。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b14 已通过（SPEC 14.19~14.27；v046-b12 是单批次重跑通过、状态格由 R1 改）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；队列从 v046-b16 起，固定版本 `90cd5e2`
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；队列从 v046-b17 起，固定版本 `86b3cad`。接线第二块（收尾）是 v046-b17、b18、b19（SPEC 16.16）
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -113,6 +113,9 @@
 | 78 | v046-b14 | R2 凭提交号认自己的提交：规则 2 不再按提交说明的开头跳过 | v046-b11 | passed |
 | 79 | v046-b15 | 接线第一块：带情形的批次在写 task 信封之前先拉起测试 agent | v046-b12, v046-b14, v046-b16 | passed |
 | 80 | v046-b16 | prepareAcceptance 里运行器抛错的两种情形；两条空过的测试改实（不接进队列） | v046-b12 | passed |
+| 81 | v046-b17 | 接线收尾一：被跟踪文件不进提交、heartbeat 阶段改回、测试 agent 单独墙钟、放宽超时 | v046-b15 | pending |
+| 82 | v046-b18 | 接线收尾二：带情形的 worker 任务书多出情形与接口两节、写明验收测试不能改 | v046-b15 | pending |
+| 83 | v046-b19 | 接线收尾三：why 与 report 显示测试 agent 的花费；审核手册补一句 | v046-b17, v046-b18 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -3368,3 +3371,127 @@ R1 读代码的推断（没有实跑）：worker 的提交只要用了这四种�
 - 为了让测试过而删除或跳过任何测试；条目 3 点名的两条之外，删去或改松任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b17 接线收尾一：被跟踪文件不进提交、heartbeat 阶段改回、测试 agent 单独墙钟、放宽超时
+
+优先级：81　依赖：v046-b15
+
+接线第一块（v046-b15）跑起来之后，操作员在克隆里实测查出两处必须在带情形的批次正式跑之前修（SPEC 14.28）：测试 agent 改了主工作区里被跟踪的文件会被 R2 一起提交；worker 工作期间 heartbeat 的 `phase` 停在 `tester`。
+再加测试 agent 单独的墙钟，并把两条高负载下会超时的用例放宽。改 R2，只动测试 agent 这一步相关的几处，不碰 worker / reviewer / 仲裁的判定。
+
+条目：
+1. 读 SPEC 16.16 的「v046-b17」一段与 14.28「b15 查出两处」。`src/run.ts`：上报原因是 `tester_touched_main_tree` 时，走上报路径之前先把主工作区恢复干净
+   （在 `root` 里 `git checkout -- .` 再 `git clean -fd`，只在这一条路径上做），这样测试 agent 动过的被跟踪文件不会进 R2 的 `progress.md` / backlog 提交；被动过的文件名写进 `tester.md`（这条路径现在不写 `tester.md`，补上）。
+   未跟踪的新文件照旧由「只提交点名路径」挡住。
+   **假测试 agent 除了写验收测试还往主工作区被跟踪的 `docs/progress.md` 加一行：批次以 `tester_touched_main_tree` 上报、退出码 20；`git log` 里 R2 的提交都不含测试 agent 加的那一行；`tester.md` 列出了被动过的文件**
+   同一处还有 heartbeat：测试 agent 这一步结束、拉起 worker 之前，`phase` 从 `tester` 改回 `worker`（worker 真正开始时本就有一处写 `worker`，现在的问题是它在测试 agent 之前；补一处即可）。
+   **带情形的批次，worker 工作期间读 heartbeat，`phase` 是 `worker`，不是 `tester`**
+2. `src/schema/index.ts` 与 `templates/collie.toml`：`[limits]` 加可选的 `worktree_secs`（正整数，缺省 1800，写法照 `tester_max`；模板写 `worktree_secs = 1800` 带一行注释）。
+   测试 agent 这一步的墙钟（`src/run.ts` 里现在用 `wallclock_secs` 建的那个 `AbortSignal.timeout`）改用 `worktree_secs`。本仓库的 `.collie/collie.toml` 不许动。
+   允许改写的旧用例只有：`test/config.test.ts` 的 `has the limits of SPEC 3.1`（期望对象加 `worktree_secs: 1800`）与内联 `VALID_TOML`；`test/schema.test.ts` 的夹具 `validConfig.limits`；每处在「偏离或疑问」里列出（这几处由本条点名）。
+3. `test/queue-limit.test.ts`、`test/scenario-n.test.ts` 等真实跑多轮队列或真实起子进程的用例，`describe` / `it` 自带的超时从 120 秒放宽到 300 秒（只改数值，不改断言；慢机器高负载下 120 秒会到点）。
+   `test/tester-step.test.ts` 新加一组 `describe('tester step: heartbeat and tracked-file safety', …)`：条目 1、2 加粗的情形；测试 agent 改未跟踪的新文件时照旧上报、文件留在工作区（和现有那条对比）。
+   R1 查过现有用例：`test/view.test.ts` 的 `phase` 断言用的是不带情形的批次，不受影响；`tester step: failures stop the batch` 里 `tester writes to main workspace` 那条写的是未跟踪文件、只断言文件还在，本批次把它移进新组并补「被跟踪文件」的情形，原断言保留。
+   已有断言除上面点名处外一条都不改；别的现有用例因为本批次的新行为而失败时的处理见下。
+   `test/invariants.test.ts` 加「`src/run.ts` 里有 `worktree_secs`」
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/run.ts`、`src/schema/index.ts`、`templates/collie.toml`、`test/tester-step.test.ts`、`test/queue-limit.test.ts`、`test/scenario-n.test.ts`、`test/config.test.ts`、`test/schema.test.ts`、`test/invariants.test.ts`。不应改动 `test/invariants.test.ts` 已有的任何数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 没有 git 全局身份时全部测试通过 | `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test` | exit 0 |
+| 接线那一步的测试通过 | `npm test -- test/tester-step.test.ts test/config.test.ts test/schema.test.ts` | exit 0 |
+| 新的一组用例在 | `grep -qF "tester step: heartbeat and tracked-file safety" test/tester-step.test.ts` | exit 0 |
+| 模板有新配置项，本仓库的配置没动 | `grep -qE "^worktree_secs = 1800" templates/collie.toml && ! grep -qE "worktree_secs" .collie/collie.toml` | exit 0 |
+| 不变量同步 | `grep -qF "worktree_secs" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `.collie/collie.toml`、`AGENT-*.md`）；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/acceptance.ts`、`src/redcheck.ts`、`src/roles/`、`src/runner/`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/ladder.ts`、`src/backlog.ts`；改动任何一条规则的判定、`fix_max` 的计数、队列自动重跑的条件
+- 把 `git checkout -- .` / `git clean` 用在 `tester_touched_main_tree` 以外的任何路径上；改变不带情形的批次的任何行为
+- 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言（条目 4 只改超时数值）
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b18 接线收尾二：带情形的 worker 任务书多出情形与接口两节、写明验收测试不能改
+
+优先级：82　依赖：v046-b15
+
+带情形的批次，worker 现在拿到的 `task.md` 没有情形与接口两节，也没写验收测试在哪、不能改（v046-b15 真跑时看到的）。这一批给任务书补上。只改任务书的文字，不改任何判定。
+
+条目：
+1. 读 SPEC 16.16 的「v046-b18」一段。`src/roles/worker.ts` 的 `renderBody`（或它的调用处）：批次有情形时，`task.md` 在「本批次条目」之后、「验收标准」之前多两节：
+   「本批次情形」——每条 `- <编号> [新|保持] <文字>`，和给测试 agent 的情形逐字相同；「本批次接口」——有接口才出现，每条一行；并在「验收标准」里或紧接一句写明
+   「`test/acceptance/<批次>/` 下是本批次的验收测试，由测试 agent 写好，你不能改（受保护路径）」。
+   批次没有情形时，`task.md` 逐字不变。
+   **一个带 2 情形、1 接口的批次：渲染出的 `task.md` 里有「本批次情形」两条、「本批次接口」一条，以及「验收测试……你不能改」那句；一个不带情形的批次：渲染结果和现在逐字节相同**
+2. `test/task-envelope.test.ts`：新加一组或在「body」组里加用例，覆盖条目 1 加粗的两种情形（有情形、无情形逐字不变）；
+   现有的 `has the SPEC 3.3 section order` 用的是不带情形的批次，断言的小节清单不变，本批次不许改它。
+   `test/worker.test.ts` 的闭环用例用的批次不带情形，应当照常通过。
+   R1 查过：`test/task-envelope.test.ts` 的 body 组逐条跑 backlog 里的真实批次，这些批次现在都不带情形，所以渲染结果不变、现有断言不受影响。
+   已有断言一条都不改；别的现有用例因为本批次的新行为而失败时的处理见下。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/roles/worker.ts`、`test/task-envelope.test.ts`。不应改动 `test/invariants.test.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 任务书与 worker 的测试通过 | `npm test -- test/task-envelope.test.ts test/worker.test.ts` | exit 0 |
+| 带情形时任务书有两节，不带情形时逐字不变——由新用例覆盖 | `grep -qE "本批次情形" src/roles/worker.ts && grep -qE "本批次接口" src/roles/worker.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `AGENT-*.md`）；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/run.ts`、`src/acceptance.ts`、`src/redcheck.ts`、`src/roles/reviewer.ts`、`src/roles/tester.ts`、`src/backlog.ts`、`src/schema/index.ts`、`src/runner/`；改变不带情形的批次的任务书哪怕一个字节
+- 在这一步校验情形、拉起谁、改任何判定
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v046-b19 接线收尾三：why 与 report 显示测试 agent 的花费；审核手册补一句
+
+优先级：83　依赖：v046-b17, v046-b18
+
+测试 agent 这一步的轮数和花费现在只在 journal 里，`why` 与 `report` 看不到；审核手册也没写信封提交里的验收测试不是 worker 的产出。这一批补上。
+
+条目：
+1. 读 SPEC 16.16 的「v046-b19」一段。`src/view.ts`：`why <run_id>` 与 `report`（队列汇报）读本批次 journal 里的 `tester.started` / `tester.finished`，把测试 agent 的轮数、花费、用时显示出来，和 worker、reviewer 并列；
+   一次运行里测试 agent 拉起多次时合计；没有 `tester.*` 事件的运行，不显示这一栏（输出和现在逐字节相同）。
+   **一个有 `tester.finished`（带 `num_turns`、`cost_usd`）的运行：`why` 的输出里有测试 agent 的轮数与花费；一个没有 `tester.*` 的运行：`why` 的输出和现在逐字节相同**
+2. `AGENT-reviewer.md`：在「`.collie/batches/` 下是信封文件，不是 worker 的产出；只读本批次的 `task.md`」那一句之后补一句——
+   信封提交里的 `test/acceptance/<批次>/` 是测试 agent 写好的验收测试，不是 worker 的产出，核对受保护路径时不要把它当成 worker 改了受保护路径。
+3. `test/why.test.ts`、`test/report.test.ts`：加条目 1 加粗的两种情形（有测试 agent、无测试 agent 逐字不变）。
+   R1 查过：`test/why.test.ts`、`test/report.test.ts` 现有用例用的运行都没有 `tester.*` 事件，所以「无测试 agent 逐字不变」成立、现有断言不受影响。
+   已有断言一条都不改；别的现有用例因为本批次的新行为而失败时的处理见下。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/view.ts`、`AGENT-reviewer.md`、`test/why.test.ts`、`test/report.test.ts`。不应改动 `test/invariants.test.ts`。
+注意：`AGENT-reviewer.md` 是受保护路径，本批次经由条目点名改它；取证时它的改动会被算进 `spec_diff_lines`。这一条由 R1 在签发说明里对操作员写明，worker 照常提交即可。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| why 与 report 的测试通过 | `npm test -- test/why.test.ts test/report.test.ts` | exit 0 |
+| 审核手册补了那一句 | `grep -qE "test/acceptance" AGENT-reviewer.md` | exit 0 |
+
+额外禁止：
+- 改动 `AGENT-reviewer.md` 以外的受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`、`.collie/collie.toml`
+- 改动 `src/run.ts`、`src/acceptance.ts`、`src/redcheck.ts`、`src/roles/`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/backlog.ts`、`src/schema/index.ts`、`src/runner/`；改任何判定
+- 改变没有测试 agent 的运行的 `why` / `report` 输出哪怕一个字节
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
