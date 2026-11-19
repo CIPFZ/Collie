@@ -1941,4 +1941,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b16 · r-20261119033533 · PASS
+
+- 时间：2026-11-19T03:55:13.857Z
+- 裁定：规则 10，All 9 acceptance commands pass. SPEC 16.15 four requirements implemented correctly in src/acceptance.ts. lastMisclassified removed. New test group covers both error cases plus two extras. Two empty-passing r2-commits tests rewritten with strictly stronger assertions. No protected/forbidden files modified, no dependency changes. CI conclusion unknown — CI 以 R2 取证为准。
+- 提交：`53c5988` `a269fda` `a1f5deb`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1375 passed, 0 failed
+  - `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/prepare-acceptance.test.ts test/r2-commits.test.ts` → exit 0，38 passed, 0 failed
+  - `grep -qF "prepareAcceptance: abort and runner errors" test/prepare-acceptance.test.ts` → exit 0，exit 0
+  - `! grep -qF "lastMisclassified" src/acceptance.ts` → exit 0，exit 0
+  - `grep -qF "interrupt_retry" test/r2-commits.test.ts && ! grep -qE "if \(passEvents\.length > 0\)" test/r2-commits.test.ts` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "acceptance\.js"` → exit 0，exit 0
+  - `grep -qF "lastMisclassified" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44453913845
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
