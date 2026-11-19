@@ -25,6 +25,7 @@ import {
 } from './run.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { AgentRunner } from './runner/index.js';
+import type { RedCheckFn } from './acceptance.js';
 import { RunIdSchema, type Event } from './schema/index.js';
 import {
   buildStatus,
@@ -77,6 +78,10 @@ export interface CliDeps {
   watchSleep?: (ms: number) => Promise<void>;
   /** SPEC 14.1: injectable disk-free reader (MB) for preflight. */
   diskFreeMb?: (root: string) => number;
+  /** Test hook: overrides the tester step's abort signal (SPEC 16.14). */
+  testerSignal?: AbortSignal;
+  /** Test hook: injectable red-check function for the tester step (SPEC 16.14). */
+  redCheck?: RedCheckFn;
 }
 
 const TEMPLATE = join(import.meta.dirname, '..', 'templates', 'collie.toml');
@@ -203,6 +208,8 @@ async function run(
     ...(deps.livenessFingerprint === undefined
       ? {}
       : { livenessFingerprint: deps.livenessFingerprint }),
+    ...(deps.testerSignal === undefined ? {} : { testerSignal: deps.testerSignal }),
+    ...(deps.redCheck === undefined ? {} : { redCheck: deps.redCheck }),
   });
   // SPEC 4.3 (v03-b03-fix): escalation path (RULE_ESCALATED=0) does not prefix
   // the summary with "rule N:"; the decision.reason already has the full message.
@@ -262,6 +269,8 @@ async function runContinue(
       ? {}
       : { livenessFingerprint: deps.livenessFingerprint }),
     ...(deps.diskFreeMb === undefined ? {} : { diskFreeMb: deps.diskFreeMb }),
+    ...(deps.testerSignal === undefined ? {} : { testerSignal: deps.testerSignal }),
+    ...(deps.redCheck === undefined ? {} : { redCheck: deps.redCheck }),
   });
   const batchSummary =
     outcome.batches.map((b) => `${b.batch_id}:${b.verdict}`).join(', ') || 'none';

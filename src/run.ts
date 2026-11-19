@@ -2603,6 +2603,10 @@ export interface QueueContext {
   livenessFingerprint?: (root: string) => Promise<string>;
   /** SPEC 14.1: injectable disk-free reader for preflight. */
   diskFreeMb?: (root: string) => number;
+  /** Test hook: overrides the tester step's abort signal (SPEC 16.14). */
+  testerSignal?: AbortSignal;
+  /** Test hook: injectable red-check function for the tester step (SPEC 16.14). */
+  redCheck?: RedCheckFn;
 }
 
 export interface QueueOutcome {
@@ -2843,6 +2847,8 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
       ...(ctx.livenessFingerprint === undefined
         ? {}
         : { livenessFingerprint: ctx.livenessFingerprint }),
+      ...(ctx.testerSignal === undefined ? {} : { testerSignal: ctx.testerSignal }),
+      ...(ctx.redCheck === undefined ? {} : { redCheck: ctx.redCheck }),
     });
     batchesRun.push({ batch_id: currentBatchId, run_id: runId, verdict: outcome.final });
 
