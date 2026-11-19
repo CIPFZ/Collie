@@ -1,12 +1,13 @@
 ---
 schema_version: 1
-run_id: r-20261119083439
+run_id: r-20261119092654
 batch_id: v046-b17
 base_sha: 31f16e21026c25cf304a54b9406c8a0ec3fcc2e1
-created_at: 2026-11-19T08:34:40.510Z
-attempt: 1
-interrupted_at: null
+created_at: 2026-11-19T09:26:55.401Z
+attempt: 2
+interrupted_at: r-20261119083439 stalled run.finished@2026-11-19T09:26:54.604Z
 issued_by: collie
+rescue_sha: bbdf6730cb1f10d58abc0f36a4c39c464422cdf6
 ---
 
 # 批次 v046-b17：接线收尾一：被跟踪文件不进提交、heartbeat 阶段改回、测试 agent 单独墙钟、放宽超时
@@ -61,3 +62,10 @@ issued_by: collie
 完成后写 `.collie/batches/v046-b17/report.md`：固定四段（做了什么 / 测试结果 / 偏离或疑问 / 下一步建议）
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v046-b17` 为提交信息单独提交并推送该文件。
+
+## 上一轮中断
+
+中断信息：`r-20261119083439 stalled run.finished@2026-11-19T09:26:54.604Z`
+救援提交：`bbdf6730cb1f10d58abc0f36a4c39c464422cdf6`
+
+请先核实 `bbdf6730cb1f10d58abc0f36a4c39c464422cdf6` 中的半成品是否完整，不要把它当作已完成。
