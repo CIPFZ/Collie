@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-run_id: r-20261119035517
+run_id: r-20261119050316
 batch_id: v046-b15
 base_sha: 9e4884ebb1b53f406161a290d6eb5e61086c0289
-created_at: 2026-11-19T03:55:18.675Z
-attempt: 1
+created_at: 2026-11-19T05:03:17.447Z
+attempt: 2
 interrupted_at: null
 issued_by: collie
 ---
@@ -72,3 +72,18 @@ issued_by: collie
 完成后写 `.collie/batches/v046-b15/report.md`：固定四段（做了什么 / 测试结果 / 偏离或疑问 / 下一步建议）
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v046-b15` 为提交信息单独提交并推送该文件。
+
+## 上一轮判 FIX
+
+### Gaps
+
+- tester_touched_main_tree 分支（src/run.ts:1521）调用通用 escalate()，导致裁定说明文字为「上报：无 report — ...」而非 task 要求的「上报：验收测试没有准备好 — ...」。需走自定义上报路径或参数化 escalate()
+- 自定义 tester 上报路径（src/run.ts:1570）把完整前缀写入 escalated 事件的 reason 字段（'上报：验收测试没有准备好 — red_check_failed: ...'），应只写裸原因（'red_check_failed: ...'）使之以 task 要求的前缀开头；测试断言也应从 .toContain() 改为验证前缀
+- test/tester-step.test.ts:625「FIX rerun after first PASS」两次运行都以 PASS 结束，不是 task 要求的「先 FIX 再 PASS」场景。需第一次给 FIX 裁定、第二次给 PASS，并验证合并调用序列 tester→worker→reviewer→worker→reviewer
+
+### 上一轮代码提交
+
+- `05f5644ac1c08302d0848435e47c522f543c8a6a`
+- `5f6a1f811378265dc57d481a7a28df558fde67d5`
+
+这些提交已在审核范围内，只补缺口，不要重做。
