@@ -170,8 +170,9 @@ export async function prepareAcceptance(opts: PrepareAcceptanceOpts): Promise<Ac
     let lastFailReason: AcceptanceFailReason = 'red_check';
     /** Collects final reply text from each tester invocation (SPEC 16.13). */
     const reports: string[] = [];
-    /** Last extracted misclassified list (SPEC 16.14). */
-    const lastMisclassified: string[] = [];
+    /** Error limit for tester.finished error field (SPEC 16.15). */
+    // eslint-disable-next-line no-restricted-syntax -- SPEC 16.15 hard-coded limit, not a tunable threshold
+    const ERROR_CHAR_LIMIT = 500;
 
     const testerCfg = config.agent.tester;
 
@@ -203,19 +204,44 @@ export async function prepareAcceptance(opts: PrepareAcceptanceOpts): Promise<Ac
       });
 
       // SPEC 16.14: forward signal, onTesterEvent wrapper, and redact to runTester.
+      // SPEC 16.15: runner errors are caught — two cases depending on signal state.
       const currentAttempt = attempts;
       const testerOnEvent = opts.onTesterEvent;
-      const result = await runTester(runner, config, testerInput, worktreeDir, {
-        ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
-        ...(testerOnEvent !== undefined
-          ? {
-              onEvent: (event: unknown) => {
-                testerOnEvent(currentAttempt, event);
-              },
-            }
-          : {}),
-        ...(opts.redact !== undefined && opts.redact.length > 0 ? { redact: opts.redact } : {}),
-      });
+      let result: Awaited<ReturnType<typeof runTester>>;
+      try {
+        result = await runTester(runner, config, testerInput, worktreeDir, {
+          ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+          ...(testerOnEvent !== undefined
+            ? {
+                onEvent: (event: unknown) => {
+                  testerOnEvent(currentAttempt, event);
+                },
+              }
+            : {}),
+          ...(opts.redact !== undefined && opts.redact.length > 0 ? { redact: opts.redact } : {}),
+        });
+      } catch (runnerErr: unknown) {
+        // SPEC 16.15: runner threw — record tester.finished with error.
+        const errMsg = String(runnerErr instanceof Error ? runnerErr.message : runnerErr).slice(
+          0,
+          ERROR_CHAR_LIMIT,
+        );
+        record?.('tester.finished', { attempt: attempts, error: errMsg });
+        reports.push('');
+
+        // Re-read aborted: it may have flipped to true during the async call.
+        if ((opts.signal?.aborted as boolean | undefined) === true) {
+          // SPEC 16.15 case 1: signal already aborted — stop, no retry.
+          lastProblems = [errMsg];
+          lastFailReason = 'tester_failed';
+          break;
+        }
+        // SPEC 16.15 case 2: signal not aborted — treat as failed attempt, carry error into next prompt.
+        lastProblems = [errMsg];
+        lastFailReason = 'tester_failed';
+        previousProblems = [...previousProblems, errMsg];
+        continue;
+      }
 
       record?.('tester.finished', {
         attempt: attempts,
@@ -303,7 +329,7 @@ export async function prepareAcceptance(opts: PrepareAcceptanceOpts): Promise<Ac
       problems: lastProblems,
       reason: lastFailReason,
       reports,
-      misclassified: lastMisclassified,
+      misclassified: [],
     };
   } finally {
     // Always remove the worktree, even on error.
