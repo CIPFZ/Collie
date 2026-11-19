@@ -1962,4 +1962,26 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b15 · r-20261119035517 · FIX
+
+- 时间：2026-11-19T04:56:55.279Z
+- 裁定：规则 10，全部 10 条验收命令通过、1385 测试通过、无保护文件改动、无新增依赖。但 tester_touched_main_tree 的上报文字含禁止的「无 report」、custom 上报路径把前缀写入了 escalated 事件 reason（不以 task 要求的 red_check_failed/misclassified/tester_failed 开头）、FIX→PASS 测试场景实际跑的是 PASS→PASS。CI 以 R2 取证为准。
+- 提交：`05f5644` `5f6a1f8`
+- 验收命令：10/10 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1385 passed, 0 failed
+  - `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test` → exit 0，1385 passed, 0 failed
+  - `npm test -- test/tester-step.test.ts test/config.test.ts test/schema.test.ts test/heartbeat.test.ts` → exit 0，143 passed, 0 failed
+  - `grep -qF "tester step: runs before the task envelope" test/tester-step.test.ts && grep -qF "tester step: failures stop the batch" test/tester-step.test.ts && grep -qF "tester step: skipped when the tests are already in the tree" test/tester-step.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qE "acceptance\.js"` → exit 0，exit 0
+  - `grep -qE "^redcheck_secs = 600" templates/collie.toml && ! grep -qE "redcheck_secs|agent\.tester" .collie/collie.toml` → exit 0，exit 0
+  - `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" | tail -n 1 | grep -qE "^mutation: caught 43 survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` → exit 0，exit 0
+  - `grep -qF "tester.stream.ndjson" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44458192312
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
