@@ -40,6 +40,13 @@ export const DEFAULT_TESTER_MAX = 2;
 // eslint-disable-next-line no-restricted-syntax -- SPEC 16.14: red check timeout default, named constant
 export const DEFAULT_REDCHECK_SECS = 600;
 
+/**
+ * SPEC 16.16: default worktree_secs — tester step wall-clock timeout.
+ * Used when the field is absent from collie.toml.
+ */
+// eslint-disable-next-line no-restricted-syntax -- SPEC 16.16: tester worktree timeout default, named constant
+export const DEFAULT_WORKTREE_SECS = 1800;
+
 /** JSON value, the only payload an NDJSON event line can round-trip losslessly (SPEC 3.6). */
 export type JsonValue =
   string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -141,6 +148,8 @@ export const LimitsSchema = z.strictObject({
   tester_max: z.number().int().positive().optional().default(DEFAULT_TESTER_MAX),
   /** SPEC 16.14: per-command red-check timeout in seconds; optional, defaults to 600. */
   redcheck_secs: z.number().int().positive().optional().default(DEFAULT_REDCHECK_SECS),
+  /** SPEC 16.16: tester step wall-clock timeout in seconds; optional, defaults to 1800. */
+  worktree_secs: z.number().int().positive().optional().default(DEFAULT_WORKTREE_SECS),
 });
 export type Limits = z.infer<typeof LimitsSchema>;
 

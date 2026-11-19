@@ -1481,9 +1481,9 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         updateHeartbeat(root, { phase: 'tester', updated_at: ctx.now().toISOString() });
 
         // Build the tester abort signal: use ctx.testerSignal if injected, else
-        // create a wallclock-based timer from limits.wallclock_secs.
+        // create a wallclock-based timer from limits.worktree_secs (SPEC 16.16).
         const testerAbort =
-          ctx.testerSignal ?? AbortSignal.timeout(config.limits.wallclock_secs * MS_PER_SECOND);
+          ctx.testerSignal ?? AbortSignal.timeout(config.limits.worktree_secs * MS_PER_SECOND);
 
         const redCheckSecsValue = config.limits.redcheck_secs;
         const headShaForTester = await revParse(root, 'HEAD');
@@ -1602,9 +1602,25 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         if (!mainStatus.clean) {
           const touchedFiles = mainStatus.entries.map((e) => e.path);
           const testerTouchReason = `tester_touched_main_tree: ${touchedFiles.join(', ')}`;
-          // Do NOT clean up the files — leave them for human inspection.
-          // No commits are made for the tester's files.
-          return await testerEscalate(testerTouchReason);
+          // SPEC 16.16 (v046-b17): restore tracked files and remove untracked files
+          // so the tester's changes do not leak into R2's subsequent commits.
+          await git(root, ['checkout', '--', '.']);
+          await git(root, ['clean', '-fd']);
+          // Write tester.md listing the touched files.
+          const testerMdLines: string[] = ['# Tester report', ''];
+          testerMdLines.push('## Touched files', '');
+          for (const f of touchedFiles) {
+            testerMdLines.push(`- ${f}`);
+          }
+          testerMdLines.push('');
+          testerMdLines.push('## Reason', '');
+          testerMdLines.push('tester_touched_main_tree');
+          testerMdLines.push('');
+          const testerMdPath = join(root, '.collie', 'batches', batchId, 'tester.md');
+          mkdirSync(dirname(testerMdPath), { recursive: true });
+          writeFileSync(testerMdPath, testerMdLines.join('\n'));
+          const testerMdRel = join('.collie', 'batches', batchId, 'tester.md');
+          return await testerEscalate(testerTouchReason, [testerMdRel]);
         }
 
         if (testerResult.ok) {
@@ -1655,6 +1671,9 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
           return await testerEscalate(escalateReason, [testerMdRel]);
         }
       }
+
+      // SPEC 16.16 (v046-b17): tester step finished, change heartbeat phase back to worker.
+      updateHeartbeat(root, { phase: 'worker', updated_at: ctx.now().toISOString() });
     }
 
     const task = buildTask(batch, {
