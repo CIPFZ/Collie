@@ -2,16 +2,61 @@
 // R2's own commits (identified by sha in the journal, not by message prefix)
 // must stay out of the protected-path count.
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { git } from '../src/git.js';
 import { RUNS_RELATIVE_DIR } from '../src/journal.js';
 import type { FakeSceneContext } from '../src/runner/fake.js';
 import { FakeRunner } from '../src/runner/fake.js';
 import type { Claims, Report, Verdict } from '../src/schema/index.js';
+import { controllableFingerprint, fakeLivenessClock, instantDelay } from './support/fake-clock.js';
 import { Sandbox, TEST_CMD } from './support/sandbox.js';
 
 const FENCE = '```';
+
+// ---------------------------------------------------------------------------
+// Liveness helpers (same approach as scenario-n, SPEC 16.15 v046-b16)
+// ---------------------------------------------------------------------------
+
+function livenessOpts(fp: ReturnType<typeof controllableFingerprint>) {
+  const { delay } = instantDelay();
+  const clock = fakeLivenessClock(() => fp.isFrozen());
+  return {
+    ladderDelay: delay,
+    livenessIntervalMs: 50,
+    livenessNow: clock.now,
+    livenessSetTimer: clock.setTimer,
+    livenessFingerprint: fp.livenessFingerprint,
+  };
+}
+
+/** Idle worker: commits code (no report), then goes idle (SPEC 13.14). */
+function idleWorkerNoReport(
+  batchId: string,
+  fp: ReturnType<typeof controllableFingerprint>,
+): {
+  expectRole: 'worker';
+  effect: (ctx: FakeSceneContext) => Promise<void>;
+  result: { exitCode: number };
+} {
+  return {
+    expectRole: 'worker',
+    effect: async (ctx: FakeSceneContext) => {
+      const featurePath = join(ctx.cwd, 'feature.txt');
+      mkdirSync(dirname(featurePath), { recursive: true });
+      writeFileSync(featurePath, `idle-${batchId}\n`);
+      await git(ctx.cwd, ['add', '-A']);
+      await git(ctx.cwd, ['commit', '-q', '-m', 'feat: partial work']);
+      fp.freeze();
+      for (let i = 0; i < 10; i++) {
+        ctx.opts.onEvent?.({ type: 'assistant', message: 'still thinking...' });
+      }
+      await ctx.stopped;
+      fp.unfreeze();
+    },
+    result: { exitCode: 0 },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -421,45 +466,48 @@ describe('R2 own commits stay out of the count', () => {
   });
 
   it('interrupt auto-retry: second run is not blocked by R2 retry commit', async () => {
-    // For interrupt retry to fire, the worker must exit (not crash) with
-    // workerStopReason in { idling, stalled, wallclock }. Use a worker that
-    // writes no report and exits normally under an immediately-aborted signal.
-    const noReportWorkerScene = {
-      expectRole: 'worker' as const,
-      effect: () => {
-        /* exits without writing report → escalation path */
-      },
-      result: { exitCode: 0 },
-    };
+    // Replace backlog for multi-batch queue test
+    const backlog = makeBacklog([
+      { priority: 1, id: 'v99-b01', title: '示例功能', depends: '—', status: 'pending' },
+      { priority: 2, id: 'v99-b02', title: '第二功能', depends: 'v99-b01', status: 'pending' },
+    ]);
+    box.write('docs/backlog.md', backlog);
+    await box.commitAll('chore: two-batch backlog');
+
+    const fp = controllableFingerprint();
 
     const runner = new FakeRunner([
-      // Run 1: worker writes no report under wallclock → escalation BLOCK
-      noReportWorkerScene,
-      // Run 2 (interrupt retry): normal worker + reviewer PASS
+      // Run 1: worker idle, no report → BLOCK → interrupt retry.
+      idleWorkerNoReport('v99-b01', fp),
+      // Retry: normal worker + reviewer PASS.
       normalWorkerScene(box, 'v99-b01', true),
       reviewerPassScene(box, 'v99-b01'),
+      // Run 3: v99-b02 worker + reviewer PASS.
+      normalWorkerScene(box, 'v99-b02', true),
+      reviewerPassScene(box, 'v99-b02'),
     ]);
-
-    // Use workerSignal to trigger wallclock ladder immediately
-    const ctl = new AbortController();
-    ctl.abort();
-
-    const code = await box.cli(['run', '--continue', '--max', '1'], runner, {
-      workerSignal: ctl.signal,
-    });
+    const code = await box.cli(['run', '--continue', '--max', '2'], runner, livenessOpts(fp));
+    expect(code).toBe(0);
 
     const events = box.events();
-    // Check that there is at least one run.finished
-    expect(events.some((e) => e.event === 'run.finished')).toBe(true);
 
-    // If the interrupt retry path fired, verify spec_diff_lines is 0 on the PASS run.
-    const passEvents = events.filter((e) => e.event === 'run.finished' && e.verdict === 'PASS');
-    if (passEvents.length > 0) {
-      const evidenceEvents = events.filter((e) => e.event === 'evidence.collected');
-      const lastEvidence = evidenceEvents.at(-1);
-      expect(lastEvidence?.spec_diff_lines).toBe(0);
-      expect(code).toBe(0);
-    }
+    // queue.batch_started with why=interrupt_retry for the retry run.
+    const retryStarted = events.find(
+      (e) => e.event === 'queue.batch_started' && e.why === 'interrupt_retry',
+    );
+    expect(retryStarted).toBeDefined();
+    expect(retryStarted?.batch_id).toBe('v99-b01');
+
+    // The retry should PASS with spec_diff_lines = 0.
+    const passFinished = events.filter((e) => e.event === 'run.finished' && e.verdict === 'PASS');
+    expect(passFinished.length).toBeGreaterThanOrEqual(1);
+    const evidenceEvents = events.filter((e) => e.event === 'evidence.collected');
+    // Find the evidence for the PASS run of v99-b01 (the retry).
+    const retryEvidence = evidenceEvents.find(
+      (e) => e.batch_id === 'v99-b01' && e.spec_diff_lines === 0,
+    );
+    expect(retryEvidence).toBeDefined();
+    expect(retryEvidence?.spec_diff_lines).toBe(0);
   });
 
   it('R2 commit count in git log equals r2.commit count in journal', async () => {
@@ -473,14 +521,32 @@ describe('R2 own commits stay out of the count', () => {
     const events = box.events();
     const r2CommitEvents = events.filter((e) => e.event === 'r2.commit');
 
-    // After the run, all R2 commits should be recorded in the journal
+    // After the run, all R2 commits should be recorded in the journal.
     expect(r2CommitEvents.length).toBeGreaterThan(0);
 
-    // Every r2.commit should have a valid sha and subject
-    for (const e of r2CommitEvents) {
-      expect(typeof e.sha).toBe('string');
-      expect(typeof e.subject).toBe('string');
+    // Collect the sha set from journal r2.commit events.
+    const journalShas = new Set(
+      r2CommitEvents.map((e) => {
+        const sha: unknown = e.sha;
+        return typeof sha === 'string' ? sha : '';
+      }),
+    );
+
+    // Collect commits from git log whose subjects match R2 prefixes.
+    const logOutput = await git(box.root, ['log', '--format=%H %s', 'main']);
+    const gitR2Shas = new Set<string>();
+    for (const line of logOutput.trim().split('\n')) {
+      const spaceIdx = line.indexOf(' ');
+      if (spaceIdx === -1) continue;
+      const sha = line.slice(0, spaceIdx);
+      const subject = line.slice(spaceIdx + 1);
+      if (subject.startsWith('docs: issue ') || subject.startsWith('progress: ')) {
+        gitR2Shas.add(sha);
+      }
     }
+
+    // The two sets must be equal.
+    expect(journalShas).toEqual(gitR2Shas);
   });
 
   it('deleting .collie/runs/ causes rule 2 to block R2 own ruling commit (conservative)', async () => {
