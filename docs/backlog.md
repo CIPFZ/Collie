@@ -20,9 +20,11 @@
 > R1 签发自查（v046-b07 / b08 后，SPEC 14.25）：条目里举例时不拿本仓库的现状当例子（「本仓库的配置就没有这两项」被写成了断言）；
 > 新测试文件要建 git 仓库、用临时目录的，验收里加一条「没有 git 全局身份、系统临时目录里有别人的同名前缀目录」时也通过的命令：CI 的机器和开发的机器不一样，worker 看不到 CI。
 > R1 签发自查（v046-b09 后，SPEC 14.26）：条目里允许「改某条断言看的对象」时，同时写明「不许删这条断言」，并在指令里请操作员把被守的那一处撤掉、看测试变不变红（两条残留检查被删，reviewer 判为合理）。
+> R1 签发自查（v046-b14 后，SPEC 14.27、16.15）：签发前还要查钉死完整清单的用例（事件序列、事件类型个数、整段配置对象、变异清单项数）；
+> 条目里不写「发现别的现有用例失败一律停下」，写「只许做新行为直接要求的最小改动并逐条列出，拿不准才停下」（b14 照「停下」把代码推了上去，主分支红了 26 分钟）。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b11 已通过（SPEC 14.19~14.26）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；队列从 v046-b12 起，固定版本 `8e95868`
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b14 已通过（SPEC 14.19~14.27；v046-b12 是单批次重跑通过、状态格由 R1 改）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；队列从 v046-b16 起，固定版本 `90cd5e2`
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -106,10 +108,11 @@
 | 73 | v046-b09 | 测试只依赖自己带的环境：git 身份、私有临时目录、不绑本仓库配置；沙箱可留 journal | v046-b06, v046-b07 | passed |
 | 74 | v046-b10 | prepareAcceptance 收尾：带回测试 agent 的回复、类别标错不再重拉（不接进队列） | v046-b09 | passed |
 | 75 | v046-b11 | R2 诊断信息：规则 9 重跑的 task 带 CI 链接；查裁定提交 CI 出异常时记事件 | v046-b09 | passed |
-| 76 | v046-b12 | 接线前的铺垫补齐：测试 agent 的事件与中止、类别标错清单；三处测试小修（不接进队列） | v046-b10 | blocked |
+| 76 | v046-b12 | 接线前的铺垫补齐：测试 agent 的事件与中止、类别标错清单；三处测试小修（不接进队列） | v046-b10 | passed |
 | 77 | v046-b13 | 活性指纹不占索引锁：R2 在 worker 工作期间不改写 .git/index | v046-b09 | passed |
 | 78 | v046-b14 | R2 凭提交号认自己的提交：规则 2 不再按提交说明的开头跳过 | v046-b11 | passed |
-| 79 | v046-b15 | 接线第一块：带情形的批次在写 task 信封之前先拉起测试 agent | v046-b12, v046-b14 | pending |
+| 79 | v046-b15 | 接线第一块：带情形的批次在写 task 信封之前先拉起测试 agent | v046-b12, v046-b14, v046-b16 | pending |
+| 80 | v046-b16 | prepareAcceptance 里运行器抛错的两种情形；两条空过的测试改实（不接进队列） | v046-b12 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -3263,7 +3266,7 @@ R1 读代码的推断（没有实跑）：worker 的提交只要用了这四种�
 
 ## v046-b15 接线第一块：带情形的批次在写 task 信封之前先拉起测试 agent
 
-优先级：79　依赖：v046-b12, v046-b14
+优先级：79　依赖：v046-b12, v046-b14, v046-b16
 
 分工改造第 3 步的接线（SPEC 第 16 章）：带「情形」的批次，R2 在写 task 信封之前先调 `prepareAcceptance`，过了就把验收测试和信封一起提交，没过就上报停下。不带情形的批次什么都不变。改 R2。
 
@@ -3289,7 +3292,8 @@ R1 读代码的推断（没有实跑）：worker 的提交只要用了这四种�
    `test/config.test.ts` 的 `has the limits of SPEC 3.1`（期望对象加 `redcheck_secs: 600`）与内联配置 `VALID_TOML`（跟着模板加一行）；`test/schema.test.ts` 的夹具 `validConfig.limits`（加这个字段，类型要求）；
    `test/invariants.test.ts` 的 `src/run.ts non-comment lines do not contain acceptance.js (v046-b08)`：改成断言 `src/run.ts` 引用了 `acceptance.js`，名字相应改掉。
    R1 查过：`test/heartbeat.test.ts` 没有钉死阶段的清单；`test/cli.test.ts` 比较 `limits` 的那条两边都取自模板；现有测试的沙箱 backlog 都不带情形，所以现有的场景测试都走不到新的一步。
-   你发现有别的现有用例因此失败，停下，在「偏离或疑问」里写明是哪一条，不要自己改。
+   钉死完整清单的用例 R1 也查过：`test/exit-codes.test.ts` 的 `records the v0.1 event sequence in order` 跑的是不带情形的批次，它的事件序列一个都不许变；本批次不加事件类型，变异清单的项数不变。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
    `test/invariants.test.ts` 另加「`src/run.ts` 里有 `tester.stream.ndjson`」
 
 本批次只改 `src/run.ts`、`src/heartbeat.ts`、`src/schema/index.ts`、`templates/collie.toml`、`test/tester-step.test.ts`、`test/config.test.ts`、`test/schema.test.ts`、`test/invariants.test.ts`。
@@ -3317,3 +3321,50 @@ R1 读代码的推断（没有实跑）：worker 的提交只要用了这四种�
 - 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner、真实的 vitest 子进程或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b16 prepareAcceptance 里运行器抛错的两种情形；两条空过的测试改实（不接进队列）
+
+优先级：80　依赖：v046-b12
+
+操作员读代码并实测：测试 agent 的一次运行中途被中止时，`prepareAcceptance` 直接抛出 `AbortError`，不按失败返回，也不记 `tester.finished`。接线（v046-b15）调的就是这个函数，先修。
+另有两条 v046-b14 加的测试守不住自己的名字，一并改实。这一批不改 `src/run.ts`。
+
+条目：
+1. 读 SPEC 16.15 的「`prepareAcceptance` 里运行器抛错的两种情形」一段。`src/acceptance.ts`：照那四条做。顺手去掉没用的变量 `lastMisclassified`（没有声明类别标错时，失败返回值的 `misclassified` 仍是空数组）。
+   **假测试 agent 在第 1 次运行中途让 `signal` 中止，`testerMax` 是 2：`prepareAcceptance` 不抛错，返回 `ok` 为 false、`attempts` 为 1、`reason` 为 `tester_failed`；运行器只被调用 1 次；**
+   **`record` 收到 `tester.started` 与 `tester.finished` 各 1 条，后者带 `error`；私有临时目录里没有留下 `collie-accept-*`**
+   **第 1 次运行器抛出普通错误（`signal` 没有中止）、第 2 次正常且红检查通过：返回 `ok` 为 true、`attempts` 为 2，第 2 次的提示词里有第 1 次的错误信息**
+2. `test/prepare-acceptance.test.ts` 新加一组 `describe('prepareAcceptance: abort and runner errors', …)`：条目 1 加粗的两种情形；两次都抛普通错误 → `tester_failed`、`attempts` 为 2、`problems` 里有错误信息；
+   `onTesterEvent` 在第 2 次拉起时第一个参数是 2（现在只测了第 1 次）。
+   R1 查过现有用例：这个文件里没有一条让运行器抛错（假测试 agent 的场景都给的是返回值）；`signal aborted before next attempt → tester_failed, no second invocation` 用的是一开始就中止的信号，一次都不拉起，行为不变；
+   `injected redCheck throws → …` 与 `addWorktree fails (bad headSha) → …` 两条仍然应当抛错；`record receives events in the right order for two attempts` 的两次都正常结束，事件序列不变。
+   `test/invariants.test.ts` 加「`src/acceptance.ts` 里没有 `lastMisclassified`」
+3. `test/r2-commits.test.ts` 的两条用例改实。这两条点名允许改写，在「偏离或疑问」里列出原断言与现断言：
+   `interrupt auto-retry: second run is not blocked by R2 retry commit`：现在 worker 是崩溃、没有走到中断重跑，断言包在 `if` 里，空过。改成真的走到中断重跑
+   （做法照 `test/scenario-n.test.ts` 的 `idle once → interrupt retry → PASS → queue continues (exit 0)`），去掉 `if`，断言：队列 journal 里有 `why` 为 `interrupt_retry` 的 `queue.batch_started`；重跑那一次的 `spec_diff_lines` 是 0、结论 PASS；退出码 0。
+   `R2 commit count in git log equals r2.commit count in journal`：现在只断言大于 0。改成真的比较：`git log` 里提交说明以 `docs: issue ` 或 `progress: ` 开头的提交的 sha 集合，等于 journal 里 `r2.commit` 的 sha 集合。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/acceptance.ts`、`test/prepare-acceptance.test.ts`、`test/r2-commits.test.ts`、`test/invariants.test.ts`。不应改动 `test/invariants.test.ts` 已有的任何断言。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 没有 git 全局身份时两个文件的测试通过 | `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/prepare-acceptance.test.ts test/r2-commits.test.ts` | exit 0 |
+| 新的一组用例在 | `grep -qF "prepareAcceptance: abort and runner errors" test/prepare-acceptance.test.ts` | exit 0 |
+| 没用的变量去掉了 | `! grep -qF "lastMisclassified" src/acceptance.ts` | exit 0 |
+| 中断重跑那条不再空过 | `grep -qF "interrupt_retry" test/r2-commits.test.ts && ! grep -qE "if \(passEvents\.length > 0\)" test/r2-commits.test.ts` | exit 0 |
+| 队列还没有用它（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qE "acceptance\.js"` | exit 0 |
+| 不变量同步 | `grep -qF "lastMisclassified" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `AGENT-tester.md`）；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/run.ts`、`src/redcheck.ts`、`src/evidence.ts`、`src/ladder.ts`、`src/roles/`、`src/runner/`、`src/schema/index.ts`、`test/support/sandbox.ts`；把这个模块接进队列
+- 让红检查抛出的错误被吞掉；让 `prepareAcceptance` 往主仓库的工作区写文件、提交或推送
+- 为了让测试过而删除或跳过任何测试；条目 3 点名的两条之外，删去或改松任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
