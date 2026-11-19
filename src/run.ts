@@ -1511,6 +1511,92 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
           ...(redact.length > 0 ? { redact } : {}),
         });
 
+        // SPEC 16.14: tester-specific escalation helper.
+        // Uses "上报：验收测试没有准备好 — <reason>" (not "上报：无 report — …").
+        // The `escalated` event carries the bare reason so it starts with the
+        // expected prefix (red_check_failed / misclassified / tester_failed / tester_touched_main_tree).
+        const testerEscalate = async (
+          bareReason: string,
+          extraFiles: string[] = [],
+        ): Promise<RunOutcome> => {
+          rec.record('escalated', { reason: bareReason });
+          const escalationDesc = `上报：验收测试没有准备好 — ${bareReason}`;
+          const decision = escalationDecision(escalationDesc);
+
+          let evidence = emptyEvidence();
+          try {
+            const commits = await log(root, baseSha, 'HEAD');
+            let remoteHasHead = false;
+            try {
+              remoteHasHead = await remoteContains(
+                root,
+                ctx.remote,
+                config.ci.expected_branch,
+                await revParse(root, 'HEAD'),
+              );
+            } catch {
+              // Best effort
+            }
+            evidence = {
+              ...evidence,
+              commits_actual: commits.map((c) => c.sha),
+              remote_has_head: remoteHasHead,
+            };
+          } catch {
+            // Best effort
+          }
+
+          const progressPath = writeProgress(root, {
+            batchId,
+            runId,
+            at: ctx.now().toISOString(),
+            decision,
+            evidence,
+            workerExitCode,
+            workerStopReason,
+          });
+          const testerEnvelopes = [relative(root, progressPath), ...extraFiles];
+          if (ctx.updateBacklogStatus === true) {
+            const backlogFile = join(root, BACKLOG_RELATIVE_PATH);
+            try {
+              const backlogText = readFileSync(backlogFile, 'utf8');
+              const result = setBatchStatus(backlogText, batchId, 'blocked');
+              if (result.changed) {
+                writeFileSync(backlogFile, result.text);
+                testerEnvelopes.push(BACKLOG_RELATIVE_PATH);
+                rec.record('batch.status', {
+                  batch_id: batchId,
+                  from: result.from ?? '',
+                  to: 'blocked',
+                });
+              } else {
+                rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
+              }
+            } catch {
+              rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
+            }
+          }
+          await r2Commit(root, `progress: ${batchId} ${decision.final}`, testerEnvelopes, rec);
+
+          // SPEC 12.1: push the verdict commit to remote (tester escalation path).
+          try {
+            await push(root, ctx.remote, config.ci.expected_branch);
+            const pushSha = await revParse(root, 'HEAD');
+            rec.record('verdict.pushed', {
+              sha: pushSha,
+              remote: ctx.remote,
+              branch: config.ci.expected_branch,
+            });
+          } catch (pushError) {
+            rec.record('verdict.push_failed', {
+              sha: await revParse(root, 'HEAD').catch(() => 'unknown'),
+              error: message(pushError),
+            });
+          }
+
+          return finish('BLOCK', { escalation: bareReason, decision });
+        };
+
         // SPEC 16.14 step 4: check main workspace — git status --porcelain must be empty.
         const mainStatus = await status(root);
         if (!mainStatus.clean) {
@@ -1518,7 +1604,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
           const testerTouchReason = `tester_touched_main_tree: ${touchedFiles.join(', ')}`;
           // Do NOT clean up the files — leave them for human inspection.
           // No commits are made for the tester's files.
-          return await escalate(testerTouchReason, baseSha);
+          return await testerEscalate(testerTouchReason);
         }
 
         if (testerResult.ok) {
@@ -1566,83 +1652,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
 
           // Include tester.md in the verdict/escalation commit.
           const testerMdRel = join('.collie', 'batches', batchId, 'tester.md');
-          // We need a custom escalation path that includes tester.md in the commit.
-          rec.record('escalated', { reason: `上报：验收测试没有准备好 — ${escalateReason}` });
-          const escalationReason = `上报：验收测试没有准备好 — ${escalateReason}`;
-          const decision = escalationDecision(escalationReason);
-
-          let evidence = emptyEvidence();
-          try {
-            const commits = await log(root, baseSha, 'HEAD');
-            let remoteHasHead = false;
-            try {
-              remoteHasHead = await remoteContains(
-                root,
-                ctx.remote,
-                config.ci.expected_branch,
-                await revParse(root, 'HEAD'),
-              );
-            } catch {
-              // Best effort
-            }
-            evidence = {
-              ...evidence,
-              commits_actual: commits.map((c) => c.sha),
-              remote_has_head: remoteHasHead,
-            };
-          } catch {
-            // Best effort
-          }
-
-          const progressPath = writeProgress(root, {
-            batchId,
-            runId,
-            at: ctx.now().toISOString(),
-            decision,
-            evidence,
-            workerExitCode,
-            workerStopReason,
-          });
-          const escalateEnvelopes = [relative(root, progressPath), testerMdRel];
-          if (ctx.updateBacklogStatus === true) {
-            const backlogFile = join(root, BACKLOG_RELATIVE_PATH);
-            try {
-              const backlogText = readFileSync(backlogFile, 'utf8');
-              const result = setBatchStatus(backlogText, batchId, 'blocked');
-              if (result.changed) {
-                writeFileSync(backlogFile, result.text);
-                escalateEnvelopes.push(BACKLOG_RELATIVE_PATH);
-                rec.record('batch.status', {
-                  batch_id: batchId,
-                  from: result.from ?? '',
-                  to: 'blocked',
-                });
-              } else {
-                rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
-              }
-            } catch {
-              rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
-            }
-          }
-          await r2Commit(root, `progress: ${batchId} ${decision.final}`, escalateEnvelopes, rec);
-
-          // SPEC 12.1: push the verdict commit to remote (tester escalation path).
-          try {
-            await push(root, ctx.remote, config.ci.expected_branch);
-            const pushSha = await revParse(root, 'HEAD');
-            rec.record('verdict.pushed', {
-              sha: pushSha,
-              remote: ctx.remote,
-              branch: config.ci.expected_branch,
-            });
-          } catch (pushError) {
-            rec.record('verdict.push_failed', {
-              sha: await revParse(root, 'HEAD').catch(() => 'unknown'),
-              error: message(pushError),
-            });
-          }
-
-          return finish('BLOCK', { escalation: escalateReason, decision });
+          return await testerEscalate(escalateReason, [testerMdRel]);
         }
       }
     }

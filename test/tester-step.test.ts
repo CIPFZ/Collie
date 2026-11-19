@@ -351,11 +351,11 @@ function workerScene(box: TesterSandbox, suffix = ''): FakeScene {
   };
 }
 
-function reviewerScene(): FakeScene {
+function reviewerScene(verdict: 'PASS' | 'FIX' = 'PASS'): FakeScene {
   const body: Verdict = {
     schema_version: 1,
     batch_id: BATCH,
-    verdict: 'PASS',
+    verdict,
     evidence: {
       commits_actual: [],
       verify_results: [{ cmd: TEST_CMD, exit_code: 0, summary: '1 passed, 0 failed' }],
@@ -367,8 +367,8 @@ function reviewerScene(): FakeScene {
       spec_diff_lines: 0,
     },
     claim_mismatches: [],
-    gaps: [],
-    reason: 'the report looks complete',
+    gaps: verdict === 'FIX' ? ['needs another look'] : [],
+    reason: verdict === 'FIX' ? 'some gaps found' : 'the report looks complete',
   };
   return {
     expectRole: 'reviewer',
@@ -494,7 +494,7 @@ describe('tester step: failures stop the batch', () => {
     const events = box.events();
     const escalated = events.find((e) => e.event === 'escalated');
     expect(escalated).toBeDefined();
-    expect(escalated?.reason as string).toContain('red_check');
+    expect((escalated?.reason as string).startsWith('red_check_failed')).toBe(true);
 
     // tester.md should exist in the batch dir
     expect(existsSync(join(box.root, '.collie', 'batches', BATCH, 'tester.md'))).toBe(true);
@@ -518,7 +518,7 @@ describe('tester step: failures stop the batch', () => {
     const events = box.events();
     const escalated = events.find((e) => e.event === 'escalated');
     expect(escalated).toBeDefined();
-    expect(escalated?.reason as string).toContain('misclassified');
+    expect((escalated?.reason as string).startsWith('misclassified')).toBe(true);
 
     // Only 1 tester call (misclassified stops retry)
     expect(runner.calls.filter((c) => c.role === 'tester').length).toBe(1);
@@ -538,7 +538,7 @@ describe('tester step: failures stop the batch', () => {
     const events = box.events();
     const escalated = events.find((e) => e.event === 'escalated');
     expect(escalated).toBeDefined();
-    expect(escalated?.reason as string).toContain('tester_touched_main_tree');
+    expect((escalated?.reason as string).startsWith('tester_touched_main_tree')).toBe(true);
 
     // The rogue file should still be in the main workspace (not cleaned up)
     expect(existsSync(join(box.root, 'rogue.txt'))).toBe(true);
@@ -558,7 +558,7 @@ describe('tester step: failures stop the batch', () => {
     const events = box.events();
     const escalated = events.find((e) => e.event === 'escalated');
     expect(escalated).toBeDefined();
-    expect(escalated?.reason as string).toContain('tester_failed');
+    expect((escalated?.reason as string).startsWith('tester_failed')).toBe(true);
   });
 
   it('config has no [agent.tester] → exit 1, stderr names [agent.tester], no commits', async () => {
@@ -622,12 +622,12 @@ describe('tester step: skipped when the tests are already in the tree', () => {
     expect(eventTypes.filter((e) => e.startsWith('redcheck.')).length).toBe(0);
   });
 
-  it('FIX rerun after first PASS: tester only runs on first attempt', async () => {
-    // First run: tester runs and passes, full pipeline gets PASS
-    const runner1 = new FakeRunner([testerScene(), workerScene(box), reviewerScene()]);
+  it('FIX rerun after first FIX: tester only runs on first attempt', async () => {
+    // First run: tester runs and passes, full pipeline gets FIX verdict
+    const runner1 = new FakeRunner([testerScene(), workerScene(box), reviewerScene('FIX')]);
     const redCheck = passingRedCheck();
     const exit1 = await box.run(runner1, { redCheck });
-    expect(exit1).toBe(0);
+    expect(exit1).toBe(10); // FIX exit code
 
     // Verify the acceptance test is now in the tree
     expect(existsSync(join(box.root, `test/acceptance/${BATCH}/new.test.ts`))).toBe(true);
@@ -636,11 +636,15 @@ describe('tester step: skipped when the tests are already in the tree', () => {
     // step should be skipped automatically — no need to change the backlog.
     const runner2 = new FakeRunner([workerScene(box, '-v2'), reviewerScene()]);
     const exit2 = await box.run(runner2);
-    expect(exit2).toBe(0);
+    expect(exit2).toBe(0); // PASS exit code
 
     // Second run should not call tester
     expect(runner2.calls).toHaveLength(2);
     expect(runner2.calls[0]?.role).toBe('worker');
     expect(runner2.calls[1]?.role).toBe('reviewer');
+
+    // Combined call sequence across both runs: tester, worker, reviewer, worker, reviewer
+    const allCalls = [...runner1.calls, ...runner2.calls].map((c) => c.role);
+    expect(allCalls).toEqual(['tester', 'worker', 'reviewer', 'worker', 'reviewer']);
   });
 });
