@@ -12,6 +12,7 @@ import {
   type Batch,
   type CollieConfig,
   type Report,
+  type Scenario,
   type TaskFrontmatter,
 } from '../schema/index.js';
 
@@ -89,8 +90,51 @@ function listItem(marker: string, text: string): string {
   return `${marker} ${text.split('\n').join(`\n${' '.repeat(marker.length + 1)}`)}`;
 }
 
+/** SPEC 16.16: maps scenario kind to Chinese label for the worker task body. */
+function scenarioKindLabel(kind: Scenario['kind']): string {
+  return kind === 'new' ? '新' : '保持';
+}
+
+/**
+ * SPEC 16.16 (v046-b18): when a batch has scenarios, render the 「本批次情形」
+ * and (optionally) 「本批次接口」 sections that go between 条目 and 验收标准.
+ * Returns an array of section strings (0, 1, or 2 elements).
+ */
+function renderScenarioSections(batch: Batch): string[] {
+  if (batch.scenarios === undefined || batch.scenarios.length === 0) return [];
+  const result: string[] = [];
+
+  // 「本批次情形」: each line "- <id> [新|保持] <text>", same as given to tester agent.
+  result.push(
+    [
+      '## 本批次情形',
+      '',
+      ...batch.scenarios.map((s) =>
+        listItem('-', `${s.id} [${scenarioKindLabel(s.kind)}] ${s.text}`),
+      ),
+    ].join('\n'),
+  );
+
+  // 「本批次接口」: only when interfaces is non-empty.
+  if (batch.interfaces !== undefined && batch.interfaces.length > 0) {
+    result.push(
+      ['## 本批次接口', '', ...batch.interfaces.map((iface) => listItem('-', iface))].join('\n'),
+    );
+  }
+
+  return result;
+}
+
 function renderBody(batch: Batch): string {
   const reportFile = `.collie/batches/${batch.id}/${REPORT_FILE_NAME}`;
+  const hasScenarios = batch.scenarios !== undefined && batch.scenarios.length > 0;
+  const scenarioSections = renderScenarioSections(batch);
+
+  // SPEC 16.16: when scenarios are present, add a note about acceptance tests.
+  const acceptanceNote = hasScenarios
+    ? `\n\n\`test/acceptance/${batch.id}/\` 下是本批次的验收测试，由测试 agent 写好，你不能改（受保护路径）。`
+    : '';
+
   const sections = [
     `# 批次 ${batch.id}：${batch.title}`,
     [
@@ -104,6 +148,8 @@ function renderBody(batch: Batch): string {
       '',
       ...batch.items.map((item, i) => listItem(`${String(i + 1)}.`, item)),
     ].join('\n'),
+    // SPEC 16.16: scenario + interface sections go between 条目 and 验收标准.
+    ...scenarioSections,
     [
       '## 验收标准（可机器判定）',
       '',
@@ -112,7 +158,7 @@ function renderBody(batch: Batch): string {
       ...batch.acceptance.map(
         (a) => `| ${cell(a.desc)} | ${cell(codeSpan(a.cmd))} | ${cell(expectText(a.expect))} |`,
       ),
-    ].join('\n'),
+    ].join('\n') + acceptanceNote,
     [
       '## 本批次额外禁止',
       '',

@@ -186,4 +186,59 @@ describe('task-envelope: body', () => {
       '## 汇报要求',
     ]);
   });
+
+  it('renders 本批次情形 and 本批次接口 when batch has scenarios (SPEC 16.16)', () => {
+    const withScenarios: Batch = {
+      ...batch('v01-b02'),
+      scenarios: [
+        { id: 'S1', kind: 'new', text: '第一个情形' },
+        { id: 'S2', kind: 'keep', text: '第二个情形' },
+      ],
+      interfaces: ['someFunction(a: string): boolean'],
+    };
+    const { body } = splitFrontmatter(buildTask(withScenarios, ctx).markdown);
+    const headings = body.split('\n').filter((l) => l.startsWith('#'));
+    // Section order: 条目 → 情形 → 接口 → 验收 → 禁止 → 汇报
+    expect(headings).toEqual([
+      `# 批次 v01-b02：${withScenarios.title}`,
+      '## 你的身份与边界',
+      `## 本批次条目（${String(withScenarios.items.length)} 个）`,
+      '## 本批次情形',
+      '## 本批次接口',
+      '## 验收标准（可机器判定）',
+      '## 本批次额外禁止',
+      '## 汇报要求',
+    ]);
+    // Scenario lines use "- <id> [新|保持] <text>" format
+    expect(body).toContain('- S1 [新] 第一个情形');
+    expect(body).toContain('- S2 [保持] 第二个情形');
+    // Interface line
+    expect(body).toContain('- someFunction(a: string): boolean');
+    // Acceptance test protection note
+    expect(body).toContain(
+      `\`test/acceptance/${withScenarios.id}/\` 下是本批次的验收测试，由测试 agent 写好，你不能改（受保护路径）`,
+    );
+  });
+
+  it('without scenarios, task body is byte-for-byte identical to the no-scenarios output (SPEC 16.16)', () => {
+    const noScenarios = batch('v01-b01');
+    // Ensure this batch indeed has no scenarios
+    expect(noScenarios.scenarios).toBeUndefined();
+    const { body } = splitFrontmatter(buildTask(noScenarios, ctx).markdown);
+    // No scenario or interface sections
+    expect(body).not.toContain('## 本批次情形');
+    expect(body).not.toContain('## 本批次接口');
+    // No acceptance-test protection note
+    expect(body).not.toContain('由测试 agent 写好，你不能改');
+    // Headings are the original six
+    const headings = body.split('\n').filter((l) => l.startsWith('#'));
+    expect(headings).toEqual([
+      '# 批次 v01-b01：工程骨架与基础设施',
+      '## 你的身份与边界',
+      '## 本批次条目（3 个）',
+      '## 验收标准（可机器判定）',
+      '## 本批次额外禁止',
+      '## 汇报要求',
+    ]);
+  });
 });
