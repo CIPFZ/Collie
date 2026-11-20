@@ -904,8 +904,21 @@ export interface WhyAttempt {
   /** SPEC 13.23: ci.verdict_commit events for this run. */
   verdictCommitCi: { sha: string; conclusion: string; when: string; runUrl: string | null }[];
 
-  /** SPEC 13.23: cost breakdown per attempt. */
-  cost: { worker: number | null; reviewer: number | null; total: number | null };
+  /** Tester agent aggregate (SPEC 16.16): null when no tester.finished events exist. */
+  tester: {
+    turns: number | null;
+    costUsd: number | null;
+    durationMs: number | null;
+    invocations: number;
+  } | null;
+
+  /** SPEC 13.23: cost breakdown per attempt; tester added in SPEC 16.16. */
+  cost: {
+    worker: number | null;
+    reviewer: number | null;
+    tester: number | null;
+    total: number | null;
+  };
 
   /** Conclusion: verdict, rule, reason from run.finished. */
   verdict: string | null;
@@ -1130,14 +1143,50 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
       runUrl: asString(e.run_url),
     }));
 
-  // SPEC 13.23: cost breakdown = worker + reviewer; both missing = null.
+  // SPEC 16.16: tester agent aggregate from tester.finished events.
+  const testerFinishedAll = events.filter((e) => e.event === 'tester.finished');
+  let tester: WhyAttempt['tester'] = null;
+  if (testerFinishedAll.length > 0) {
+    let sumTurns = 0;
+    let sumCost = 0;
+    let sumDuration = 0;
+    let hasTurns = false;
+    let hasCost = false;
+    let hasDuration = false;
+    for (const tf of testerFinishedAll) {
+      const t = asNumber(tf.num_turns);
+      const c = asNumber(tf.cost_usd);
+      const d = asNumber(tf.duration_ms);
+      if (t !== null) {
+        sumTurns += t;
+        hasTurns = true;
+      }
+      if (c !== null) {
+        sumCost += c;
+        hasCost = true;
+      }
+      if (d !== null) {
+        sumDuration += d;
+        hasDuration = true;
+      }
+    }
+    tester = {
+      turns: hasTurns ? sumTurns : null,
+      costUsd: hasCost ? sumCost : null,
+      durationMs: hasDuration ? sumDuration : null,
+      invocations: testerFinishedAll.length,
+    };
+  }
+
+  // SPEC 16.16: cost breakdown = worker + reviewer + tester; all missing = null.
   const workerCost = worker?.costUsd ?? null;
   const reviewerCost = reviewer?.costUsd ?? null;
+  const testerCost = tester?.costUsd ?? null;
   let totalCost: number | null = null;
-  if (workerCost !== null || reviewerCost !== null) {
-    totalCost = (workerCost ?? 0) + (reviewerCost ?? 0);
+  if (workerCost !== null || reviewerCost !== null || testerCost !== null) {
+    totalCost = (workerCost ?? 0) + (reviewerCost ?? 0) + (testerCost ?? 0);
   }
-  const cost = { worker: workerCost, reviewer: reviewerCost, total: totalCost };
+  const cost = { worker: workerCost, reviewer: reviewerCost, tester: testerCost, total: totalCost };
 
   // Conclusion — SPEC 13.20: rule/reason fallback order:
   //   run.finished → last verdict.downgraded → null.
@@ -1155,6 +1204,7 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
     started: started?.ts ?? null,
     finished: finished?.ts ?? null,
     worker,
+    tester,
     evidence,
     failedAcceptance,
     claimMismatches,
@@ -1322,6 +1372,18 @@ export function formatWhy(proj: WhyProjection): string {
       lines.push('worker: —');
     }
 
+    // 1b. Tester agent (SPEC 16.16): only shown when tester.finished events exist.
+    if (a.tester !== null) {
+      const t = a.tester;
+      const tParts = [
+        `turns=${dash(t.turns)}`,
+        `cost=${t.costUsd !== null ? `$${t.costUsd.toFixed(COST_DECIMALS)}` : '—'}`,
+        `duration=${formatDuration(t.durationMs)}`,
+        `invocations=${String(t.invocations)}`,
+      ];
+      lines.push(`tester: ${tParts.join(' ')}`);
+    }
+
     // 2. Evidence.
     if (a.evidence !== null) {
       const ev = a.evidence;
@@ -1428,12 +1490,17 @@ export function formatWhy(proj: WhyProjection): string {
       lines.push(`${p.event}: ${p.ts}${detail !== '' ? ` ${detail}` : ''}`);
     }
 
-    // SPEC 13.23: cost breakdown line before conclusion.
+    // SPEC 16.16: cost breakdown line; tester shown only when present.
     {
       const wc = a.cost.worker !== null ? `$${a.cost.worker.toFixed(COST_DECIMALS)}` : '—';
       const rc = a.cost.reviewer !== null ? `$${a.cost.reviewer.toFixed(COST_DECIMALS)}` : '—';
       const tc = a.cost.total !== null ? `$${a.cost.total.toFixed(COST_DECIMALS)}` : '—';
-      lines.push(`cost: worker=${wc} reviewer=${rc} total=${tc}`);
+      if (a.tester !== null) {
+        const tesc = a.cost.tester !== null ? `$${a.cost.tester.toFixed(COST_DECIMALS)}` : '—';
+        lines.push(`cost: worker=${wc} reviewer=${rc} tester=${tesc} total=${tc}`);
+      } else {
+        lines.push(`cost: worker=${wc} reviewer=${rc} total=${tc}`);
+      }
     }
 
     // Conclusion line.
@@ -1493,6 +1560,8 @@ export interface ReportBatchRow {
   durationMs: number | null;
   workerCost: number | null;
   reviewerCost: number | null;
+  /** SPEC 16.16: aggregated tester cost; null when no tester.finished events exist. */
+  testerCost: number | null;
   totalCost: number | null;
   workerTurns: number | null;
   /** SPEC 14.10: worker.started.max_turns, null when the journal predates the field. */
@@ -1644,14 +1713,31 @@ export function projectReport(
       durationMs = new Date(runFinished.ts).getTime() - new Date(runStarted.ts).getTime();
     }
 
-    // cost: worker + reviewer (SPEC 13.23)
+    // cost: worker + reviewer + tester (SPEC 13.23, SPEC 16.16)
     const wf = batchEvents.find((ev) => ev.event === 'worker.finished');
     const rf = batchEvents.find((ev) => ev.event === 'reviewer.finished');
     const workerCost = wf !== undefined ? asNumber(wf.cost_usd) : null;
     const reviewerCost = rf !== undefined ? asNumber(rf.cost_usd) : null;
+
+    // SPEC 16.16: aggregate tester cost from all tester.finished events.
+    const testerFinishedEvts = batchEvents.filter((ev) => ev.event === 'tester.finished');
+    let testerCost: number | null = null;
+    if (testerFinishedEvts.length > 0) {
+      let tc = 0;
+      let hasTc = false;
+      for (const tf of testerFinishedEvts) {
+        const c = asNumber(tf.cost_usd);
+        if (c !== null) {
+          tc += c;
+          hasTc = true;
+        }
+      }
+      testerCost = hasTc ? tc : null;
+    }
+
     let totalCost: number | null = null;
-    if (workerCost !== null || reviewerCost !== null) {
-      totalCost = (workerCost ?? 0) + (reviewerCost ?? 0);
+    if (workerCost !== null || reviewerCost !== null || testerCost !== null) {
+      totalCost = (workerCost ?? 0) + (reviewerCost ?? 0) + (testerCost ?? 0);
     }
 
     // worker turns (and SPEC 14.10: the configured upper bound, absent in old journals)
@@ -1684,6 +1770,7 @@ export function projectReport(
       durationMs,
       workerCost,
       reviewerCost,
+      testerCost,
       totalCost,
       workerTurns,
       workerMaxTurns,
@@ -1787,20 +1874,39 @@ export function formatReport(
   lines.push('');
 
   // §3: batch runs table
+  // SPEC 16.16: tester column only appears when at least one row has tester cost.
+  const hasTester = proj.batchRows.some((r) => r.testerCost !== null);
   lines.push('## 实际经过');
   lines.push('');
-  lines.push(
-    '| 顺序 | 批次 | 运行 | attempt | 结论 | 规则 | 用时 | worker 花费 | reviewer 花费 | 合计 | worker 轮数 | head_sha | audit |',
-  );
-  lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  if (hasTester) {
+    lines.push(
+      '| 顺序 | 批次 | 运行 | attempt | 结论 | 规则 | 用时 | worker 花费 | reviewer 花费 | tester 花费 | 合计 | worker 轮数 | head_sha | audit |',
+    );
+    lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  } else {
+    lines.push(
+      '| 顺序 | 批次 | 运行 | attempt | 结论 | 规则 | 用时 | worker 花费 | reviewer 花费 | 合计 | worker 轮数 | head_sha | audit |',
+    );
+    lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  }
   for (const r of proj.batchRows) {
     const costFmt = (v: number | null) => (v !== null ? `$${v.toFixed(COST_DECIMALS)}` : '—');
-    lines.push(
-      `| ${String(r.seq)} | ${r.batchId} | ${r.runId} | ${String(r.attempt)} | ${dash(r.verdict)} | ${dash(r.rule)} | ${formatDuration(r.durationMs)} | ${costFmt(r.workerCost)} | ${costFmt(r.reviewerCost)} | ${costFmt(r.totalCost)} | ${formatTurns(r.workerTurns, r.workerMaxTurns)} | ${dash(r.headSha)} | ${dash(r.auditOutcome)} |`,
-    );
+    if (hasTester) {
+      lines.push(
+        `| ${String(r.seq)} | ${r.batchId} | ${r.runId} | ${String(r.attempt)} | ${dash(r.verdict)} | ${dash(r.rule)} | ${formatDuration(r.durationMs)} | ${costFmt(r.workerCost)} | ${costFmt(r.reviewerCost)} | ${costFmt(r.testerCost)} | ${costFmt(r.totalCost)} | ${formatTurns(r.workerTurns, r.workerMaxTurns)} | ${dash(r.headSha)} | ${dash(r.auditOutcome)} |`,
+      );
+    } else {
+      lines.push(
+        `| ${String(r.seq)} | ${r.batchId} | ${r.runId} | ${String(r.attempt)} | ${dash(r.verdict)} | ${dash(r.rule)} | ${formatDuration(r.durationMs)} | ${costFmt(r.workerCost)} | ${costFmt(r.reviewerCost)} | ${costFmt(r.totalCost)} | ${formatTurns(r.workerTurns, r.workerMaxTurns)} | ${dash(r.headSha)} | ${dash(r.auditOutcome)} |`,
+      );
+    }
   }
   if (proj.batchRows.length === 0) {
-    lines.push('| — | — | — | — | — | — | — | — | — | — | — | — | — |');
+    if (hasTester) {
+      lines.push('| — | — | — | — | — | — | — | — | — | — | — | — | — | — |');
+    } else {
+      lines.push('| — | — | — | — | — | — | — | — | — | — | — | — | — |');
+    }
   }
   // SPEC 14.10: totals row (duration, worker cost, reviewer cost, combined cost).
   {
@@ -1817,9 +1923,15 @@ export function formatReport(
       return seen ? total : null;
     };
     const costFmt = (v: number | null) => (v !== null ? `$${v.toFixed(COST_DECIMALS)}` : '—');
-    lines.push(
-      `| 合计 | | | | | | ${formatDuration(sum((r) => r.durationMs))} | ${costFmt(sum((r) => r.workerCost))} | ${costFmt(sum((r) => r.reviewerCost))} | ${costFmt(sum((r) => r.totalCost))} | | | |`,
-    );
+    if (hasTester) {
+      lines.push(
+        `| 合计 | | | | | | ${formatDuration(sum((r) => r.durationMs))} | ${costFmt(sum((r) => r.workerCost))} | ${costFmt(sum((r) => r.reviewerCost))} | ${costFmt(sum((r) => r.testerCost))} | ${costFmt(sum((r) => r.totalCost))} | | | |`,
+      );
+    } else {
+      lines.push(
+        `| 合计 | | | | | | ${formatDuration(sum((r) => r.durationMs))} | ${costFmt(sum((r) => r.workerCost))} | ${costFmt(sum((r) => r.reviewerCost))} | ${costFmt(sum((r) => r.totalCost))} | | | |`,
+      );
+    }
   }
   lines.push('');
 

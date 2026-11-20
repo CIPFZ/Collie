@@ -535,3 +535,316 @@ describe('collie report: edge cases', () => {
     expect(preflightSection.trim()).toBe('—');
   });
 });
+
+// ===================================================================
+// Group 4: Tester agent cost in report (SPEC 16.16)
+// ===================================================================
+
+describe('collie report: tester agent cost (SPEC 16.16)', () => {
+  it('tester.finished cost included in total; tester column appears', async () => {
+    const { projectReport, formatReport, formatWhy, projectWhy } = await import('../src/view.js');
+    type Event = import('../src/schema/index.js').Event;
+    type RunData = import('../src/view.js').RunData;
+
+    // Build a batch run journal with tester.finished events.
+    const batchRunId = 'r-20261120-100000';
+    const batchEvents: Event[] = [
+      {
+        ts: '2026-11-20T10:00:00.000Z',
+        run_id: batchRunId,
+        event: 'run.started',
+        batch_id: 'v99-t01',
+      },
+      {
+        ts: '2026-11-20T10:00:01.000Z',
+        run_id: batchRunId,
+        event: 'tester.started',
+        batch_id: 'v99-t01',
+        attempt: 1,
+      },
+      {
+        ts: '2026-11-20T10:00:30.000Z',
+        run_id: batchRunId,
+        event: 'tester.finished',
+        batch_id: 'v99-t01',
+        attempt: 1,
+        exit_code: 0,
+        num_turns: 6,
+        cost_usd: 1.5,
+        duration_ms: 29000,
+      },
+      {
+        ts: '2026-11-20T10:01:00.000Z',
+        run_id: batchRunId,
+        event: 'worker.started',
+        batch_id: 'v99-t01',
+      },
+      {
+        ts: '2026-11-20T10:02:00.000Z',
+        run_id: batchRunId,
+        event: 'worker.finished',
+        batch_id: 'v99-t01',
+        exit_code: 0,
+        num_turns: 10,
+        cost_usd: 5.0,
+        duration_ms: 60000,
+      },
+      {
+        ts: '2026-11-20T10:02:30.000Z',
+        run_id: batchRunId,
+        event: 'reviewer.started',
+        batch_id: 'v99-t01',
+      },
+      {
+        ts: '2026-11-20T10:03:00.000Z',
+        run_id: batchRunId,
+        event: 'reviewer.finished',
+        batch_id: 'v99-t01',
+        exit_code: 0,
+        num_turns: 4,
+        cost_usd: 1.0,
+      },
+      {
+        ts: '2026-11-20T10:03:01.000Z',
+        run_id: batchRunId,
+        event: 'reviewer.verdict',
+        batch_id: 'v99-t01',
+        verdict: 'PASS',
+        gaps: [],
+      },
+      {
+        ts: '2026-11-20T10:04:00.000Z',
+        run_id: batchRunId,
+        event: 'run.finished',
+        batch_id: 'v99-t01',
+        verdict: 'PASS',
+        exit_code: 0,
+        rule: 10,
+        reason: 'ok',
+      },
+    ];
+
+    const allRunData: RunData[] = [{ runId: batchRunId, status: 'ok', events: batchEvents }];
+
+    // Queue events referencing the batch run.
+    const queueRunId = 'q-20261120100000';
+    const queueEvents: Event[] = [
+      {
+        ts: '2026-11-20T09:59:00.000Z',
+        run_id: queueRunId,
+        event: 'queue.preflight',
+        ok: true,
+        checks: [{ name: 'worktree_clean', ok: true }],
+      },
+      {
+        ts: '2026-11-20T10:00:00.000Z',
+        run_id: queueRunId,
+        event: 'queue.batch_started',
+        batch_id: 'v99-t01',
+        batch_run_id: batchRunId,
+      },
+      {
+        ts: '2026-11-20T10:04:01.000Z',
+        run_id: queueRunId,
+        event: 'queue.finished',
+        reason: 'exhausted',
+      },
+    ];
+
+    const proj = projectReport(allRunData, queueEvents, queueRunId);
+
+    // Batch row should include tester cost in total.
+    expect(proj.batchRows).toHaveLength(1);
+    const row = proj.batchRows[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(row.testerCost).toBe(1.5);
+    expect(row.workerCost).toBe(5.0);
+    expect(row.reviewerCost).toBe(1.0);
+    // total = worker + reviewer + tester = 5.0 + 1.0 + 1.5 = 7.5
+    expect(row.totalCost).toBeCloseTo(7.5);
+
+    // Build why text for the per-batch section.
+    const whyProj = projectWhy(allRunData, 'v99-t01');
+    const whyText = whyProj !== null ? formatWhy(whyProj) : '';
+    const whyTexts = new Map([['v99-t01', whyText]]);
+
+    const text = formatReport(proj, whyTexts, '(queue events)', '(none)');
+
+    // Table should have tester 花费 column.
+    expect(text).toContain('tester 花费');
+
+    // Per-batch why section should show tester cost breakdown.
+    expect(text).toContain('tester=$1.50');
+
+    // Total row should include tester cost.
+    const totalsLine = text.split('\n').find((line) => line.startsWith('| 合计')) ?? '';
+    expect(totalsLine).toContain('$1.50'); // tester total
+    expect(totalsLine).toContain('$7.50'); // combined total
+  });
+
+  it('two tester invocations in one run: aggregated in total', async () => {
+    const { projectReport } = await import('../src/view.js');
+    type Event = import('../src/schema/index.js').Event;
+    type RunData = import('../src/view.js').RunData;
+
+    const batchRunId = 'r-20261120-110000';
+    const batchEvents: Event[] = [
+      {
+        ts: '2026-11-20T11:00:00.000Z',
+        run_id: batchRunId,
+        event: 'run.started',
+        batch_id: 'v99-t02',
+      },
+      {
+        ts: '2026-11-20T11:00:10.000Z',
+        run_id: batchRunId,
+        event: 'tester.finished',
+        batch_id: 'v99-t02',
+        attempt: 1,
+        exit_code: 0,
+        num_turns: 4,
+        cost_usd: 1.0,
+        duration_ms: 10000,
+      },
+      {
+        ts: '2026-11-20T11:00:30.000Z',
+        run_id: batchRunId,
+        event: 'tester.finished',
+        batch_id: 'v99-t02',
+        attempt: 2,
+        exit_code: 0,
+        num_turns: 3,
+        cost_usd: 0.75,
+        duration_ms: 8000,
+      },
+      {
+        ts: '2026-11-20T11:01:00.000Z',
+        run_id: batchRunId,
+        event: 'worker.finished',
+        batch_id: 'v99-t02',
+        exit_code: 0,
+        num_turns: 8,
+        cost_usd: 4.0,
+      },
+      {
+        ts: '2026-11-20T11:02:00.000Z',
+        run_id: batchRunId,
+        event: 'reviewer.finished',
+        batch_id: 'v99-t02',
+        exit_code: 0,
+        num_turns: 3,
+        cost_usd: 0.5,
+      },
+      {
+        ts: '2026-11-20T11:03:00.000Z',
+        run_id: batchRunId,
+        event: 'run.finished',
+        batch_id: 'v99-t02',
+        verdict: 'PASS',
+        exit_code: 0,
+      },
+    ];
+
+    const allRunData: RunData[] = [{ runId: batchRunId, status: 'ok', events: batchEvents }];
+
+    const queueRunId = 'q-20261120110000';
+    const queueEvents: Event[] = [
+      {
+        ts: '2026-11-20T10:59:00.000Z',
+        run_id: queueRunId,
+        event: 'queue.batch_started',
+        batch_id: 'v99-t02',
+        batch_run_id: batchRunId,
+      },
+      {
+        ts: '2026-11-20T11:03:01.000Z',
+        run_id: queueRunId,
+        event: 'queue.finished',
+        reason: 'exhausted',
+      },
+    ];
+
+    const proj = projectReport(allRunData, queueEvents, queueRunId);
+    expect(proj.batchRows).toHaveLength(1);
+    const row = proj.batchRows[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    // tester cost aggregated: 1.0 + 0.75 = 1.75
+    expect(row.testerCost).toBeCloseTo(1.75);
+    // total = 4.0 + 0.5 + 1.75 = 6.25
+    expect(row.totalCost).toBeCloseTo(6.25);
+  });
+
+  it('no tester events: output byte-identical (no tester column)', async () => {
+    const { projectReport, formatReport } = await import('../src/view.js');
+    type Event = import('../src/schema/index.js').Event;
+    type RunData = import('../src/view.js').RunData;
+
+    const batchRunId = 'r-20261120-120000';
+    const batchEvents: Event[] = [
+      {
+        ts: '2026-11-20T12:00:00.000Z',
+        run_id: batchRunId,
+        event: 'run.started',
+        batch_id: 'v99-t03',
+      },
+      {
+        ts: '2026-11-20T12:01:00.000Z',
+        run_id: batchRunId,
+        event: 'worker.finished',
+        batch_id: 'v99-t03',
+        exit_code: 0,
+        num_turns: 10,
+        cost_usd: 5.0,
+      },
+      {
+        ts: '2026-11-20T12:02:00.000Z',
+        run_id: batchRunId,
+        event: 'reviewer.finished',
+        batch_id: 'v99-t03',
+        exit_code: 0,
+        num_turns: 4,
+        cost_usd: 1.0,
+      },
+      {
+        ts: '2026-11-20T12:03:00.000Z',
+        run_id: batchRunId,
+        event: 'run.finished',
+        batch_id: 'v99-t03',
+        verdict: 'PASS',
+        exit_code: 0,
+      },
+    ];
+
+    const allRunData: RunData[] = [{ runId: batchRunId, status: 'ok', events: batchEvents }];
+
+    const queueRunId = 'q-20261120120000';
+    const queueEvents: Event[] = [
+      {
+        ts: '2026-11-20T11:59:00.000Z',
+        run_id: queueRunId,
+        event: 'queue.batch_started',
+        batch_id: 'v99-t03',
+        batch_run_id: batchRunId,
+      },
+      {
+        ts: '2026-11-20T12:03:01.000Z',
+        run_id: queueRunId,
+        event: 'queue.finished',
+        reason: 'exhausted',
+      },
+    ];
+
+    const proj = projectReport(allRunData, queueEvents, queueRunId);
+    expect(proj.batchRows).toHaveLength(1);
+    const row = proj.batchRows[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(row.testerCost).toBeNull();
+    // total = worker + reviewer only
+    expect(row.totalCost).toBeCloseTo(6.0);
+
+    const text = formatReport(proj, new Map(), '(queue events)', '(none)');
+    // No tester column.
+    expect(text).not.toContain('tester 花费');
+    // Original header intact.
+    expect(text).toContain(
+      '| 顺序 | 批次 | 运行 | attempt | 结论 | 规则 | 用时 | worker 花费 | reviewer 花费 | 合计 | worker 轮数 | head_sha | audit |',
+    );
+  });
+});

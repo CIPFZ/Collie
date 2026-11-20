@@ -1262,3 +1262,235 @@ describe('why — exit codes (SPEC 13.4)', () => {
     expect(parsed).toHaveProperty('attempts');
   });
 });
+
+// ---------------------------------------------------------------------------
+// D. Tester agent display (SPEC 16.16)
+// ---------------------------------------------------------------------------
+
+describe('why — tester agent display (SPEC 16.16)', () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'collie-why-tester-'));
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    writeFileSync(join(root, 'docs', 'backlog.md'), FIXTURE_BACKLOG);
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('single tester.finished: why shows tester line and tester cost in cost breakdown', () => {
+    const RUN = 'r-20261120-010000';
+    const events: Event[] = [
+      makeEvent({ run_id: RUN, event: 'run.started', batch_id: 'v99-b01' }),
+      makeEvent({ run_id: RUN, event: 'tester.started', batch_id: 'v99-b01', attempt: 1 }),
+      makeEvent({
+        run_id: RUN,
+        event: 'tester.finished',
+        batch_id: 'v99-b01',
+        attempt: 1,
+        exit_code: 0,
+        num_turns: 8,
+        cost_usd: 2.0,
+        duration_ms: 30000,
+      }),
+      makeEvent({ run_id: RUN, event: 'worker.started', batch_id: 'v99-b01' }),
+      makeEvent({
+        run_id: RUN,
+        event: 'worker.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-20T01:05:00Z',
+        exit_code: 0,
+        num_turns: 12,
+        cost_usd: 5.0,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'reviewer.started',
+        batch_id: 'v99-b01',
+        head_sha: 'aaa1111111111111111111111111111111111111',
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'reviewer.finished',
+        batch_id: 'v99-b01',
+        exit_code: 0,
+        num_turns: 4,
+        cost_usd: 1.0,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'reviewer.verdict',
+        batch_id: 'v99-b01',
+        verdict: 'PASS',
+        gaps: [],
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'run.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-20T01:10:00Z',
+        verdict: 'PASS',
+        exit_code: 0,
+        rule: 10,
+        reason: 'ok',
+      }),
+    ];
+    writeJournal(root, RUN, events);
+    const runs = loadRuns(root);
+    const proj = projectWhy(runs, 'v99-b01');
+    expect(proj).not.toBeNull();
+
+    const a = proj!.attempts[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+
+    // Tester projection populated.
+    expect(a.tester).not.toBeNull();
+    expect(a.tester?.turns).toBe(8);
+    expect(a.tester?.costUsd).toBe(2.0);
+    expect(a.tester?.durationMs).toBe(30000);
+    expect(a.tester?.invocations).toBe(1);
+
+    // Cost breakdown includes tester.
+    expect(a.cost.worker).toBe(5.0);
+    expect(a.cost.reviewer).toBe(1.0);
+    expect(a.cost.tester).toBe(2.0);
+    expect(a.cost.total).toBeCloseTo(8.0);
+
+    // Text output.
+    const text = formatWhy(proj!); // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(text).toContain('tester: turns=8');
+    expect(text).toContain('cost=$2.00');
+    expect(text).toContain('invocations=1');
+    expect(text).toContain('cost: worker=$5.00 reviewer=$1.00 tester=$2.00 total=$8.00');
+  });
+
+  it('multiple tester invocations: aggregated turns, cost, and duration', () => {
+    const RUN = 'r-20261120-020000';
+    const events: Event[] = [
+      makeEvent({ run_id: RUN, event: 'run.started', batch_id: 'v99-b01' }),
+      makeEvent({ run_id: RUN, event: 'tester.started', batch_id: 'v99-b01', attempt: 1 }),
+      makeEvent({
+        run_id: RUN,
+        event: 'tester.finished',
+        batch_id: 'v99-b01',
+        attempt: 1,
+        exit_code: 0,
+        num_turns: 5,
+        cost_usd: 1.5,
+        duration_ms: 20000,
+      }),
+      makeEvent({ run_id: RUN, event: 'tester.started', batch_id: 'v99-b01', attempt: 2 }),
+      makeEvent({
+        run_id: RUN,
+        event: 'tester.finished',
+        batch_id: 'v99-b01',
+        attempt: 2,
+        exit_code: 0,
+        num_turns: 3,
+        cost_usd: 0.8,
+        duration_ms: 15000,
+      }),
+      makeEvent({ run_id: RUN, event: 'worker.started', batch_id: 'v99-b01' }),
+      makeEvent({
+        run_id: RUN,
+        event: 'worker.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-20T02:05:00Z',
+        exit_code: 0,
+        num_turns: 10,
+        cost_usd: 4.0,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'run.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-20T02:10:00Z',
+        verdict: 'PASS',
+        exit_code: 0,
+        rule: 10,
+        reason: 'ok',
+      }),
+    ];
+    writeJournal(root, RUN, events);
+    const runs = loadRuns(root);
+    const proj = projectWhy(runs, 'v99-b01');
+    expect(proj).not.toBeNull();
+
+    const a = proj!.attempts[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+
+    // Aggregated tester data.
+    expect(a.tester).not.toBeNull();
+    expect(a.tester?.turns).toBe(8); // 5 + 3
+    expect(a.tester?.costUsd).toBeCloseTo(2.3); // 1.5 + 0.8
+    expect(a.tester?.durationMs).toBe(35000); // 20000 + 15000
+    expect(a.tester?.invocations).toBe(2);
+
+    // Total cost includes tester.
+    expect(a.cost.tester).toBeCloseTo(2.3);
+    expect(a.cost.total).toBeCloseTo(6.3); // 4.0 + 0 (no reviewer) + 2.3
+
+    const text = formatWhy(proj!); // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(text).toContain('invocations=2');
+    expect(text).toContain('tester=$2.30');
+  });
+
+  it('no tester events: output identical to run without tester (tester field null)', () => {
+    const RUN = 'r-20261120-030000';
+    const events: Event[] = [
+      makeEvent({ run_id: RUN, event: 'run.started', batch_id: 'v99-b01' }),
+      makeEvent({ run_id: RUN, event: 'worker.started', batch_id: 'v99-b01' }),
+      makeEvent({
+        run_id: RUN,
+        event: 'worker.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-20T03:05:00Z',
+        exit_code: 0,
+        num_turns: 10,
+        cost_usd: 5.0,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'reviewer.finished',
+        batch_id: 'v99-b01',
+        exit_code: 0,
+        num_turns: 4,
+        cost_usd: 1.0,
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'reviewer.verdict',
+        batch_id: 'v99-b01',
+        verdict: 'PASS',
+        gaps: [],
+      }),
+      makeEvent({
+        run_id: RUN,
+        event: 'run.finished',
+        batch_id: 'v99-b01',
+        ts: '2026-11-20T03:10:00Z',
+        verdict: 'PASS',
+        exit_code: 0,
+        rule: 10,
+        reason: 'ok',
+      }),
+    ];
+    writeJournal(root, RUN, events);
+    const runs = loadRuns(root);
+    const proj = projectWhy(runs, 'v99-b01');
+    expect(proj).not.toBeNull();
+
+    const a = proj!.attempts[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+
+    // No tester data.
+    expect(a.tester).toBeNull();
+    expect(a.cost.tester).toBeNull();
+
+    // Text output has no tester line and old-style cost line.
+    const text = formatWhy(proj!); // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
+    expect(text).not.toContain('tester:');
+    expect(text).toContain('cost: worker=$5.00 reviewer=$1.00 total=$6.00');
+    // Ensure no tester in the cost breakdown line.
+    expect(text).not.toMatch(/cost:.*tester/);
+  });
+});
