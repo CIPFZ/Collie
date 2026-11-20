@@ -1602,19 +1602,34 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         if (!mainStatus.clean) {
           const touchedFiles = mainStatus.entries.map((e) => e.path);
           const testerTouchReason = `tester_touched_main_tree: ${touchedFiles.join(', ')}`;
-          // SPEC 16.16 (v046-b17): restore tracked files and remove untracked files
-          // so the tester's changes do not leak into R2's subsequent commits.
-          await git(root, ['checkout', '--', '.']);
-          await git(root, ['clean', '-fd']);
-          // Write tester.md listing the touched files.
+          // SPEC 16.17 (v046-b20): separate tracked and untracked files.
+          const trackedFiles = mainStatus.entries.filter((e) => e.code !== '??').map((e) => e.path);
+          const untrackedFiles = mainStatus.entries
+            .filter((e) => e.code === '??')
+            .map((e) => e.path);
+          // Restore tracked files (modified or deleted) to HEAD; leave untracked files alone.
+          if (trackedFiles.length > 0) {
+            await git(root, ['checkout', 'HEAD', '--', ...trackedFiles]);
+          }
+          // Write tester.md with two sections (SPEC 16.17).
           const testerMdLines: string[] = ['# Tester report', ''];
-          testerMdLines.push('## Touched files', '');
-          for (const f of touchedFiles) {
-            testerMdLines.push(`- ${f}`);
+          testerMdLines.push('## 恢复了的被跟踪文件', '');
+          if (trackedFiles.length > 0) {
+            for (const f of trackedFiles) {
+              testerMdLines.push(`- ${f}`);
+            }
+          } else {
+            testerMdLines.push('无');
           }
           testerMdLines.push('');
-          testerMdLines.push('## Reason', '');
-          testerMdLines.push('tester_touched_main_tree');
+          testerMdLines.push('## 留在工作区的未跟踪文件', '');
+          if (untrackedFiles.length > 0) {
+            for (const f of untrackedFiles) {
+              testerMdLines.push(`- ${f}`);
+            }
+          } else {
+            testerMdLines.push('无');
+          }
           testerMdLines.push('');
           const testerMdPath = join(root, '.collie', 'batches', batchId, 'tester.md');
           mkdirSync(dirname(testerMdPath), { recursive: true });

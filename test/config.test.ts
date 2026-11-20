@@ -318,6 +318,20 @@ describe('config: tester_max and verify.static', () => {
   });
 });
 
+describe('config: worktree_secs', () => {
+  it('worktree_secs = 0 is rejected, error names limits.worktree_secs', () => {
+    const text = replaceLine(VALID_TOML, 'worktree_secs = 1800', 'worktree_secs = 0');
+    const err = configError(text);
+    expect(err.issues.map((i) => i.path)).toEqual(['limits.worktree_secs']);
+  });
+
+  it('config without worktree_secs loads, defaults to 1800', () => {
+    const text = VALID_TOML.replace(/worktree_secs = 1800\n/, '');
+    const parsed = parseConfig(text, 'inline.toml');
+    expect(parsed.limits.worktree_secs).toBe(1800);
+  });
+});
+
 describe('config: loadConfig file handling', () => {
   const dirs: string[] = [];
 

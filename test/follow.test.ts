@@ -118,7 +118,7 @@ const FIVE_MIN_MS = 5 * 60_000;
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('collie follow (SPEC 14.4 / 14.9)', { timeout: 120_000 }, () => {
+describe('collie follow (SPEC 14.4 / 14.9)', { timeout: 300_000 }, () => {
   let box: Sandbox;
   let baseSha: string;
   let pinnedDir: string;

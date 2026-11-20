@@ -685,4 +685,24 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
     expect(content).toContain('tester.stream.ndjson');
   });
+
+  it('src/run.ts has worktree_secs (v046-b20)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    expect(content).toContain('worktree_secs');
+  });
+
+  it("src/run.ts non-comment lines do not contain 'clean' (v046-b20)", () => {
+    const lines = readFileSync(join(ROOT, 'src/run.ts'), 'utf8').split('\n');
+    const codeLines = lines.filter(
+      (l) =>
+        !l.trimStart().startsWith('//') &&
+        !l.trimStart().startsWith('*') &&
+        !l.trimStart().startsWith('/*'),
+    );
+    const hasClean = codeLines.some((l) => l.includes("'clean'"));
+    expect(
+      hasClean,
+      "'clean' should not appear in non-comment code lines of src/run.ts (v046-b20)",
+    ).toBe(false);
+  });
 });

@@ -3,6 +3,7 @@
 // AGENT-tester.md and accepts a custom backlog), FakeRunner, and injected
 // redCheck to avoid real runners, real vitest subprocesses, and network.
 import {
+  appendFileSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -312,6 +313,45 @@ function testerTouchMainScene(mainRoot: string): FakeScene {
       writeFileSync(join(outDir, 'MAP.md'), '# MAP\n');
       // Also write a rogue file in the MAIN repo
       writeFileSync(join(mainRoot, 'rogue.txt'), 'should not be here\n');
+    },
+    result: { exitCode: 0, finalText: 'done' },
+  };
+}
+
+/**
+ * A tester scene that modifies a tracked file AND creates an untracked file
+ * in the MAIN repo's tree (SPEC 16.17 scenario).
+ */
+function testerTouchTrackedAndUntrackedScene(mainRoot: string): FakeScene {
+  return {
+    expectRole: 'tester',
+    effect: ({ cwd }: FakeSceneContext) => {
+      const outDir = join(cwd, 'test', 'acceptance', BATCH);
+      mkdirSync(outDir, { recursive: true });
+      writeFileSync(join(outDir, 'new.test.ts'), '// acceptance test\nexport {};\n');
+      writeFileSync(join(outDir, 'MAP.md'), '# MAP\n');
+      // Modify a tracked file in the MAIN repo
+      appendFileSync(join(mainRoot, 'docs', 'progress.md'), '\ntester was here\n');
+      // Create an untracked file in the MAIN repo
+      writeFileSync(join(mainRoot, 'rogue.txt'), 'should not be here\n');
+    },
+    result: { exitCode: 0, finalText: 'done' },
+  };
+}
+
+/**
+ * A tester scene that only deletes a tracked file in the MAIN repo's tree.
+ */
+function testerDeleteTrackedScene(mainRoot: string): FakeScene {
+  return {
+    expectRole: 'tester',
+    effect: ({ cwd }: FakeSceneContext) => {
+      const outDir = join(cwd, 'test', 'acceptance', BATCH);
+      mkdirSync(outDir, { recursive: true });
+      writeFileSync(join(outDir, 'new.test.ts'), '// acceptance test\nexport {};\n');
+      writeFileSync(join(outDir, 'MAP.md'), '# MAP\n');
+      // Delete a tracked file in the MAIN repo
+      rmSync(join(mainRoot, 'docs', 'progress.md'));
     },
     result: { exitCode: 0, finalText: 'done' },
   };
@@ -646,5 +686,115 @@ describe('tester step: skipped when the tests are already in the tree', () => {
     // Combined call sequence across both runs: tester, worker, reviewer, worker, reviewer
     const allCalls = [...runner1.calls, ...runner2.calls].map((c) => c.role);
     expect(allCalls).toEqual(['tester', 'worker', 'reviewer', 'worker', 'reviewer']);
+  });
+});
+
+describe('tester step: heartbeat and tracked-file safety', () => {
+  let box: TesterSandbox;
+
+  beforeEach(async () => {
+    box = await TesterSandbox.create(BACKLOG_WITH_SCENARIOS);
+  });
+
+  afterEach(() => {
+    box.dispose();
+  });
+
+  it('tracked file modified + untracked file → restore tracked, leave untracked, tester.md lists both', async () => {
+    // The tester modifies docs/progress.md (tracked) and creates rogue.txt (untracked)
+    const runner = new FakeRunner([testerTouchTrackedAndUntrackedScene(box.root)]);
+    const redCheck = passingRedCheck();
+    const exit = await box.run(runner, { redCheck });
+
+    expect(exit).toBe(20);
+
+    // Escalation event must start with tester_touched_main_tree
+    const events = box.events();
+    const escalated = events.find((e) => e.event === 'escalated');
+    expect(escalated).toBeDefined();
+    expect((escalated?.reason as string).startsWith('tester_touched_main_tree')).toBe(true);
+
+    // The rogue.txt must still be in the workspace (untracked, not cleaned)
+    expect(existsSync(join(box.root, 'rogue.txt'))).toBe(true);
+
+    // git log -p must NOT contain the tester's line in any commit
+    const logP = await git(box.root, ['log', '-p']);
+    expect(logP).not.toContain('tester was here');
+
+    // tester.md must have two sections with correct files
+    const testerMd = box.read(`.collie/batches/${BATCH}/tester.md`);
+    expect(testerMd).toContain('恢复了的被跟踪文件');
+    expect(testerMd).toContain('docs/progress.md');
+    expect(testerMd).toContain('留在工作区的未跟踪文件');
+    expect(testerMd).toContain('rogue.txt');
+  });
+
+  it('tester only deletes a tracked file → that file is restored, listed in tester.md', async () => {
+    const runner = new FakeRunner([testerDeleteTrackedScene(box.root)]);
+    const redCheck = passingRedCheck();
+    const exit = await box.run(runner, { redCheck });
+
+    expect(exit).toBe(20);
+
+    // The deleted file must be restored
+    expect(existsSync(join(box.root, 'docs', 'progress.md'))).toBe(true);
+
+    // tester.md must list it under restored tracked files
+    const testerMd = box.read(`.collie/batches/${BATCH}/tester.md`);
+    expect(testerMd).toContain('恢复了的被跟踪文件');
+    expect(testerMd).toContain('docs/progress.md');
+  });
+
+  it('after tester step, heartbeat phase is worker', async () => {
+    // We need a worker scene that checks the heartbeat
+    let heartbeatPhase: string | undefined;
+    const workerSceneWithHeartbeatCheck: FakeScene = {
+      expectRole: 'worker',
+      effect: async ({ cwd }: FakeSceneContext) => {
+        // The worker runs AFTER the tester step. At this point, heartbeat
+        // phase should have been set back to 'worker'.
+        // The heartbeat file is in the MAIN repo (box.root), not the worktree.
+        const hbPath = join(box.root, '.collie', 'heartbeat.json');
+        if (existsSync(hbPath)) {
+          const hb = JSON.parse(readFileSync(hbPath, 'utf8')) as { phase?: string };
+          heartbeatPhase = hb.phase;
+        }
+        // Still do the normal worker work
+        box.write('feature.txt', 'feature\n', cwd);
+        box.write('tests/t000.sh', 'exit 0\n', cwd);
+        const head = await box.commitAll('feat: add feature with tests', cwd);
+        const report: Report = {
+          schema_version: 1,
+          batch_id: BATCH,
+          head_sha: head,
+          claims: {
+            commits: [head],
+            tests_passed: 1,
+            tests_failed: 0,
+            pushed: true,
+            ci_passed: true,
+            new_deps: [],
+            spec_touched: false,
+          },
+          open_questions: [],
+        };
+        box.write(
+          `.collie/batches/${BATCH}/report.md`,
+          `# 批次 ${BATCH} 汇报\n\n## 做了什么\n完成。\n\n## 测试结果\n见 claims。\n\n## 偏离或疑问\n无\n\n## 下一步建议\n无\n\n${FENCE}json\n${JSON.stringify(report, null, 2)}\n${FENCE}\n`,
+          cwd,
+        );
+        await box.commitAll(`report(collie): ${BATCH}`, cwd);
+        await git(cwd, ['push', '-q', 'origin', 'main']);
+      },
+      result: { exitCode: 0 },
+    };
+
+    const runner = new FakeRunner([testerScene(), workerSceneWithHeartbeatCheck, reviewerScene()]);
+    const redCheck = passingRedCheck();
+    const exit = await box.run(runner, { redCheck });
+    expect(exit).toBe(0);
+
+    // Verify heartbeat phase was 'worker' when the worker scene ran
+    expect(heartbeatPhase).toBe('worker');
   });
 });

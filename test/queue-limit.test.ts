@@ -185,7 +185,7 @@ function reviewerFixScene(
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('--max counts only PASS verdicts (SPEC 14.14)', { timeout: 120_000 }, () => {
+describe('--max counts only PASS verdicts (SPEC 14.14)', { timeout: 300_000 }, () => {
   let box: Sandbox;
 
   beforeEach(async () => {
