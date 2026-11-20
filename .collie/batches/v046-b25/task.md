@@ -1,11 +1,11 @@
 ---
 schema_version: 1
-run_id: r-20261120095844
+run_id: r-20261120104848
 batch_id: v046-b25
 base_sha: d352068ea6732a8bb56d86115d4755f9cc307b3f
-created_at: 2026-11-20T09:58:45.270Z
-attempt: 1
-interrupted_at: null
+created_at: 2026-11-20T10:48:52.992Z
+attempt: 2
+interrupted_at: r-20261120095844 blocked run.finished@2026-11-20T10:48:48.651Z
 issued_by: collie
 ---
 
@@ -57,3 +57,10 @@ issued_by: collie
 完成后写 `.collie/batches/v046-b25/report.md`：固定四段（做了什么 / 测试结果 / 偏离或疑问 / 下一步建议）
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v046-b25` 为提交信息单独提交并推送该文件。
+
+## 上一轮中断
+
+中断信息：`r-20261120095844 blocked run.finished@2026-11-20T10:48:48.651Z`
+上一轮结论：规则 1：verdict unparseable: reviewer returned no final text
+
+上一轮的提交仍在审核范围内，按上面的结论只补缺口。
