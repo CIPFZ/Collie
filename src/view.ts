@@ -904,19 +904,19 @@ export interface WhyAttempt {
   /** SPEC 13.23: ci.verdict_commit events for this run. */
   verdictCommitCi: { sha: string; conclusion: string; when: string; runUrl: string | null }[];
 
-  /** Tester agent aggregate (SPEC 16.16): null when no tester.finished events exist. */
-  tester: {
+  /** Tester agent aggregate (SPEC 16.16): absent when no tester.finished events (SPEC 16.18). */
+  tester?: {
     turns: number | null;
     costUsd: number | null;
     durationMs: number | null;
     invocations: number;
-  } | null;
+  };
 
-  /** SPEC 13.23: cost breakdown per attempt; tester added in SPEC 16.16. */
+  /** SPEC 13.23: cost breakdown per attempt; tester added in SPEC 16.16; absent when no tester events (SPEC 16.18). */
   cost: {
     worker: number | null;
     reviewer: number | null;
-    tester: number | null;
+    tester?: number | null;
     total: number | null;
   };
 
@@ -1144,8 +1144,9 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
     }));
 
   // SPEC 16.16: tester agent aggregate from tester.finished events.
+  // SPEC 16.18: when no tester events, the key is absent from the returned object.
   const testerFinishedAll = events.filter((e) => e.event === 'tester.finished');
-  let tester: WhyAttempt['tester'] = null;
+  let tester: WhyAttempt['tester'];
   if (testerFinishedAll.length > 0) {
     let sumTurns = 0;
     let sumCost = 0;
@@ -1179,6 +1180,7 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
   }
 
   // SPEC 16.16: cost breakdown = worker + reviewer + tester; all missing = null.
+  // SPEC 16.18: cost.tester key absent when no tester events.
   const workerCost = worker?.costUsd ?? null;
   const reviewerCost = reviewer?.costUsd ?? null;
   const testerCost = tester?.costUsd ?? null;
@@ -1186,7 +1188,10 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
   if (workerCost !== null || reviewerCost !== null || testerCost !== null) {
     totalCost = (workerCost ?? 0) + (reviewerCost ?? 0) + (testerCost ?? 0);
   }
-  const cost = { worker: workerCost, reviewer: reviewerCost, tester: testerCost, total: totalCost };
+  const cost: WhyAttempt['cost'] = { worker: workerCost, reviewer: reviewerCost, total: totalCost };
+  if (tester !== undefined) {
+    cost.tester = testerCost;
+  }
 
   // Conclusion — SPEC 13.20: rule/reason fallback order:
   //   run.finished → last verdict.downgraded → null.
@@ -1198,13 +1203,13 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
   const reason =
     finishedReason ?? (downgradeEvent !== undefined ? asString(downgradeEvent.reason) : null);
 
-  return {
+  // SPEC 16.18: tester key only present when tester events exist.
+  const result: WhyAttempt = {
     attempt,
     runId,
     started: started?.ts ?? null,
     finished: finished?.ts ?? null,
     worker,
-    tester,
     evidence,
     failedAcceptance,
     claimMismatches,
@@ -1223,6 +1228,10 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
     rule,
     reason,
   };
+  if (tester !== undefined) {
+    result.tester = tester;
+  }
+  return result;
 }
 
 /**
@@ -1373,7 +1382,7 @@ export function formatWhy(proj: WhyProjection): string {
     }
 
     // 1b. Tester agent (SPEC 16.16): only shown when tester.finished events exist.
-    if (a.tester !== null) {
+    if (a.tester != null) {
       const t = a.tester;
       const tParts = [
         `turns=${dash(t.turns)}`,
@@ -1495,8 +1504,8 @@ export function formatWhy(proj: WhyProjection): string {
       const wc = a.cost.worker !== null ? `$${a.cost.worker.toFixed(COST_DECIMALS)}` : '—';
       const rc = a.cost.reviewer !== null ? `$${a.cost.reviewer.toFixed(COST_DECIMALS)}` : '—';
       const tc = a.cost.total !== null ? `$${a.cost.total.toFixed(COST_DECIMALS)}` : '—';
-      if (a.tester !== null) {
-        const tesc = a.cost.tester !== null ? `$${a.cost.tester.toFixed(COST_DECIMALS)}` : '—';
+      if (a.tester != null) {
+        const tesc = a.cost.tester != null ? `$${a.cost.tester.toFixed(COST_DECIMALS)}` : '—';
         lines.push(`cost: worker=${wc} reviewer=${rc} tester=${tesc} total=${tc}`);
       } else {
         lines.push(`cost: worker=${wc} reviewer=${rc} total=${tc}`);
@@ -1560,8 +1569,8 @@ export interface ReportBatchRow {
   durationMs: number | null;
   workerCost: number | null;
   reviewerCost: number | null;
-  /** SPEC 16.16: aggregated tester cost; null when no tester.finished events exist. */
-  testerCost: number | null;
+  /** SPEC 16.16: aggregated tester cost; absent when no tester.finished events (SPEC 16.18). */
+  testerCost?: number | null;
   totalCost: number | null;
   workerTurns: number | null;
   /** SPEC 14.10: worker.started.max_turns, null when the journal predates the field. */
@@ -1760,7 +1769,8 @@ export function projectReport(
     const auditInBatch = batchEvents.find((e) => e.event === 'audit.result');
     const auditOutcome = asString(auditEvent?.outcome) ?? asString(auditInBatch?.outcome) ?? null;
 
-    batchRows.push({
+    // SPEC 16.18: testerCost key only present when tester events exist.
+    const row: ReportBatchRow = {
       seq: i + 1,
       batchId,
       runId: batchRunId,
@@ -1770,13 +1780,16 @@ export function projectReport(
       durationMs,
       workerCost,
       reviewerCost,
-      testerCost,
       totalCost,
       workerTurns,
       workerMaxTurns,
       headSha,
       auditOutcome,
-    });
+    };
+    if (testerFinishedEvts.length > 0) {
+      row.testerCost = testerCost;
+    }
+    batchRows.push(row);
   }
 
   // §4: gate_passed, paused, BLOCK, retried, batch.status
@@ -1875,7 +1888,8 @@ export function formatReport(
 
   // §3: batch runs table
   // SPEC 16.16: tester column only appears when at least one row has tester cost.
-  const hasTester = proj.batchRows.some((r) => r.testerCost !== null);
+  // SPEC 16.18: testerCost key may be absent; use != null to handle both undefined and null.
+  const hasTester = proj.batchRows.some((r) => r.testerCost != null);
   lines.push('## 实际经过');
   lines.push('');
   if (hasTester) {
@@ -1893,7 +1907,7 @@ export function formatReport(
     const costFmt = (v: number | null) => (v !== null ? `$${v.toFixed(COST_DECIMALS)}` : '—');
     if (hasTester) {
       lines.push(
-        `| ${String(r.seq)} | ${r.batchId} | ${r.runId} | ${String(r.attempt)} | ${dash(r.verdict)} | ${dash(r.rule)} | ${formatDuration(r.durationMs)} | ${costFmt(r.workerCost)} | ${costFmt(r.reviewerCost)} | ${costFmt(r.testerCost)} | ${costFmt(r.totalCost)} | ${formatTurns(r.workerTurns, r.workerMaxTurns)} | ${dash(r.headSha)} | ${dash(r.auditOutcome)} |`,
+        `| ${String(r.seq)} | ${r.batchId} | ${r.runId} | ${String(r.attempt)} | ${dash(r.verdict)} | ${dash(r.rule)} | ${formatDuration(r.durationMs)} | ${costFmt(r.workerCost)} | ${costFmt(r.reviewerCost)} | ${costFmt(r.testerCost ?? null)} | ${costFmt(r.totalCost)} | ${formatTurns(r.workerTurns, r.workerMaxTurns)} | ${dash(r.headSha)} | ${dash(r.auditOutcome)} |`,
       );
     } else {
       lines.push(
@@ -1925,7 +1939,7 @@ export function formatReport(
     const costFmt = (v: number | null) => (v !== null ? `$${v.toFixed(COST_DECIMALS)}` : '—');
     if (hasTester) {
       lines.push(
-        `| 合计 | | | | | | ${formatDuration(sum((r) => r.durationMs))} | ${costFmt(sum((r) => r.workerCost))} | ${costFmt(sum((r) => r.reviewerCost))} | ${costFmt(sum((r) => r.testerCost))} | ${costFmt(sum((r) => r.totalCost))} | | | |`,
+        `| 合计 | | | | | | ${formatDuration(sum((r) => r.durationMs))} | ${costFmt(sum((r) => r.workerCost))} | ${costFmt(sum((r) => r.reviewerCost))} | ${costFmt(sum((r) => r.testerCost ?? null))} | ${costFmt(sum((r) => r.totalCost))} | | | |`,
       );
     } else {
       lines.push(

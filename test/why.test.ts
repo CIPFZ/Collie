@@ -1435,7 +1435,7 @@ describe('why — tester agent display (SPEC 16.16)', () => {
     expect(text).toContain('tester=$2.30');
   });
 
-  it('no tester events: output identical to run without tester (tester field null)', () => {
+  it('no tester events: output identical to run without tester (tester key absent)', () => {
     const RUN = 'r-20261120-030000';
     const events: Event[] = [
       makeEvent({ run_id: RUN, event: 'run.started', batch_id: 'v99-b01' }),
@@ -1482,9 +1482,9 @@ describe('why — tester agent display (SPEC 16.16)', () => {
 
     const a = proj!.attempts[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
 
-    // No tester data.
-    expect(a.tester).toBeNull();
-    expect(a.cost.tester).toBeNull();
+    // No tester data — keys absent (SPEC 16.18).
+    expect(Object.prototype.hasOwnProperty.call(a, 'tester')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(a.cost, 'tester')).toBe(false);
 
     // Text output has no tester line and old-style cost line.
     const text = formatWhy(proj!); // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above

@@ -835,7 +835,7 @@ describe('collie report: tester agent cost (SPEC 16.16)', () => {
     const proj = projectReport(allRunData, queueEvents, queueRunId);
     expect(proj.batchRows).toHaveLength(1);
     const row = proj.batchRows[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- checked above
-    expect(row.testerCost).toBeNull();
+    expect(Object.prototype.hasOwnProperty.call(row, 'testerCost')).toBe(false);
     // total = worker + reviewer only
     expect(row.totalCost).toBeCloseTo(6.0);
 
