@@ -2085,4 +2085,20 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b21 · r-20261120061618 · PASS
+
+- 时间：2026-11-20T06:40:51.742Z
+- 裁定：规则 10，All 4 acceptance commands pass. Item 1: tester/testerCost keys correctly omitted when no tester.finished events (type made optional, conditional assignment). Item 2: 3 assertions changed from toBeNull to hasOwnProperty false, test name updated — all within the named-permitted scope. formatWhy/formatReport text output unchanged (!=null handles undefined equivalently). No protected path changes, no dependency changes, no scope creep. CI conclusion unknown — deferred to R2.
+- 提交：`e529ba3`
+- 验收命令：4/4 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1428 passed, 0 failed
+  - `npm test -- test/acceptance/v046-b21` → exit 0，12 passed, 0 failed
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44688644423
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->

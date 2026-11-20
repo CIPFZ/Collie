@@ -121,7 +121,7 @@
 | 82 | v046-b18 | 接线收尾二：带情形的 worker 任务书多出情形与接口两节、写明验收测试不能改 | v046-b15, v046-b20 | passed |
 | 83 | v046-b19 | 接线收尾三：why 与 report 显示测试 agent 的花费 | v046-b18 | passed |
 | 84 | v046-b20 | v046-b17 改签：测试 agent 动过的被跟踪文件恢复原样、heartbeat 与墙钟补测试、放宽超时，把主分支修绿 | v046-b15 | passed |
-| 85 | v046-b21 | 没有测试 agent 的运行，why 与 report 的 JSON 里不出现测试 agent 的键（第一个带情形的批次） | v046-b19 | pending |
+| 85 | v046-b21 | 没有测试 agent 的运行，why 与 report 的 JSON 里不出现测试 agent 的键（第一个带情形的批次） | v046-b19 | passed |
 | 86 | v046-b22 | 批次在队列里最终被拦时的收尾：撤销救援提交的改动、拿掉本批次的验收测试 | v046-b20 | pending |
 | 87 | v046-b23 | 模型接口出错的 worker 会话算可续跑的中断：先等一段时间，自动续跑一次 | v046-b22 | pending |
 | 88 | v046-b24 | 小修：reviewer 读这一次运行的信封；两处守不住的测试改实 | v046-b20 | pending |
