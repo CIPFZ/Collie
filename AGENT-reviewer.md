@@ -45,7 +45,7 @@
 | 验收命令 | 逐条实跑 `task.md` 的 `acceptance[].cmd`，记录退出码与真实输出。**命令取 `parseBacklog` 解析后的形式**（`collie show` 可打印），不得从 `.md` 源码原样复制——表格中的 `\|` 是 GFM 转义，原样执行会让 grep 类命令失效放行 |
 | 提交事实 | `git log` 确认提交存在；`git ls-remote` 确认已推送到远端 |
 | CI 实际结论 | 你没有 GitHub 凭据，查不到是常态：`ci_conclusion` 填 `unknown`、`ci_branch_matched` 填 `null`、`ci_run_url` 留空，`reason` 里写一句「CI 以 R2 取证为准」。CI 的实测由 R2 用 token 完成并写进 progress 与 journal（`ci.resolved`），仲裁规则 7 只用 R2 的结果。若你碰巧能查到，照实填并核对监听分支 |
-| 受保护路径是否被改 | `git diff --stat <base>..<head> -- SPEC.md CONSTRAINTS.md ROADMAP.md ROLES.md 'AGENT-*.md' docs/backlog.md docs/decisions docs/progress.md .collie/collie.toml`，清单与 AGENT-worker.md 第 2 节一致，不要只 diff 前三个 |
+| 受保护路径是否被改 | `git diff --stat <base>..<head> -- SPEC.md CONSTRAINTS.md ROADMAP.md ROLES.md 'AGENT-*.md' docs/backlog.md docs/decisions docs/progress.md .collie/collie.toml test/acceptance`，清单与 AGENT-worker.md 第 2 节一致，不要只 diff 前三个。带情形的批次里，`test/acceptance/<批次>/` 下的验收测试是测试 Agent 写的，由 R2 随 `docs: issue` 开头的信封提交放进来，不是 worker 的改动；要查的是 worker 有没有动它：`git log --format='%h %s' <base>..<head> -- test/acceptance` 里，除了 `docs: issue` 开头的提交不应有别的 |
 | 依赖变化 | diff `package.json` 与 lock 文件 |
 | 测试真实数字 | 从实跑输出中提取，不要从汇报中抄 |
 
