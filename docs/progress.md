@@ -2101,4 +2101,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b22 · r-20261120064055 · PASS
+
+- 时间：2026-11-20T07:26:55.915Z
+- 裁定：规则 10，All 8 acceptance commands pass. Implementation adds batchCleanup function in src/run.ts called at exactly two queue-mode exit points (blocked, fix_max). Two event types added to schema. New test file covers all required scenarios (rescue revert, acceptance removal, conflict handling, single-batch no-op, no-rescue no-op, evidence_unavailable no-op). Only the two explicitly allowed assertion changes were made. No protected files, no dependency changes, no prohibited files modified. CI conclusion unknown (no credentials); ci_branch_matched null.
+- 提交：`f777664` `6f7f657`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1437 passed, 0 failed
+  - `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/blocked-cleanup.test.ts` → exit 0，6 passed, 0 failed
+  - `grep -qF "blocked cleanup: rescue commits are reverted" test/blocked-cleanup.test.ts && grep -qF "blocked cleanup: acceptance tests are removed" test/blocked-cleanup.test.ts && grep -qF "blocked cleanup: when it must not act" test/blocked-cleanup.test.ts` → exit 0，exit 0
+  - `grep -qF "batch.cleanup_failed" src/schema/index.ts && grep -qE "'batch\.cleanup'" src/schema/index.ts` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qF "'clean'"` → exit 0，exit 0
+  - `grep -qF "batch.cleanup" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44693945123
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
