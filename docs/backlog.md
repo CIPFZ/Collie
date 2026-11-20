@@ -128,6 +128,7 @@
 | 88 | v046-b24 | 小修：reviewer 读这一次运行的信封；两处守不住的测试改实 | v046-b20 | pending |
 | 89 | v046-b25 | 收尾只提交自己改的路径：不提交未跟踪文件、冲突时只用 revert --abort | v046-b22 | pending |
 | 90 | v046-b26 | （v046-b23 改签）模型接口出错的 worker 会话算可续跑的中断：先等一段时间，自动续跑一次 | v046-b25 | pending |
+| 91 | v046-b27 | 开跑前检查：运行器退出码非零算不过，写出结束原因与用时 | v046-b20 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -3831,3 +3832,44 @@ v046-b22 加的收尾（批次在队列里最终被拦时撤掉救援提交、�
 - 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b27 开跑前检查：运行器退出码非零算不过，写出结束原因与用时
+
+优先级：91　依赖：v046-b20
+
+第二十二次队列开跑前，模型接口坏着：`preflight --smoke` 每次要 4 分钟，`runner` 一项写的是 `exitCode=1`，可这一项仍记 `ok`，整条命令退出码 0（SPEC 14.33）。
+操作员是自己量用时、读那一行文字才拦下来的；`collie follow` 靠这条命令判断能不能开跑。改 `preflight` 与 `smoke` 两条命令对运行器结果的判断，不改队列。
+
+条目：
+1. 读 SPEC 14.33 的「开跑前检查的修补」一段（这条命令的来历在 14.1）。`src/preflight.ts` 的 `runner` 一项：运行器返回的退出码非零 → `ok` 为 false，`detail` 是 `exitCode=<N>`，返回值带 `stopReason` 时再加 ` stopReason=<原因>`；
+   通过与不过的 `detail` 末尾都加 ` secs=<用时秒数，取整>`。用时经可注入的时钟算（缺省用真实时钟），测试里不许真的等。运行器抛错时照旧不过，`detail` 是错误信息。
+   **假运行器返回 `exitCode: 1`、`stopReason: 'error'`：`preflight --smoke` 输出里有一行以 `FAIL runner: exitCode=1 stopReason=error` 开头，末行是 `preflight: failed (runner)`，命令的退出码非零；`--json` 里这一项的 `ok` 是 false**
+   **假运行器返回 `exitCode: 0`：这一行以 `ok   runner: exitCode=0` 开头、带 `secs=`，命令的退出码是 0**
+2. `src/cli.ts` 的 `collie smoke`：运行器返回的退出码非零 → 标准错误写 `smoke failed: exitCode=<N>`（有 `stopReason` 时带上），退出码 1，不再去查 CI，标准输出里没有 `smoke ok`。
+   **假运行器返回 `exitCode: 1`：`collie smoke` 的退出码是 1，输出里有 `smoke failed: exitCode=1`、没有 `smoke ok`，CI 一次都没有被查询**
+3. 测试。`test/preflight.test.ts` 新加一组 `describe('preflight: runner check judges the exit code', …)`（条目 1 的情形；`secs=` 用注入的时钟让它是一个确定的数）；`test/cli.test.ts` 新加一条 `smoke exits 1 when the runner returns a non-zero exit code`（条目 2 的情形）。
+   R1 查过现有用例：`test/preflight.test.ts` 的 `--smoke adds runner and ci_query checks` 用的是 `exitCode: 0`，断言 `ok   runner`，仍然成立；`--smoke runner failure shows FAIL runner` 是运行器抛错，仍然成立；
+   `test/cli.test.ts` 的 `smoke succeeds with a fake runner that returns a RunResult` 是 `exitCode: 0`，断言含 `smoke ok` 与 `exitCode=0`，仍然成立；`test/scenario-m.test.ts` 两条 `smoke exits 1 …` 的运行器都是成功的，不受影响；
+   `test/follow.test.ts` 用假的子进程代替 `preflight`，不受影响。已有断言一条都不改。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/preflight.ts`、`src/cli.ts`、`test/preflight.test.ts`、`test/cli.test.ts`。不应改动 `test/invariants.test.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 两条命令与用到它们的测试通过 | `npm test -- test/preflight.test.ts test/cli.test.ts test/scenario-m.test.ts test/follow.test.ts` | exit 0 |
+| 新的一组与新的一条在 | `grep -qF "preflight: runner check judges the exit code" test/preflight.test.ts && grep -qF "smoke exits 1 when the runner returns a non-zero exit code" test/cli.test.ts` | exit 0 |
+| 两条命令都有了不过的说法（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/cli.ts \| grep -qF "smoke failed" && grep -vE "^\s*(//\|\*\|/\*)" src/preflight.ts \| grep -qF "stopReason"` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`、`templates/collie.toml`
+- 改动 `src/run.ts`、`src/follow.ts`、`src/runner/`、`src/schema/index.ts`；改动 `preflight` 别的检查项、不带 `--smoke` 时的行为、队列开头那次检查
+- 给用时加阈值或新的配置项（这一批只把用时写出来）；在 `detail` 或输出里写出模型的回复全文、token 或文件的绝对路径
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；测试里真的等待；新增依赖
