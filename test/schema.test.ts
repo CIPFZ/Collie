@@ -252,11 +252,14 @@ describe('schema: Event round-trip', () => {
   });
 
   it('defines the v0.1 event types plus v0.2 and v0.3 types added so far', () => {
-    expect(EVENT_TYPES).toHaveLength(42);
+    expect(EVENT_TYPES).toHaveLength(44);
     expect(EVENT_TYPES).toContain('ci.wait_timeout');
     expect(EVENT_TYPES).toContain('acceptance.failed');
     // v0.46 (SPEC 16.14): R2 records its own commits by sha.
     expect(EVENT_TYPES).toContain('r2.commit');
+    // v0.46 (SPEC 16.18): batch cleanup events.
+    expect(EVENT_TYPES).toContain('batch.cleanup');
+    expect(EVENT_TYPES).toContain('batch.cleanup_failed');
     // v0.2 additions (SPEC 11.3–11.6)
     expect(EVENT_TYPES).toContain('run.orphaned');
     expect(EVENT_TYPES).toContain('worker.rescued');

@@ -306,6 +306,9 @@ export const EVENT_TYPES = [
   // v0.46 (SPEC 16.14): R2 records every commit it makes (sha + subject); used to
   // identify R2 commits by sha instead of by message prefix.
   'r2.commit',
+  // v0.46 (SPEC 16.18): batch cleanup after final block/fix_max in queue mode.
+  'batch.cleanup',
+  'batch.cleanup_failed',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);

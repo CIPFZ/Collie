@@ -2625,6 +2625,169 @@ export function auditReviewerTools(
 }
 
 // ---------------------------------------------------------------------------
+// SPEC 16.18: batch cleanup when a batch is finally blocked in queue mode.
+// Reverts rescue commits and removes acceptance tests for the batch.
+// ---------------------------------------------------------------------------
+
+/**
+ * SPEC 16.18: collects all rescue commit shas for `batchId` across all runs,
+ * filtering to those in the range `firstBaseSha..HEAD`.
+ */
+function collectRescueShas(root: string, batchId: string): string[] {
+  const runsDir = join(root, RUNS_RELATIVE_DIR);
+  if (!existsSync(runsDir)) return [];
+  const journal = createJournal(root);
+  const shas: string[] = [];
+  for (const dir of readdirSync(runsDir).sort()) {
+    if (!RunIdSchema.safeParse(dir).success || !existsSync(join(runsDir, dir, EVENTS_FILE_NAME)))
+      continue;
+    for (const event of journal.replay(dir)) {
+      if (
+        event.event === 'worker.rescued' &&
+        event.batch_id === batchId &&
+        typeof event.sha === 'string'
+      ) {
+        shas.push(event.sha);
+      }
+    }
+  }
+  return shas;
+}
+
+/**
+ * SPEC 16.18: cleanup function called when a batch is finally blocked in queue
+ * mode (BLOCK with no more retries, or fix_max exceeded). Never called in
+ * single-batch mode.
+ *
+ * Steps:
+ * 1. Check worktree is clean (tracked changes only); if dirty → batch.cleanup_failed.
+ * 2. Find rescue commit shas from journal, filter to firstBaseSha..HEAD range.
+ * 3. Revert their changes (newest first) without individual commits.
+ *    On conflict: abort, restore worktree, record batch.cleanup_failed, continue to step 4.
+ * 4. If test/acceptance/<batchId>/ exists in HEAD's tree, remove it.
+ * 5. If any changes from steps 2–4: commit, push, record batch.cleanup.
+ */
+async function batchCleanup(
+  root: string,
+  batchId: string,
+  rec: Recorder,
+  remote: string,
+  branch: string,
+): Promise<void> {
+  // SPEC 16.18: check worktree for tracked file changes.
+  const ws = await status(root);
+  const trackedDirty = ws.entries.filter((e) => e.code !== '??');
+  if (trackedDirty.length > 0) {
+    rec.record('batch.cleanup_failed', { reason: 'worktree_dirty' });
+    return;
+  }
+
+  // Find first base_sha for this batch from journal.
+  let firstBaseSha: string | undefined;
+  const allRuns = allBatchEvents(root);
+  for (const [, events] of allRuns) {
+    const selected = events.find((e) => e.event === 'batch.selected' && e.batch_id === batchId);
+    if (selected !== undefined && typeof selected.base_sha === 'string') {
+      firstBaseSha = selected.base_sha;
+      break;
+    }
+  }
+
+  if (firstBaseSha === undefined) {
+    // No base_sha means no run ever started for this batch — nothing to clean.
+    return;
+  }
+
+  // Collect rescue shas and filter to those in firstBaseSha..HEAD.
+  const allRescueShas = collectRescueShas(root, batchId);
+  const rescueShasInRange: string[] = [];
+  for (const sha of allRescueShas) {
+    try {
+      const inRange = await isAncestor(root, firstBaseSha, sha);
+      if (inRange) {
+        rescueShasInRange.push(sha);
+      }
+    } catch {
+      // sha might not exist or other git error — skip.
+    }
+  }
+
+  // Revert rescue commits newest-first (reverse order).
+  const reverted: string[] = [];
+  let revertFailed = false;
+  if (rescueShasInRange.length > 0) {
+    // Process from newest to oldest.
+    const reversed = [...rescueShasInRange].reverse();
+    for (const sha of reversed) {
+      try {
+        // Revert without committing: apply the inverse diff to index + worktree.
+        await git(root, ['revert', '--no-commit', sha]);
+        reverted.push(sha);
+      } catch {
+        // Conflict: abort all reverts, restore worktree.
+        revertFailed = true;
+        try {
+          await git(root, ['revert', '--abort']);
+        } catch {
+          // revert --abort may fail if there's nothing to abort.
+        }
+        // Ensure worktree is clean: reset index and restore tracked files.
+        try {
+          await git(root, ['reset', 'HEAD']);
+          await git(root, ['checkout', '.']);
+        } catch {
+          // Best effort.
+        }
+        rec.record('batch.cleanup_failed', { reason: `revert_conflict: ${sha}` });
+        break;
+      }
+    }
+    // If revert succeeded so far, reset the index (the --no-commit reverts staged everything).
+    // We'll commit all changes at once at the end.
+  }
+
+  // SPEC 16.18 step 2: remove acceptance tests if they exist.
+  const acceptancePath = join('test', 'acceptance', batchId);
+  const absAcceptancePath = join(root, acceptancePath);
+  let removedAcceptance = false;
+  if (existsSync(absAcceptancePath)) {
+    rmSync(absAcceptancePath, { recursive: true, force: true });
+    try {
+      await git(root, ['add', acceptancePath]);
+    } catch {
+      // Best effort: if the path wasn't tracked, git add might fail.
+    }
+    removedAcceptance = true;
+  }
+
+  // Check if there are actual changes to commit.
+  const postStatus = await status(root);
+  if (postStatus.clean) {
+    // Nothing changed — no commit needed.
+    return;
+  }
+
+  // Stage everything and commit; then push (verdict.pushed / verdict.push_failed).
+  await git(root, ['add', '-A']);
+  const cleanupSha = await r2Commit(root, `progress: ${batchId} cleanup`, ['.'], rec);
+  try {
+    await push(root, remote, branch);
+    rec.record('verdict.pushed', { sha: cleanupSha, remote, branch });
+  } catch (pushError) {
+    rec.record('verdict.push_failed', {
+      sha: cleanupSha,
+      error: message(pushError),
+    });
+  }
+
+  rec.record('batch.cleanup', {
+    reverted: revertFailed ? [] : reverted,
+    removed_acceptance: removedAcceptance,
+    commit: cleanupSha,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Queue mode: --continue (SPEC 12.2)
 // ---------------------------------------------------------------------------
 
@@ -3058,6 +3221,8 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
 
       // BLOCK or escalation: stop.
       // Status already updated to 'blocked' inside runBatch when updateBacklogStatus=true.
+      // SPEC 16.18: cleanup rescue commits and acceptance tests before finishing.
+      await batchCleanup(root, currentBatchId, queueRec, ctx.remote, config.ci.expected_branch);
       queueRec.record('queue.finished', {
         reason: 'blocked',
         batches: batchesRun,
@@ -3126,6 +3291,8 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
       });
     }
     queueRec.record('escalated', { reason: 'fix_max', batch_id: currentBatchId });
+    // SPEC 16.18: cleanup rescue commits and acceptance tests before finishing.
+    await batchCleanup(root, currentBatchId, queueRec, ctx.remote, config.ci.expected_branch);
     queueRec.record('queue.finished', {
       reason: 'fix_max',
       batches: batchesRun,
