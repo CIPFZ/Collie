@@ -2030,4 +2030,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：1（error）
+
+### v046-b20 · r-20261120033243 · PASS
+
+- 时间：2026-11-20T03:58:55.639Z
+- 裁定：规则 10，All 9 acceptance commands pass. Implementation correctly replaces blanket checkout+clean with selective tracked-file restoration, leaves untracked files alone, writes two-section tester.md. All new test cases (3 in tester-step, 2 in config, 2 in invariants) pass. Existing test 'tester writes to main workspace' passes unmodified. Timeout changes at specified lines confirmed. No protected/forbidden files modified, no dependency changes, no scope creep. CI conclusion unknown — CI 以 R2 取证为准.
+- 提交：`ccb05f9`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1400 passed, 0 failed
+  - `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test` → exit 0，1400 passed, 0 failed
+  - `npm test -- test/tester-step.test.ts test/config.test.ts test/schema.test.ts` → exit 0，126 passed, 0 failed
+  - `grep -qF "tester step: heartbeat and tracked-file safety" test/tester-step.test.ts && grep -qF "config: worktree_secs" test/config.test.ts` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qF "'clean'"` → exit 0，exit 0
+  - `grep -qE "^worktree_secs = 1800" templates/collie.toml && ! grep -qE "worktree_secs" .collie/collie.toml` → exit 0，exit 0
+  - `grep -qF "worktree_secs" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44669348130
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
