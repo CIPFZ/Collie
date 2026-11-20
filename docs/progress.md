@@ -2133,4 +2133,21 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：1（error）
+
+### v046-b24 · r-20261120094203 · PASS
+
+- 时间：2026-11-20T09:58:40.426Z
+- 裁定：规则 10，All 5 acceptance commands pass. Code change in src/run.ts correctly copies task.md from the main workspace to the reviewer worktree (SPEC 16.18). New test group 'reviewer-rerun: task.md comes from the current run' verifies attempt: 2 frontmatter and '上一轮判 FIX' section. Tester test correctly changed from docs/progress.md to SPEC.md with added content verification. New 'tester wallclock uses worktree_secs' test verifies worktree_secs timeout with exit 20 and tester_failed escalation. Timeout increased to 300_000 on both describe blocks. No protected or forbidden files modified, no dependency changes, no assertions deleted or weakened. CI 以 R2 取证为准。
+- 提交：`9798c8f`
+- 验收命令：5/5 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1448 passed, 0 failed
+  - `npm test -- test/reviewer-rerun.test.ts test/tester-step.test.ts` → exit 0，27 passed, 0 failed
+  - `grep -qF "reviewer-rerun: task.md comes from the current run" test/reviewer-rerun.test.ts && grep -qF "tester wallclock uses worktree_secs" test/tester-step.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44714280287
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
