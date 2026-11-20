@@ -23,6 +23,14 @@ max_turns = 100                         # 所有者 2026-11-17：60 → 100（SP
 permission_mode = "bypassPermissions"   # SPEC 3.1；白名单仍无 Write/Edit
 bash_deny = ["^\\s*git\\s+(push|commit|add|reset|checkout|rebase|merge|cherry-pick|tag|branch\\s+-[dDm]|worktree|stash)(?=\\s|$)", "^\\s*gh\\s"]   # SPEC 3.1 / 11.2；Bash 命令级黑名单，PreToolUse 拒绝；ls-remote / fetch 不禁
 
+[agent.tester]
+# SPEC 16.10、16.18（R1 2026-11-20 启用）：测试 agent；有写工具，git 写操作被拦（和 reviewer 同一套 bash_deny）
+model = "claude-opus-4-6"
+allowed_tools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
+max_turns = 100
+permission_mode = "bypassPermissions"
+bash_deny = ["^\\s*git\\s+(push|commit|add|reset|checkout|rebase|merge|cherry-pick|tag|branch\\s+-[dDm]|worktree|stash)(?=\\s|$)", "^\\s*gh\\s"]   # SPEC 16.10；与 reviewer 相同
+
 [limits]
 stall_secs = 300         # SPEC 3.1；事件流静默判定卡死；须大于 SDK 单次最长输出时长（11.5）
 progress_secs = 1500     # SPEC 3.1；有事件但无产出判定空转（v04-b04 后 900→1500，SPEC 13.12）
@@ -32,10 +40,14 @@ fix_max = 2              # SPEC 3.1；同批次 FIX 上限（v0.3 生效）
 dry_k = 2                # SPEC 3.1；连续 dry 轮数（v0.5 生效）
 ci_wait_secs = 1800     # SPEC 3.1；R2 取证前等待 head_sha 的 CI 出结论的上限，超时按 unknown 处理
 ci_poll_secs = 30       # 等待期间查询 CI 的间隔（v01-b05 2c 裁定）
+tester_max = 2          # SPEC 16.12；一次运行里测试 agent 最多拉起几次（红检查不过就重写）
+redcheck_secs = 600     # SPEC 16.14；红检查每条命令的时限
+worktree_secs = 1800    # SPEC 16.16；测试 agent 这一步的墙钟
 
 [verify]
 # SPEC 3.1；reviewer 必跑的全局命令，批次级命令在 task 中追加
 commands = ["npm run lint", "npm run typecheck", "npm test"]
+static = ["npm run lint", "npm run typecheck"]   # SPEC 16.12；红检查在只多了验收测试的树上跑的静态检查
 
 [ci]
 # SPEC 3.1；用于核对 CI 实际监听分支，防止「假全绿」（铁律 5）

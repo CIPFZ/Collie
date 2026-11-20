@@ -24,9 +24,11 @@
 > 条目里不写「发现别的现有用例失败一律停下」，写「只许做新行为直接要求的最小改动并逐条列出，拿不准才停下」（b14 照「停下」把代码推了上去，主分支红了 26 分钟）。
 > R1 签发自查（v046-b17 后，SPEC 14.30）：每批最多 3 个条目，签完先 `show` 一遍；条目之间互相对一遍，尤其是「要做的清理」和「要保留的现有断言」会不会打架；
 > 点名的文件先 `grep` 确认（超时写成了 `scenario-n`，实际在 `follow`）；手册是 R1 的文档，R1 自己改，不放进批次；在主仓库里执行 `git clean` 这类会删别人文件的命令不签。
+> R1 签发自查（v046-b19、b20 后，SPEC 14.31）：写「输出不变」时写明是哪些输出（文字、JSON 都算），验收里各比一次；让测试删或改的文件，不能是 R2 自己本来就会重写的那个；
+> 把一段留待以后的事拆成批次时，对着原来的清单逐项点一遍（16.14 留下四项，拆的时候漏了两项）。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；队列从 v046-b20 起，固定版本 `86b3cad`。接线第二块（收尾）是 v046-b20、b18、b19（SPEC 16.16、16.17）
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18、b19、b20 已通过（SPEC 14.31）；队列从 v046-b21 起，固定版本 `1745544`，本仓库配置已启用测试 agent。v046-b21 是第一个带「情形」的批次（SPEC 16.18）
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -119,6 +121,10 @@
 | 82 | v046-b18 | 接线收尾二：带情形的 worker 任务书多出情形与接口两节、写明验收测试不能改 | v046-b15, v046-b20 | passed |
 | 83 | v046-b19 | 接线收尾三：why 与 report 显示测试 agent 的花费 | v046-b18 | passed |
 | 84 | v046-b20 | v046-b17 改签：测试 agent 动过的被跟踪文件恢复原样、heartbeat 与墙钟补测试、放宽超时，把主分支修绿 | v046-b15 | passed |
+| 85 | v046-b21 | 没有测试 agent 的运行，why 与 report 的 JSON 里不出现测试 agent 的键（第一个带情形的批次） | v046-b19 | pending |
+| 86 | v046-b22 | 批次在队列里最终被拦时的收尾：撤销救援提交的改动、拿掉本批次的验收测试 | v046-b20 | pending |
+| 87 | v046-b23 | 模型接口出错的 worker 会话算可续跑的中断：先等一段时间，自动续跑一次 | v046-b22 | pending |
+| 88 | v046-b24 | 小修：reviewer 读这一次运行的信封；两处守不住的测试改实 | v046-b20 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -3543,5 +3549,187 @@ v046-b17 两次运行都因模型接口中断，没有完成；它做了一半�
 - 改动 `src/acceptance.ts`、`src/redcheck.ts`、`src/roles/`、`src/runner/`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/ladder.ts`、`src/backlog.ts`；改动任何一条规则的判定、`fix_max` 的计数、队列自动重跑的条件
 - 在主仓库里执行 `git clean`，或用任何别的办法删除、移动测试 agent 留下的未跟踪文件；改变不带情形的批次的任何行为
 - 为了让测试过而删除或跳过任何测试；改写条目 2 点名之外的任何已有断言（条目 3 的超时只改那两个数值）
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b21 没有测试 agent 的运行，why 与 report 的 JSON 里不出现测试 agent 的键（第一个带情形的批次）
+
+优先级：85　依赖：v046-b19
+
+这是第一个按新流程走的批次（SPEC 16.18）：下面的「情形」先由测试 agent 写成验收测试，放在 `test/acceptance/v046-b21/`，随 task 信封一起提交；worker 只写实现，不能改那个目录。
+起因：v046-b19 之后，没有测试 agent 的运行，`why --json` 与 `report --json` 多出了值为 `null` 的新键，而那一批要求的是输出不变（SPEC 14.31）。
+
+情形：
+- S1 [新] 一次运行的 journal 里没有任何 `tester.` 开头的事件：`projectWhy` 得到的那个 attempt 对象没有 `tester` 这个键，它的 `cost` 对象也没有 `tester` 这个键；整个结果 `JSON.stringify` 之后不出现 `"tester":`
+- S2 [新] 一个队列里每个批次的 journal 都没有任何 `tester.` 开头的事件：`projectReport` 得到的每一行 `batchRows` 都没有 `testerCost` 这个键；整个结果 `JSON.stringify` 之后不出现 `"testerCost":`
+- K1 [保持] 一次运行的 journal 里有一条 `tester.finished`（`num_turns` 21、`cost_usd` 0.29、`duration_ms` 123000）：那个 attempt 的 `tester` 是 `turns` 21、`costUsd` 0.29、`durationMs` 123000、`invocations` 1，`cost.tester` 是 0.29；`formatWhy` 的文字里有以 `tester:` 开头的一行
+- K2 [保持] 队列里一个批次的 journal 有一条 `tester.finished`（`cost_usd` 0.29）：`projectReport` 那一行的 `testerCost` 是 0.29；`formatReport` 的文字里有「tester 花费」这一列
+- K3 [保持] 没有任何 `tester.` 开头事件的运行与队列：`formatWhy` 的文字里没有以 `tester:` 开头的行，`formatReport` 的文字里没有「tester 花费」
+
+接口：
+- `src/view.ts` 已有的导出，签名都不变：`loadRuns(root)`、`projectWhy(runDataList, batchId, filterAttempt?)`、`formatWhy(proj)`、`projectReport(allRunData, queueEvents, queueRunId)`、`formatReport(proj, whyTexts, showQueueText, queueRemainingText)`
+- 类型 `RunData` 在 `src/view.ts`，`Event` 在 `src/schema/index.ts`；journal 是 `.collie/runs/<run_id>/events.ndjson`，一行一个事件
+
+条目：
+1. 读 SPEC 16.18 的「第一个带情形的批次」一段与 14.31 里「判 PASS 之后才查出来的三处」的第 1 条。`src/view.ts`：一次运行（或一个批次）的 journal 里没有 `tester.finished` 事件时，
+   `projectWhy` 的 attempt 对象不带 `tester` 键、它的 `cost` 不带 `tester` 键，`projectReport` 的行不带 `testerCost` 键（类型上改成可选；不要输出值为 `null` 或 `undefined` 的占位）。
+   有 `tester.finished` 时这三处与现在相同。`formatWhy`、`formatReport` 的文字输出一个字节都不变。
+2. 现有用例里断言这三处是 `null` 的两条，改成断言键不存在。这是点名允许的改写，在「偏离或疑问」里列出原断言与现断言：
+   `test/why.test.ts` 的 `no tester events: output identical to run without tester (tester field null)`（`a.tester` 与 `a.cost.tester` 两行；用例名里的 `tester field null` 相应改掉）；
+   `test/report.test.ts` 的 `no tester events: output byte-identical (no tester column)`（`row.testerCost` 一行）。
+   R1 查过：全部测试里断言这三个键为 `null` 的只有这三行；没有用例对 `cost` 或整行做整体的 `toEqual`。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/view.ts`、`test/why.test.ts`、`test/report.test.ts`。`test/acceptance/` 下的文件你不能改：你认为某条验收测试写错了，停下，在「偏离或疑问」里写明是哪一条、错在哪。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过（含验收测试） | `npm test` | exit 0 |
+| 本批次的验收测试通过 | `npm test -- test/acceptance/v046-b21` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `test/acceptance/`、`AGENT-*.md`、`.collie/collie.toml`）；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/view.ts` 之外的 `src/` 文件；改变 `formatWhy`、`formatReport` 的文字输出；改变有测试 agent 时的 JSON
+- 为了让测试过而删除或跳过任何测试；改写条目 2 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v046-b22 批次在队列里最终被拦时的收尾：撤销救援提交的改动、拿掉本批次的验收测试
+
+优先级：86　依赖：v046-b20
+
+所有者 2026-11-20 裁定 D12 选甲：救援提交会随之后的推送上主分支（v046-b17 的半成品让主分支红了一天）；批次在队列里最终被拦时，R2 自动把救援提交的改动撤掉。
+同一处收尾还要把本批次的验收测试从树里拿掉（接线时留下没做的）。改 R2 的队列收尾，不改任何判定。
+
+条目：
+1. 读 SPEC 16.18 的「批次在队列里最终被拦时的收尾」一段（救援提交见 11.4）。`src/run.ts`：照那一段做，写成一个函数，在队列里两处调用：以 BLOCK 结束、规则 1 重跑与中断重跑都不适用（或已用过）、即将以 `blocked` 停下之前；超过 `fix_max`、即将以 `fix_max` 停下之前。
+   提交经 `r2Commit`（记 `r2.commit`）。`src/schema/index.ts`：事件类型加 `batch.cleanup`、`batch.cleanup_failed`。单批次模式 `run <批次>` 不收尾。
+   **队列里一个批次：第 1 次 worker 留下未提交的改动后被判空转（于是有救援提交），自动续跑的第 2 次又被判空转：队列以 `blocked` 结束，退出码 20；`git log` 最上面是 `progress: <批次> cleanup`，**
+   **救援提交改过的文件恢复成开跑前的内容（`git diff <首次 base_sha> HEAD -- <那些文件>` 为空）；救援提交仍在历史里；journal 有 `batch.cleanup`，`reverted` 里是救援提交的 sha；这个提交记了 `r2.commit` 并推送了**
+   **没有救援提交、树里也没有本批次验收测试的批次被拦：不多任何提交，journal 没有 `batch.cleanup`**
+2. 同一个函数的另外几种情形：
+   **带情形的批次超过 `fix_max`：收尾提交把 `test/acceptance/<批次>/` 从树里删掉（`removed_acceptance` 为 true）；worker 自己的代码提交一行不动**
+   **撤销有冲突（救援提交之后，同一行又被 worker 后来的提交改过）：不留下半截的撤销，`git status --porcelain` 为空，记 `batch.cleanup_failed`；树里有本批次的验收测试时照样拿掉**
+   **单批次模式 `run <批次>` 以 BLOCK 结束、有救援提交：不收尾，没有 `cleanup` 提交**
+3. 新文件 `test/blocked-cleanup.test.ts`，用 `Sandbox` 与 `FakeRunner`，三组：
+   `describe('blocked cleanup: rescue commits are reverted', …)`（条目 1 的情形；怎样让假 worker 被判空转，照 `test/scenario-n.test.ts` 的 `idle twice → exit 20 (BLOCK)`）；
+   `describe('blocked cleanup: acceptance tests are removed', …)`（条目 2 第一条；带情形的沙箱批次、`[agent.tester]` 与注入的红检查照 `test/tester-step.test.ts`）；
+   `describe('blocked cleanup: when it must not act', …)`（条目 2 后两条；以及队列以 `evidence_unavailable` 停下时不收尾）。
+   允许改写的旧用例只有两处，在「偏离或疑问」里列出：`test/schema.test.ts` 的 `defines the v0.1 event types plus v0.2 and v0.3 types added so far`（个数 42 改成 44，加两条 `toContain`）；
+   `test/invariants.test.ts` 的 `every await push( in run.ts has push_failed or verdict within 5 lines above (v03-b01-fix)`（上限 6 改成 7，前提是新加的推送恰好一处）。
+   R1 查过：队列以 `blocked` 或 `fix_max` 结束的现有用例在 `test/scenario-n.test.ts`（2 条）、`test/scenario-j.test.ts`、`test/scenario-m.test.ts`、`test/queue-limit.test.ts`、`test/r2-commits.test.ts`；
+   其中假 worker 留下过未提交改动的，队列结束时会多出一个收尾提交和 `r2.commit`、`verdict.pushed`、`batch.cleanup` 三条事件。`test/r2-commits.test.ts` 比较提交 sha 集合的那一条，收尾提交以 `progress: ` 开头并记了 `r2.commit`，应当仍然相等。
+   单批次模式的用例（`test/scenario-e.test.ts`、`test/scenario-i.test.ts`、`test/show.test.ts` 里有救援提交的那些）不应受影响。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+   `test/invariants.test.ts` 另加「`src/run.ts` 里有 `batch.cleanup`」
+
+本批次只改 `src/run.ts`、`src/schema/index.ts`、`test/blocked-cleanup.test.ts`、`test/schema.test.ts`、`test/invariants.test.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 没有 git 全局身份时新测试通过 | `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/blocked-cleanup.test.ts` | exit 0 |
+| 三组用例在 | `grep -qF "blocked cleanup: rescue commits are reverted" test/blocked-cleanup.test.ts && grep -qF "blocked cleanup: acceptance tests are removed" test/blocked-cleanup.test.ts && grep -qF "blocked cleanup: when it must not act" test/blocked-cleanup.test.ts` | exit 0 |
+| 两个事件进了类型清单 | `grep -qF "batch.cleanup_failed" src/schema/index.ts && grep -qE "'batch\.cleanup'" src/schema/index.ts` | exit 0 |
+| 不在主仓库里执行 git clean（不看注释行） | `! grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qF "'clean'"` | exit 0 |
+| 不变量同步 | `grep -qF "batch.cleanup" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`、`templates/collie.toml`
+- 改动 `src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/acceptance.ts`、`src/redcheck.ts`、`src/roles/`、`src/runner/`、`src/cli.ts`；改动任何一条规则的判定、`fix_max` 的计数、队列自动重跑的条件
+- 撤销 worker 自己提交的代码；改写或删除历史里的提交（不许 `reset`、`rebase`、强推）；在主仓库里执行 `git clean`，或删除、移动未跟踪的文件；在单批次模式里收尾
+- 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b23 模型接口出错的 worker 会话算可续跑的中断：先等一段时间，自动续跑一次
+
+优先级：87　依赖：v046-b22
+
+所有者 2026-11-20 裁定 D11：worker 的会话因为模型接口出错而结束，算可续跑的中断。第十六、十九两次队列都因为它只跑了一批就停，其中一次 worker 的活已经做完、只差汇报。
+改运行器与 R2 的队列，不改任何判定。
+
+条目：
+1. 读 SPEC 16.18 的「模型接口出错的会话算可续跑的中断」一段（中断后自动重跑见 13.14）。`src/runner/claude.ts` 与 `src/runner/index.ts`：读结果消息里的 `terminal_reason`；`RunResult.stopReason` 的取值加 `api_error`，
+   先后是 `stopped` > `turns_exhausted` > `api_error` > `error`。
+   **结果消息是 `subtype: success`、`is_error: true`、`terminal_reason: api_error`：返回值的 `exitCode` 非零、`stopReason` 是 `api_error`；同样的消息、会话是被中止的：`stopped`；出错而没有 `terminal_reason` 的消息：仍是 `error`**
+2. `src/run.ts`、`src/schema/index.ts`、`templates/collie.toml`：`[limits]` 加可选的 `api_retry_wait_secs`（非负整数，缺省 300，写法照 `tester_max`；模板写 `api_retry_wait_secs = 300` 带一行注释）。本仓库的 `.collie/collie.toml` 不许动。
+   队列里 `api_error` 与 `idling`、`stalled`、`wallclock` 一样算中断，共用每个批次每次队列一次的自动续跑；只有 `api_error` 在续跑之前先等 `api_retry_wait_secs`，`batch.retried` 多带 `waited_secs`。
+   等待经可注入的函数做：`QueueContext` 加可选的 `retryDelay(ms)`（缺省真实等待），`src/cli.ts` 只做转发。v046-b22 的收尾仍在所有自动重跑的判断之后。
+   **队列里 worker 第 1 次以 `api_error` 结束、没有 report：注入的等待函数收到 300000，然后自动重跑一次，`batch.retried` 是 `cause: interrupted`、`stop_reason: api_error`、`waited_secs: 300`；重跑 PASS：队列继续，退出码 0**
+   **重跑又以 `api_error` 结束：不再重跑，队列以 `blocked` 结束，退出码 20；第 1 次是 `idling` 的重跑不等，等待函数没有被调用**
+3. 测试。`test/runner-claude.test.ts` 新加一组 `describe('runner: api_error stop reason', …)`（条目 1 的三种情形）；新文件 `test/api-error-retry.test.ts`，一组 `describe('queue: api_error counts as a resumable interruption', …)`（条目 2 的情形；假 worker 的返回值直接给 `stopReason: 'api_error'`）。
+   允许改写的旧用例只有：`test/config.test.ts` 的 `has the limits of SPEC 3.1`（期望对象加 `api_retry_wait_secs: 300`）与内联配置 `VALID_TOML`（跟着模板加一行）；`test/schema.test.ts` 的夹具 `validConfig.limits`（加这一项）。在「偏离或疑问」里列出。
+   R1 查过：`test/runner-claude.test.ts` 现有 6 处断言 `stopReason` 是 `error` 的用例，夹具都不带 `terminal_reason`，不受影响；`test/scenario-n.test.ts` 的 `worker crash → no interrupt retry` 里 worker 是抛错，结束原因是 `error`，仍然不重跑；
+   全部测试里现在没有一处用到 `terminal_reason` 或 `api_error`。测试要注入等待函数而 `test/support/sandbox.ts` 传不过去时，可以给它加转发，在「偏离或疑问」里写明。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+   `test/invariants.test.ts` 加「`src/run.ts` 里有 `api_error`」
+
+本批次只改 `src/runner/claude.ts`、`src/runner/index.ts`、`src/run.ts`、`src/schema/index.ts`、`src/cli.ts`、`templates/collie.toml`、`test/runner-claude.test.ts`、`test/api-error-retry.test.ts`、`test/config.test.ts`、`test/schema.test.ts`、`test/invariants.test.ts`
+（以及上面说的 `test/support/sandbox.ts`）。不应改动 `test/invariants.test.ts` 已有的任何断言与数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 运行器、队列、配置的测试通过 | `npm test -- test/runner-claude.test.ts test/api-error-retry.test.ts test/scenario-n.test.ts test/config.test.ts test/schema.test.ts` | exit 0 |
+| 两组新用例在 | `grep -qF "runner: api_error stop reason" test/runner-claude.test.ts && grep -qF "queue: api_error counts as a resumable interruption" test/api-error-retry.test.ts` | exit 0 |
+| 模板有新配置项，本仓库的配置没动 | `grep -qE "^api_retry_wait_secs = 300" templates/collie.toml && ! grep -qF "api_retry_wait_secs" .collie/collie.toml` | exit 0 |
+| 运行器与队列都认得 api_error（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/runner/claude.ts \| grep -qF "api_error" && grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qF "api_error"` | exit 0 |
+| 不变量同步 | `grep -qF "api_error" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `.collie/collie.toml`）；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/acceptance.ts`、`src/redcheck.ts`、`src/roles/`、`src/ladder.ts`、`src/view.ts`；改动任何一条规则的判定、`fix_max` 的计数
+- 让一个批次在一次队列里被自动续跑超过一次；让测试 agent 或 reviewer 的会话也走这条续跑；在测试里真的等待
+- 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b24 小修：reviewer 读这一次运行的信封；两处守不住的测试改实
+
+优先级：88　依赖：v046-b20
+
+三处小修。第一处改 R2：重跑时 worker 要是没有新的代码提交，reviewer 读到的是上一次的任务书（SPEC 14.27）。后两处是 v046-b20 留下的、守不住的测试（SPEC 14.31）。
+
+条目：
+1. 读 SPEC 16.18 的「小修」一段。`src/run.ts` 给 reviewer 准备工作目录的地方（现在只留本批次的 `task.md`）：那份 `task.md` 换成主工作区里这一次运行的信封（`.collie/batches/<批次>/task.md`），不用 `head_sha` 的树里的。目录里仍然只有 `task.md`，别的批次的目录不动。
+   **同一个批次第 1 次判 FIX，第 2 次 worker 没有新的代码提交、只重写了 report：第 2 次 reviewer 的工作目录里，`task.md` 的 frontmatter `attempt` 是 2，正文有「上一轮判 FIX」一节；目录里只有 `task.md`**
+2. 测试。`test/reviewer-rerun.test.ts` 新加一组 `describe('reviewer-rerun: task.md comes from the current run', …)`（条目 1 的情形；怎样记下 reviewer 工作目录里的东西，照这个文件现有的做法）。
+   `test/tester-step.test.ts` 的 `tester only deletes a tracked file → that file is restored, listed in tester.md`：它删的是 `docs/progress.md`，R2 上报时本来就会重写这个文件，所以恢复被撤掉它也通过。
+   改成删 `SPEC.md`，并断言恢复之后的内容与 HEAD 上的相同。这是点名允许的改写，在「偏离或疑问」里列出。
+   同一个文件新加一条 `tester wallclock uses worktree_secs`：沙箱配置里 `worktree_secs = 1`、`wallclock_secs` 不动、不注入 `testerSignal`，假测试 agent 一直等到中止信号才结束 → 以 `tester_failed` 上报，退出码 20。
+   假测试 agent 的场景拿不到中止信号时，可以给 `src/runner/fake.ts` 的场景上下文加上它，在「偏离或疑问」里写明。
+   R1 查过：`test/reviewer-rerun.test.ts` 现有用例断言的是目录里只有 `task.md`、`task.md` 存在、别的批次的目录没有被动，不看 `task.md` 的内容，不受影响。已有断言除点名的那一条外都不改。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/run.ts`、`test/reviewer-rerun.test.ts`、`test/tester-step.test.ts`（以及上面说的 `src/runner/fake.ts`）。不应改动 `test/invariants.test.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 两个文件的测试通过 | `npm test -- test/reviewer-rerun.test.ts test/tester-step.test.ts` | exit 0 |
+| 新的一组与新的一条在 | `grep -qF "reviewer-rerun: task.md comes from the current run" test/reviewer-rerun.test.ts && grep -qF "tester wallclock uses worktree_secs" test/tester-step.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`、`templates/collie.toml`
+- 改动 `src/acceptance.ts`、`src/redcheck.ts`、`src/roles/`、`src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/view.ts`、`src/schema/index.ts`；改任何判定
+- 让 reviewer 的工作目录里出现 `task.md` 之外的信封文件（`report.md`、`verdict.md`、`tester.md`）
+- 为了让测试过而删除或跳过任何测试；改写条目 2 点名之外的任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
