@@ -2170,4 +2170,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b25 · r-20261120104848 · BLOCK
+
+- 时间：2026-11-20T10:57:20.255Z
+- 裁定：规则 1，verdict unparseable: reviewer returned no final text
+- 提交：`80b28b1`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1453 passed, 0 failed
+  - `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/blocked-cleanup.test.ts` → exit 0，9 passed, 0 failed
+  - `grep -qF "blocked cleanup: only its own paths" test/blocked-cleanup.test.ts` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qF "'reset'"` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -cF "['add', '-A']" | grep -qx 1` → exit 0，exit 0
+  - `grep -qF "'reset'" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44721121596
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：1（error）
 <!-- collie:runs:end -->
