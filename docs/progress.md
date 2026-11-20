@@ -2051,4 +2051,21 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b18 · r-20261120035859 · PASS
+
+- 时间：2026-11-20T04:11:40.375Z
+- 裁定：规则 10，全部验收命令通过，实现符合 SPEC 16.16 对 v046-b18 的要求，测试覆盖有/无情形两种情况，无受保护文件或依赖变化。CI 以 R2 取证为准。
+- 提交：`d6571e1`
+- 验收命令：5/5 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1402 passed, 0 failed
+  - `npm test -- test/task-envelope.test.ts test/worker.test.ts` → exit 0，200 passed, 0 failed
+  - `grep -qE "本批次情形" src/roles/worker.ts && grep -qE "本批次接口" src/roles/worker.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44671902094
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
