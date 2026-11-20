@@ -2724,38 +2724,34 @@ async function batchCleanup(
     }
   }
 
-  // Revert rescue commits newest-first (reverse order).
+  // Revert rescue commits newest-first (reverse order). SPEC 16.19.
   const reverted: string[] = [];
   let revertFailed = false;
   if (rescueShasInRange.length > 0) {
-    // Process from newest to oldest.
     const reversed = [...rescueShasInRange].reverse();
     for (const sha of reversed) {
       try {
-        // Revert without committing: apply the inverse diff to index + worktree.
         await git(root, ['revert', '--no-commit', sha]);
         reverted.push(sha);
       } catch {
-        // Conflict: abort all reverts, restore worktree.
+        // SPEC 16.19: conflict — only git revert --abort, no git reset or checkout.
         revertFailed = true;
         try {
           await git(root, ['revert', '--abort']);
         } catch {
           // revert --abort may fail if there's nothing to abort.
         }
-        // Ensure worktree is clean: reset index and restore tracked files.
-        try {
-          await git(root, ['reset', 'HEAD']);
-          await git(root, ['checkout', '.']);
-        } catch {
-          // Best effort.
+        // SPEC 16.19: check if tracked changes remain after abort.
+        const postAbortStatus = await status(root);
+        const trackedAfterAbort = postAbortStatus.entries.filter((e) => e.code !== '??');
+        if (trackedAfterAbort.length > 0) {
+          rec.record('batch.cleanup_failed', { reason: 'abort_left_changes' });
+          return;
         }
         rec.record('batch.cleanup_failed', { reason: `revert_conflict: ${sha}` });
         break;
       }
     }
-    // If revert succeeded so far, reset the index (the --no-commit reverts staged everything).
-    // We'll commit all changes at once at the end.
   }
 
   // SPEC 16.18 step 2: remove acceptance tests if they exist.
@@ -2764,24 +2760,32 @@ async function batchCleanup(
   let removedAcceptance = false;
   if (existsSync(absAcceptancePath)) {
     rmSync(absAcceptancePath, { recursive: true, force: true });
-    try {
-      await git(root, ['add', acceptancePath]);
-    } catch {
-      // Best effort: if the path wasn't tracked, git add might fail.
-    }
+    // Stage the removal in the index (files are already deleted from worktree).
+    await git(root, ['rm', '-r', '--cached', '--ignore-unmatch', '--', acceptancePath]);
     removedAcceptance = true;
   }
 
-  // Check if there are actual changes to commit.
-  const postStatus = await status(root);
-  if (postStatus.clean) {
-    // Nothing changed — no commit needed.
+  // SPEC 16.19: nothing reverted AND no acceptance tests → no commit/push/event.
+  const hasRevertedChanges = !revertFailed && reverted.length > 0;
+  if (!hasRevertedChanges && !removedAcceptance) {
     return;
   }
 
-  // Stage everything and commit; then push (verdict.pushed / verdict.push_failed).
-  await git(root, ['add', '-A']);
-  const cleanupSha = await r2Commit(root, `progress: ${batchId} cleanup`, ['.'], rec);
+  // Check if there are actual staged changes to commit.
+  const stagedOutput = await git(root, ['diff', '--cached', '--name-only']);
+  if (stagedOutput.trim() === '') {
+    return;
+  }
+
+  // SPEC 16.19: commit staged changes directly — git revert --no-commit already
+  // staged the revert diffs in the index, and git rm staged acceptance deletion.
+  // Using r2Commit (which calls git add) would fail for files that the revert
+  // removed from both index and worktree, so we commit the index as-is.
+  const subject = `progress: ${batchId} cleanup`;
+  await git(root, ['commit', '-m', subject]);
+  const cleanupSha = await revParse(root, 'HEAD');
+  rec.record('r2.commit', { sha: cleanupSha, subject });
+  // Push cleanup commit; verdict.pushed / verdict.push_failed.
   try {
     await push(root, remote, branch);
     rec.record('verdict.pushed', { sha: cleanupSha, remote, branch });

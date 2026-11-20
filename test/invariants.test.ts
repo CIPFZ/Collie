@@ -710,4 +710,34 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
     expect(content).toContain('batch.cleanup');
   });
+
+  it("src/run.ts non-comment lines have no 'reset' (v046-b25)", () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    const codeLines = content
+      .split('\n')
+      .filter(
+        (l) =>
+          !l.trimStart().startsWith('//') &&
+          !l.trimStart().startsWith('*') &&
+          !l.trimStart().startsWith('/*'),
+      );
+    const hasReset = codeLines.some((l) => l.includes("'reset'"));
+    expect(hasReset, "'reset' should not appear in non-comment code lines of src/run.ts").toBe(
+      false,
+    );
+  });
+
+  it("src/run.ts non-comment lines have exactly one ['add', '-A'] (v046-b25)", () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    const codeLines = content
+      .split('\n')
+      .filter(
+        (l) =>
+          !l.trimStart().startsWith('//') &&
+          !l.trimStart().startsWith('*') &&
+          !l.trimStart().startsWith('/*'),
+      );
+    const addAllCount = codeLines.filter((l) => l.includes("['add', '-A']")).length;
+    expect(addAllCount, "['add', '-A'] should appear exactly once (rescue commit)").toBe(1);
+  });
 });

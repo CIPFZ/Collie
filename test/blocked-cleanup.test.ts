@@ -3,7 +3,7 @@
 // edge cases (conflicts, single-batch mode, evidence_unavailable) are handled.
 // Uses Sandbox, FakeRunner, and injected liveness clock (same approach as
 // scenario-n.test.ts).
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { git, revParse } from '../src/git.js';
@@ -12,8 +12,10 @@ import { FakeRunner } from '../src/runner/fake.js';
 import type { Claims, Event, Report, Verdict } from '../src/schema/index.js';
 import { controllableFingerprint, fakeLivenessClock, instantDelay } from './support/fake-clock.js';
 import { Sandbox, TEST_CMD } from './support/sandbox.js';
+import type { RedCheckFn } from '../src/acceptance.js';
 
 const FENCE = '```';
+const repoRoot = join(import.meta.dirname, '..');
 
 // ---------------------------------------------------------------------------
 // Helpers: backlog and scene builders
@@ -697,5 +699,336 @@ describe('blocked cleanup: when it must not act', () => {
     // Should NOT have batch.cleanup (evidence_unavailable path doesn't clean up).
     const cleanup = events.find((e: Event) => e.event === 'batch.cleanup');
     expect(cleanup).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Group 4: Cleanup only commits its own paths (SPEC 16.19)
+// ---------------------------------------------------------------------------
+
+/** A passing red check for the tester step. */
+function passingRedCheck(): RedCheckFn {
+  // eslint-disable-next-line @typescript-eslint/require-await -- RedCheckFn is async
+  return async () => ({
+    ok: true as const,
+    problems: [],
+    newTestCount: 1,
+    keepTestCount: 0,
+  });
+}
+
+/** A tester scene that creates rogue.txt in the main workspace (like tester-step.test.ts). */
+function testerTouchMainScene(mainRoot: string, batchId: string): FakeScene {
+  return {
+    expectRole: 'tester',
+    effect: ({ cwd }: FakeSceneContext) => {
+      // Write acceptance files in worktree (normal).
+      const outDir = join(cwd, 'test', 'acceptance', batchId);
+      mkdirSync(outDir, { recursive: true });
+      writeFileSync(join(outDir, 'new.test.ts'), '// acceptance test\nexport {};\n');
+      writeFileSync(join(outDir, 'MAP.md'), '# MAP\n');
+      // Write a rogue file in the MAIN repo.
+      writeFileSync(join(mainRoot, 'rogue.txt'), 'should not be committed\n');
+    },
+    result: { exitCode: 0, finalText: 'done' },
+  };
+}
+
+describe('blocked cleanup: only its own paths', () => {
+  let box: Sandbox;
+
+  beforeEach(async () => {
+    workerSeq = 0;
+    box = await Sandbox.create();
+  });
+
+  afterEach(() => {
+    box.dispose();
+  });
+
+  it('tester_touched_main_tree + rogue.txt → no cleanup commit; rogue.txt stays', async () => {
+    // Batch with scenarios triggers the tester step.
+    const backlog = makeBacklog([
+      { priority: 1, id: 'v99-a01', title: '已完成', depends: '—', status: 'passed' },
+      {
+        priority: 2,
+        id: 'v99-b01',
+        title: '待跑',
+        depends: 'v99-a01',
+        status: 'pending',
+        scenarios: ['S1 [新] scenario A'],
+      },
+    ]);
+    box.write('docs/backlog.md', backlog);
+
+    // Add [agent.tester] config and verify.static (required for tester step).
+    let toml = box.read('.collie/collie.toml');
+    if (!toml.includes('[agent.tester]')) {
+      const workerSection = /\[agent\.worker\][\s\S]*?(?=\n\[)/.exec(toml)?.[0] ?? '';
+      const testerSection = workerSection
+        .replace('[agent.worker]', '[agent.tester]')
+        .replace(/bash_deny\s*=\s*\[.*?\]/s, '');
+      toml = toml.replace('[limits]', `${testerSection}\n[limits]`);
+    }
+    if (!toml.includes('tester_max')) {
+      toml = toml.replace(/fix_max\s*=\s*\d+/, 'fix_max = 2\ntester_max = 2');
+    }
+    if (!toml.includes('redcheck_secs')) {
+      toml = toml.replace(/tester_max\s*=\s*\d+/, 'tester_max = 2\nredcheck_secs = 600');
+    }
+    if (!toml.includes('worktree_secs')) {
+      toml = toml.replace(/redcheck_secs\s*=\s*\d+/, 'redcheck_secs = 600\nworktree_secs = 1800');
+    }
+    if (!toml.includes('static')) {
+      toml = toml.replace(/\[verify\]/, '[verify]\nstatic = ["true"]');
+    }
+    box.write('.collie/collie.toml', toml);
+
+    // Copy AGENT-tester.md so the tester step can run.
+    copyFileSync(join(repoRoot, 'AGENT-tester.md'), join(box.root, 'AGENT-tester.md'));
+
+    await box.commitAll('chore: tester scenario setup');
+
+    const runner = new FakeRunner([
+      // Tester writes rogue.txt in main workspace → tester_touched_main_tree.
+      testerTouchMainScene(box.root, 'v99-b01'),
+    ]);
+
+    const redCheck = passingRedCheck();
+    const code = await box.cli(['run', '--continue'], runner, { redCheck });
+    expect(code).toBe(20);
+
+    const events = box.events();
+
+    // Should have tester_touched_main_tree escalation.
+    const escalated = events.find((e: Event) => e.event === 'escalated');
+    expect(escalated).toBeDefined();
+    expect(
+      typeof escalated?.reason === 'string' &&
+        escalated.reason.startsWith('tester_touched_main_tree'),
+    ).toBe(true);
+
+    // No batch.cleanup event (no rescue commits, no acceptance tests to remove).
+    const cleanup = events.find((e: Event) => e.event === 'batch.cleanup');
+    expect(cleanup).toBeUndefined();
+
+    // No cleanup commit in history.
+    const logOutput = await git(box.root, ['log', '--format=%s']);
+    const cleanupCommits = logOutput
+      .trim()
+      .split('\n')
+      .filter((l: string) => l.includes('cleanup'));
+    expect(cleanupCommits).toHaveLength(0);
+
+    // rogue.txt should still be in the workspace.
+    expect(existsSync(join(box.root, 'rogue.txt'))).toBe(true);
+
+    // rogue.txt should NOT be in any commit.
+    const grepResult = await git(box.root, [
+      'log',
+      '--all',
+      '--diff-filter=A',
+      '--name-only',
+      '--format=',
+    ]);
+    expect(grepResult).not.toContain('rogue.txt');
+  });
+
+  it('idle workers with note.txt → cleanup only commits rescue paths; note.txt stays', async () => {
+    const backlog = makeBacklog([
+      { priority: 1, id: 'v99-a01', title: '已完成', depends: '—', status: 'passed' },
+      { priority: 2, id: 'v99-b01', title: '待跑', depends: 'v99-a01', status: 'pending' },
+    ]);
+    box.write('docs/backlog.md', backlog);
+
+    // Add note.txt to .gitignore so rescue's git add -A doesn't capture it.
+    // This simulates build artifacts / editor files that should stay untracked.
+    const gitignore = box.read('.gitignore') + 'note.txt\n';
+    box.write('.gitignore', gitignore);
+
+    let toml = box.read('.collie/collie.toml');
+    toml = toml.replace(/progress_secs\s*=\s*\d+/, 'progress_secs = 1');
+    box.write('.collie/collie.toml', toml);
+    await box.commitAll('chore: idle workers with note.txt test');
+
+    const baseSha = await revParse(box.root, 'HEAD');
+
+    const fp = controllableFingerprint();
+
+    // Worker scene that creates both feature.txt (tracked, rescued) and note.txt (ignored).
+    function idleWithNote(fileContent: string): FakeScene {
+      return {
+        expectRole: 'worker',
+        effect: async (ctx: FakeSceneContext) => {
+          writeFileSync(join(ctx.cwd, 'feature.txt'), fileContent);
+          // note.txt is in .gitignore — rescue won't capture it.
+          writeFileSync(join(ctx.cwd, 'note.txt'), 'should stay in workspace\n');
+          fp.freeze();
+          for (let i = 0; i < 10; i++) {
+            ctx.opts.onEvent?.({ type: 'assistant', message: 'thinking...' });
+          }
+          await ctx.stopped;
+          fp.unfreeze();
+        },
+        result: { exitCode: 0 },
+      };
+    }
+
+    const runner = new FakeRunner([
+      idleWithNote('partial work attempt 1\n'),
+      idleWithNote('partial work attempt 2\n'),
+    ]);
+
+    const code = await box.cli(['run', '--continue'], runner, livenessOpts(fp));
+    expect(code).toBe(20);
+
+    const events = box.events();
+
+    // Should have rescue events.
+    const rescued = events.filter((e: Event) => e.event === 'worker.rescued');
+    expect(rescued.length).toBeGreaterThanOrEqual(1);
+
+    // Should have batch.cleanup event.
+    const cleanup = events.find((e: Event) => e.event === 'batch.cleanup');
+    expect(cleanup).toBeDefined();
+    expect(Array.isArray(cleanup?.reverted)).toBe(true);
+    const revertedShas = cleanup?.reverted as string[];
+    expect(revertedShas.length).toBeGreaterThanOrEqual(1);
+
+    // The cleanup commit should only contain rescue-related files.
+    const cleanupCommitEvt = events.find(
+      (e: Event) =>
+        e.event === 'r2.commit' && typeof e.subject === 'string' && e.subject.includes('cleanup'),
+    );
+    expect(cleanupCommitEvt).toBeDefined();
+    const cleanupSha = cleanupCommitEvt?.sha as string;
+    const cleanupDiff = await git(box.root, [
+      'diff-tree',
+      '--no-commit-id',
+      '-r',
+      '--name-only',
+      cleanupSha,
+    ]);
+    const cleanupFiles = cleanupDiff.trim().split('\n').filter(Boolean);
+    // Cleanup commit should contain feature.txt (from rescue revert).
+    expect(cleanupFiles).toContain('feature.txt');
+    // note.txt should NOT be in the cleanup commit.
+    expect(cleanupFiles).not.toContain('note.txt');
+
+    // note.txt should still be in the workspace.
+    expect(existsSync(join(box.root, 'note.txt'))).toBe(true);
+
+    // note.txt should NOT be in any commit.
+    const allDiffs = await git(box.root, [
+      'log',
+      '--all',
+      '--diff-filter=A',
+      '--name-only',
+      '--format=',
+    ]);
+    expect(allDiffs).not.toContain('note.txt');
+
+    // Rescue's feature.txt changes should be reverted.
+    const diff = await git(box.root, ['diff', baseSha, 'HEAD', '--', 'feature.txt']);
+    expect(diff.trim()).toBe('');
+  });
+
+  it('content conflict → revert_conflict; no merge markers; workspace clean', async () => {
+    const backlog = makeBacklog([
+      { priority: 1, id: 'v99-a01', title: '已完成', depends: '—', status: 'passed' },
+      { priority: 2, id: 'v99-b01', title: '待跑', depends: 'v99-a01', status: 'pending' },
+    ]);
+    box.write('docs/backlog.md', backlog);
+
+    let toml = box.read('.collie/collie.toml');
+    toml = toml.replace(/fix_max\s*=\s*\d+/, 'fix_max = 1');
+    toml = toml.replace(/progress_secs\s*=\s*\d+/, 'progress_secs = 1');
+    box.write('.collie/collie.toml', toml);
+    await box.commitAll('chore: conflict test setup');
+
+    const fp = controllableFingerprint();
+
+    // Worker that creates feature.txt with content that will conflict with rescue.
+    const idleWithFeature = idleWorkerWithDirtyFiles('v99-b01', fp, 'rescue line 1\n');
+
+    // Worker that overwrites feature.txt line 1 with different content + commits + pushes.
+    function workerOverwriteScene(): FakeScene {
+      return {
+        expectRole: 'worker',
+        effect: async ({ cwd }: FakeSceneContext) => {
+          workerSeq++;
+          box.write('feature.txt', `completely different line 1 ${String(workerSeq)}\n`, cwd);
+          box.write('tests/t000.sh', 'exit 0\n', cwd);
+          const head = await box.commitAll('feat: overwrite feature', cwd);
+          const claims: Claims = {
+            commits: [head],
+            tests_passed: 1,
+            tests_failed: 0,
+            pushed: true,
+            ci_passed: false,
+            new_deps: [],
+            spec_touched: false,
+          };
+          const report: Report = {
+            schema_version: 1,
+            batch_id: 'v99-b01',
+            head_sha: head,
+            claims,
+            open_questions: [],
+          };
+          box.write(
+            '.collie/batches/v99-b01/report.md',
+            `# r\n\n## 做了什么\n完成。\n\n## 测试结果\n见。\n\n## 偏离或疑问\n无\n\n## 下一步建议\n无\n\n${FENCE}json\n${JSON.stringify(report, null, 2)}\n${FENCE}\n`,
+            cwd,
+          );
+          await box.commitAll('report(collie): v99-b01', cwd);
+          await git(cwd, ['push', '-q', 'origin', 'main']);
+        },
+        result: { exitCode: 0 },
+      };
+    }
+
+    const runner = new FakeRunner([
+      // Run 1: idle → rescue commit (feature.txt = "rescue line 1") → BLOCK → interrupt retry.
+      idleWithFeature,
+      // Run 2 (interrupt_retry): worker overwrites feature.txt → reviewer FIX.
+      workerOverwriteScene(),
+      reviewerFix(box, 'v99-b01'),
+      // Run 3 (fix_retry): worker + reviewer FIX again → exceeds fix_max.
+      workerOverwriteScene(),
+      reviewerFix(box, 'v99-b01'),
+    ]);
+
+    const code = await box.cli(['run', '--continue'], runner, livenessOpts(fp));
+    expect(code).toBe(20);
+
+    const events = box.events();
+
+    // Should have batch.cleanup_failed with revert_conflict reason.
+    const cleanupFailed = events.find((e: Event) => e.event === 'batch.cleanup_failed');
+    expect(cleanupFailed).toBeDefined();
+    expect(
+      typeof cleanupFailed?.reason === 'string' &&
+        cleanupFailed.reason.startsWith('revert_conflict'),
+    ).toBe(true);
+
+    // No merge conflict markers in any tracked file.
+    const trackedFiles = (await git(box.root, ['ls-files'])).trim().split('\n').filter(Boolean);
+    for (const f of trackedFiles) {
+      const content = readFileSync(join(box.root, f), 'utf8');
+      expect(content).not.toContain('<<<<<<<');
+    }
+
+    // git status --porcelain: no tracked file changes (only untracked are allowed).
+    const statusOutput = await git(box.root, ['status', '--porcelain']);
+    const trackedChanges = statusOutput
+      .trim()
+      .split('\n')
+      .filter((l: string) => l.trim() !== '' && !l.startsWith('??'));
+    expect(trackedChanges).toHaveLength(0);
+
+    // queue.finished reason should be 'fix_max'.
+    const finished = events.find((e: Event) => e.event === 'queue.finished');
+    expect(finished?.reason).toBe('fix_max');
   });
 });
