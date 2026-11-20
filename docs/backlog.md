@@ -117,7 +117,7 @@
 | 80 | v046-b16 | prepareAcceptance 里运行器抛错的两种情形；两条空过的测试改实（不接进队列） | v046-b12 | passed |
 | 81 | v046-b17 | 接线收尾一：被跟踪文件不进提交、heartbeat 阶段改回、测试 agent 单独墙钟、放宽超时 | v046-b15 | blocked |
 | 82 | v046-b18 | 接线收尾二：带情形的 worker 任务书多出情形与接口两节、写明验收测试不能改 | v046-b15, v046-b20 | passed |
-| 83 | v046-b19 | 接线收尾三：why 与 report 显示测试 agent 的花费 | v046-b18 | pending |
+| 83 | v046-b19 | 接线收尾三：why 与 report 显示测试 agent 的花费 | v046-b18 | passed |
 | 84 | v046-b20 | v046-b17 改签：测试 agent 动过的被跟踪文件恢复原样、heartbeat 与墙钟补测试、放宽超时，把主分支修绿 | v046-b15 | passed |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。

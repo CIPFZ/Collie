@@ -2068,4 +2068,21 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b19 · r-20261120041144 · PASS
+
+- 时间：2026-11-20T04:29:43.345Z
+- 裁定：规则 10，All 5 acceptance commands pass. Implementation in src/view.ts correctly adds tester agent display to why and report, with aggregation for multiple invocations and byte-identical output when no tester events exist. Tests cover all three scenarios in both test files. No protected files modified, no existing assertions changed, no forbidden files touched, no new dependencies. CI verification deferred to R2.
+- 提交：`711507c`
+- 验收命令：5/5 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1408 passed, 0 failed
+  - `npm test -- test/why.test.ts test/report.test.ts` → exit 0，49 passed, 0 failed
+  - `grep -qF "tester.finished" src/view.ts && grep -qF "tester.finished" test/why.test.ts && grep -qF "tester.finished" test/report.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44673985535
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
