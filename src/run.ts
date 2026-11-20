@@ -3,6 +3,7 @@
 // Deterministic: no LLM decides anything here (ROLES 2 R2).
 import {
   appendFileSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -218,6 +219,10 @@ function verifyCommands(globalCommands: readonly string[], batch: Batch): Accept
  * A worktree at head_sha: the committed result, with this batch's envelope
  * directory stripped to task.md only (SPEC 14.18 & 14.20). Dependencies are
  * not part of git, so the main tree's node_modules is linked in when present.
+ *
+ * SPEC 16.18: task.md is copied from the main workspace (this run's envelope),
+ * not from the head_sha tree — on reruns the tree's copy is the previous
+ * attempt's version.
  */
 async function withHeadWorktree<T>(
   root: string,
@@ -241,6 +246,13 @@ async function withHeadWorktree<T>(
           rmSync(join(batchDir, entry), { recursive: true, force: true });
         }
       }
+    }
+    // SPEC 16.18: replace task.md with this run's envelope from the main
+    // workspace so that rerun reviewers see the current attempt's frontmatter.
+    const mainTaskPath = join(root, '.collie', 'batches', batchId, 'task.md');
+    if (existsSync(mainTaskPath)) {
+      mkdirSync(batchDir, { recursive: true });
+      copyFileSync(mainTaskPath, join(batchDir, 'task.md'));
     }
     return await body(dir);
   } finally {

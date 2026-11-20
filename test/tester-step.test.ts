@@ -341,6 +341,7 @@ function testerTouchTrackedAndUntrackedScene(mainRoot: string): FakeScene {
 
 /**
  * A tester scene that only deletes a tracked file in the MAIN repo's tree.
+ * Uses SPEC.md because docs/progress.md would be rewritten by R2 anyway.
  */
 function testerDeleteTrackedScene(mainRoot: string): FakeScene {
   return {
@@ -351,7 +352,7 @@ function testerDeleteTrackedScene(mainRoot: string): FakeScene {
       writeFileSync(join(outDir, 'new.test.ts'), '// acceptance test\nexport {};\n');
       writeFileSync(join(outDir, 'MAP.md'), '# MAP\n');
       // Delete a tracked file in the MAIN repo
-      rmSync(join(mainRoot, 'docs', 'progress.md'));
+      rmSync(join(mainRoot, 'SPEC.md'));
     },
     result: { exitCode: 0, finalText: 'done' },
   };
@@ -737,12 +738,17 @@ describe('tester step: heartbeat and tracked-file safety', () => {
     expect(exit).toBe(20);
 
     // The deleted file must be restored
-    expect(existsSync(join(box.root, 'docs', 'progress.md'))).toBe(true);
+    expect(existsSync(join(box.root, 'SPEC.md'))).toBe(true);
+
+    // The restored content must match HEAD
+    const headContent = await git(box.root, ['show', 'HEAD:SPEC.md']);
+    const diskContent = readFileSync(join(box.root, 'SPEC.md'), 'utf8');
+    expect(diskContent).toBe(headContent);
 
     // tester.md must list it under restored tracked files
     const testerMd = box.read(`.collie/batches/${BATCH}/tester.md`);
     expect(testerMd).toContain('恢复了的被跟踪文件');
-    expect(testerMd).toContain('docs/progress.md');
+    expect(testerMd).toContain('SPEC.md');
   });
 
   it('after tester step, heartbeat phase is worker', async () => {
@@ -796,5 +802,64 @@ describe('tester step: heartbeat and tracked-file safety', () => {
 
     // Verify heartbeat phase was 'worker' when the worker scene ran
     expect(heartbeatPhase).toBe('worker');
+  });
+});
+
+describe('tester step: wallclock', () => {
+  it('tester wallclock uses worktree_secs', async () => {
+    // Create a sandbox with worktree_secs = 1 (1 second timeout)
+    const box = await TesterSandbox.create(BACKLOG_WITH_SCENARIOS);
+    try {
+      // Patch collie.toml to set worktree_secs = 1
+      const tomlPath = join(box.root, '.collie', 'collie.toml');
+      let toml = readFileSync(tomlPath, 'utf8');
+      toml = toml.replace(/^worktree_secs\s*=\s*\d+/m, 'worktree_secs = 1');
+      writeFileSync(tomlPath, toml);
+      await box.commitAll('config: set worktree_secs = 1');
+      await git(box.root, ['push', '-q', 'origin', 'main']);
+
+      // Tester scene that waits for the abort signal (via opts.signal)
+      const waitingTesterScene: FakeScene = {
+        expectRole: 'tester',
+        effect: async ({ cwd, opts }: FakeSceneContext) => {
+          // Write acceptance files so the scene looks normal up to this point
+          const outDir = join(cwd, 'test', 'acceptance', BATCH);
+          mkdirSync(outDir, { recursive: true });
+          writeFileSync(join(outDir, 'new.test.ts'), '// acceptance test\nexport {};\n');
+          writeFileSync(join(outDir, 'MAP.md'), '# MAP\n');
+          // Wait until the abort signal fires (worktree_secs = 1 second)
+          if (opts.signal && !opts.signal.aborted) {
+            await new Promise<void>((resolve) => {
+              const sig = opts.signal;
+              if (sig) {
+                sig.addEventListener(
+                  'abort',
+                  () => {
+                    resolve();
+                  },
+                  { once: true },
+                );
+              }
+            });
+          }
+        },
+        result: { exitCode: 0, finalText: 'done' },
+      };
+
+      const runner = new FakeRunner([waitingTesterScene]);
+      const redCheck = passingRedCheck();
+      // Do NOT inject testerSignal — the system should use worktree_secs from config
+      const exit = await box.run(runner, { redCheck });
+
+      expect(exit).toBe(20);
+
+      // Escalation reason should start with tester_failed
+      const events = box.events();
+      const escalated = events.find((e) => e.event === 'escalated');
+      expect(escalated).toBeDefined();
+      expect((escalated?.reason as string).startsWith('tester_failed')).toBe(true);
+    } finally {
+      box.dispose();
+    }
   });
 });

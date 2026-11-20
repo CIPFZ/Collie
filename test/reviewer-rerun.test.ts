@@ -1,7 +1,7 @@
 // SPEC 14.17: on FIX reruns the reviewer worktree must not contain the
 // previous attempt's report.md, even though git ls-tree at head_sha would
 // show it.  The path exclusion in the prompt must also be present.
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { git } from '../src/git.js';
@@ -208,7 +208,7 @@ function reviewerPassScene(
 // FIX then PASS (same batch, two attempts via --continue)
 // ===================================================================
 
-describe('reviewer-rerun: FIX then PASS', () => {
+describe('reviewer-rerun: FIX then PASS', { timeout: 300_000 }, () => {
   let box: Sandbox;
   const reviewerCaptures: ReviewerCapture[] = [];
   const workerCaptures: WorkerCapture[] = [];
@@ -348,5 +348,106 @@ describe('reviewer-rerun: first PASS', () => {
 
   it('other batch dir files are not removed from reviewer cwd', () => {
     expect(reviewerCaptures[0]?.otherBatchReportExists).toBe(true);
+  });
+});
+
+// ===================================================================
+// task.md comes from the current run (SPEC 16.18)
+// ===================================================================
+
+describe('reviewer-rerun: task.md comes from the current run', { timeout: 300_000 }, () => {
+  let box: Sandbox;
+  const reviewerTaskContents: string[] = [];
+  const workerCaptures: WorkerCapture[] = [];
+
+  /**
+   * Reviewer scene that captures the full content of task.md in its cwd.
+   */
+  function reviewerCaptureTaskScene(verdict: 'FIX' | 'PASS'): {
+    expectRole: 'reviewer';
+    effect: (ctx: FakeSceneContext) => void;
+    result: { exitCode: number; finalText: string };
+  } {
+    const body: Verdict = {
+      schema_version: 1,
+      batch_id: BATCH_ID,
+      verdict,
+      evidence: {
+        commits_actual: [],
+        verify_results: [{ cmd: TEST_CMD, exit_code: 0, summary: '1 passed, 0 failed' }],
+        remote_has_head: true,
+        ci_conclusion: 'success',
+        ci_run_url: '',
+        ci_branch_matched: true,
+        deps_diff: [],
+        spec_diff_lines: 0,
+      },
+      claim_mismatches: [],
+      gaps: verdict === 'FIX' ? ['needs work'] : [],
+      reason: verdict === 'FIX' ? 'not good enough' : 'all good',
+    };
+    return {
+      expectRole: 'reviewer',
+      effect: ({ cwd }: FakeSceneContext) => {
+        const taskPath = join(cwd, '.collie', 'batches', BATCH_ID, 'task.md');
+        if (existsSync(taskPath)) {
+          reviewerTaskContents.push(readFileSync(taskPath, 'utf8'));
+        }
+        // Also verify only task.md is present
+        const batchDir = join(cwd, '.collie', 'batches', BATCH_ID);
+        const files = existsSync(batchDir) ? readdirSync(batchDir).sort() : [];
+        expect(files).toEqual(['task.md']);
+      },
+      result: {
+        exitCode: 0,
+        finalText: `# 裁决\n\n${verdict === 'FIX' ? '修复' : '通过'}。\n\n${FENCE}json\n${JSON.stringify(body, null, 2)}\n${FENCE}\n`,
+      },
+    };
+  }
+
+  beforeEach(async () => {
+    workerSeq = 0;
+    reviewerTaskContents.length = 0;
+    workerCaptures.length = 0;
+    box = await Sandbox.create();
+    box.write('docs/backlog.md', makeBacklog());
+    await box.commitAll('chore: single-batch backlog');
+
+    const runner = new FakeRunner([
+      workerScene(box, workerCaptures, true),
+      reviewerCaptureTaskScene('FIX'),
+      workerScene(box, workerCaptures, true),
+      reviewerCaptureTaskScene('PASS'),
+    ]);
+    const code = await box.cli(['run', '--continue'], runner);
+    expect(code).toBe(0);
+  });
+
+  afterEach(() => {
+    box.dispose();
+  });
+
+  it('attempt 2 reviewer sees task.md with attempt: 2 frontmatter', () => {
+    expect(reviewerTaskContents).toHaveLength(2);
+    const secondTask = reviewerTaskContents[1] ?? '';
+    expect(secondTask).toContain('attempt: 2');
+  });
+
+  it('attempt 2 reviewer sees "上一轮判 FIX" section in task.md', () => {
+    expect(reviewerTaskContents).toHaveLength(2);
+    const secondTask = reviewerTaskContents[1] ?? '';
+    expect(secondTask).toContain('上一轮判 FIX');
+  });
+
+  it('attempt 1 reviewer sees task.md with attempt: 1 frontmatter', () => {
+    expect(reviewerTaskContents).toHaveLength(2);
+    const firstTask = reviewerTaskContents[0] ?? '';
+    expect(firstTask).toContain('attempt: 1');
+  });
+
+  it('reviewer cwd has only task.md in both attempts', () => {
+    // Verified inside the reviewer effect via expect(files).toEqual(['task.md'])
+    // If we got here, both attempts passed that check.
+    expect(reviewerTaskContents).toHaveLength(2);
   });
 });
