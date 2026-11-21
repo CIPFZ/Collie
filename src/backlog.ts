@@ -385,9 +385,12 @@ interface SectionContent {
 /**
  * SPEC 16.21 (v046-b32): paths that may be named in a 「可改的受保护路径」 section.
  * Only .github (the directory itself or anything under it), eslint.config.js,
- * and vitest.config.ts can be authorised; anything else is an error.
+ * and vitest.config.ts can be authorised.  Paths with `..`, absolute paths,
+ * and wildcards (`*`, `?`) are always rejected.
  */
 function isAllowablePath(path: string): boolean {
+  // Reject traversal, absolute, and glob patterns.
+  if (path.includes('..') || path.startsWith('/') || /[*?]/.test(path)) return false;
   if (path === '.github' || path.startsWith('.github/')) return true;
   if (path === 'eslint.config.js') return true;
   if (path === 'vitest.config.ts') return true;

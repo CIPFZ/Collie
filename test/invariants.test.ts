@@ -757,4 +757,14 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(content).toContain("'eslint.config.js'");
     expect(content).toContain("'vitest.config.ts'");
   });
+
+  it('src/backlog.ts has 可改的受保护路径 (v046-b32)', () => {
+    const content = readFileSync(join(ROOT, 'src/backlog.ts'), 'utf8');
+    expect(content).toContain('可改的受保护路径');
+  });
+
+  it('src/run.ts has authorized_diff_lines (v046-b32)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    expect(content).toContain('authorized_diff_lines');
+  });
 });

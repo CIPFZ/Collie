@@ -348,6 +348,96 @@ describe('backlog: blank lines inside scenario and interface lists', () => {
   });
 });
 
+describe('backlog: allowed protected paths', () => {
+  /** Build a minimal backlog with an optional 「可改的受保护路径」 section. */
+  function backlogAllowedProtected(pathLines?: string[]): string {
+    const sections: string[] = [
+      '# backlog',
+      '',
+      '## 队列总览',
+      '',
+      '| 优先级 | 批次 | 标题 | 依赖 | 状态 |',
+      '|---|---|---|---|---|',
+      '| 1 | v99-b01 | 示例功能 | — | pending |',
+      '',
+      '## v99-b01 示例功能',
+      '',
+      '优先级：1　依赖：无',
+      '',
+      '条目：',
+      '1. 实现 feature',
+      '',
+      '验收标准：',
+      '',
+      '| 说明 | 命令 | 期望 |',
+      '|---|---|---|',
+      '| 通过 | `npm test` | exit 0 |',
+    ];
+    if (pathLines !== undefined) {
+      sections.push('', '可改的受保护路径：', ...pathLines);
+    }
+    return sections.join('\n');
+  }
+
+  it('parses vitest.config.ts and .github/workflows/ci.yml as allowed_protected', () => {
+    const text = backlogAllowedProtected(['- vitest.config.ts', '- .github/workflows/ci.yml']);
+    const batch = parseBacklog(text)[0];
+    expect(batch?.allowed_protected).toEqual(['vitest.config.ts', '.github/workflows/ci.yml']);
+  });
+
+  it('accepts .github as a whole directory', () => {
+    const text = backlogAllowedProtected(['- .github']);
+    const batch = parseBacklog(text)[0];
+    expect(batch?.allowed_protected).toEqual(['.github']);
+  });
+
+  it('accepts eslint.config.js', () => {
+    const text = backlogAllowedProtected(['- eslint.config.js']);
+    const batch = parseBacklog(text)[0];
+    expect(batch?.allowed_protected).toEqual(['eslint.config.js']);
+  });
+
+  it('accepts full-width colon label', () => {
+    const text = backlogAllowedProtected([]).replace('可改的受保护路径：', '可改的受保护路径：');
+    const batch = parseBacklog(text)[0];
+    expect(batch?.allowed_protected).toEqual([]);
+  });
+
+  it('allows blank lines between path items', () => {
+    const text = backlogAllowedProtected(['- vitest.config.ts', '', '- eslint.config.js']);
+    const batch = parseBacklog(text)[0];
+    expect(batch?.allowed_protected).toEqual(['vitest.config.ts', 'eslint.config.js']);
+  });
+
+  it('no allowed_protected section: batch has no allowed_protected key', () => {
+    const text = backlogAllowedProtected();
+    const batch = parseBacklog(text)[0];
+    expect(batch).toBeDefined();
+    expect('allowed_protected' in (batch ?? {})).toBe(false);
+  });
+
+  it.each([
+    'SPEC.md',
+    'docs/backlog.md',
+    'test/acceptance/x.test.ts',
+    '.collie/collie.toml',
+    '../x',
+    '/etc/x',
+    '.github/*',
+  ])('rejects %s as not allowable', (badPath) => {
+    const text = backlogAllowedProtected([`- ${badPath}`]);
+    expect(() => parseBacklog(text)).toThrow(BacklogError);
+    try {
+      parseBacklog(text);
+    } catch (err) {
+      expect(err).toBeInstanceOf(BacklogError);
+      if (err instanceof BacklogError) {
+        expect(err.message).toContain(badPath);
+      }
+    }
+  });
+});
+
 describe('setBatchStatus (SPEC 12.2)', () => {
   const MINI_BACKLOG = [
     '# backlog',

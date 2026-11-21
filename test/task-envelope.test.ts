@@ -242,3 +242,42 @@ describe('task-envelope: body', () => {
     ]);
   });
 });
+
+describe('task-envelope: allowed protected paths (SPEC 16.21 v046-b32)', () => {
+  /** Creates a batch with allowed_protected paths. */
+  function batchWith(allowed: string[]): Batch {
+    return {
+      id: 'v99-b01',
+      title: '示例功能',
+      priority: 1,
+      depends_on: [],
+      items: ['实现 feature.txt'],
+      acceptance: [{ desc: '通过', cmd: 'npm test', expect: 'exit_zero' }],
+      forbidden: [],
+      status: 'pending',
+      allowed_protected: allowed,
+    };
+  }
+
+  it('has allowed_protected: task.md contains the section with two paths', () => {
+    const b = batchWith(['vitest.config.ts', '.github/workflows/ci.yml']);
+    const { body } = splitFrontmatter(buildTask(b, ctx).markdown);
+    expect(body).toContain('## 本批次可改的受保护路径');
+    expect(body).toContain('- vitest.config.ts');
+    expect(body).toContain('- .github/workflows/ci.yml');
+    expect(body).toContain('只做条目要求的改动，并在「偏离或疑问」里列出改了什么');
+    // Section goes between 条目 and 验收标准
+    const headings = body.split('\n').filter((l) => l.startsWith('#'));
+    const idx = headings.indexOf('## 本批次可改的受保护路径');
+    expect(idx).toBeGreaterThan(headings.indexOf('## 本批次条目（1 个）'));
+    expect(idx).toBeLessThan(headings.indexOf('## 验收标准（可机器判定）'));
+  });
+
+  it('no allowed_protected: task.md does not contain the section', () => {
+    const b = batch('v01-b01');
+    expect(b.allowed_protected).toBeUndefined();
+    const { body } = splitFrontmatter(buildTask(b, ctx).markdown);
+    expect(body).not.toContain('## 本批次可改的受保护路径');
+    expect(body).not.toContain('只做条目要求的改动');
+  });
+});
