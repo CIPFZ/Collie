@@ -28,9 +28,11 @@
 > 把一段留待以后的事拆成批次时，对着原来的清单逐项点一遍（16.14 留下四项，拆的时候漏了两项）。
 > R1 签发自查（v046-b22 后，SPEC 14.32）：动 git 工作区的批次，加粗情形里要有「工作区里另有未跟踪文件时」；额外禁止里列了的命令（如 `reset`），验收里加一条 grep 守住；冲突类用例写明要内容冲突。
 > R1 签发自查（v046-b24、b25 后，SPEC 14.34）：加粗情形里写了「X 的时候」，就写明测试怎样造出 X，并在验收里放一条「把修复撤掉，这条测试必须失败」由操作员核对；不许用 `.gitignore` 之类的办法绕开要造的情形。
+> R1 签发自查（v046-b24 的时限后，SPEC 14.35）：条目里写到工具的行为（如「钩子跟着用例的时限走」）先查证再写，那一句是错的：vitest 的钩子时限是配置里的 `hookTimeout`。
+> v046-b32 之后：「可改的受保护路径」加冒号独占一行就是小节标签，说明文字里提到它时不要让它独占一行。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；队列从 v046-b26 起，固定版本 `d4c0747`
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；队列从 v046-b30 起，固定版本 `e28d50f`
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -132,6 +134,9 @@
 | 91 | v046-b27 | 开跑前检查：运行器退出码非零算不过，写出结束原因与用时 | v046-b20 | passed |
 | 92 | v046-b28 | 测试改实：reviewer 信封、收尾的未跟踪文件与内容冲突三处造出真正的情形 | v046-b25 | passed |
 | 93 | v046-b29 | 同一个 head_sha 第二次被规则 9 降级就上报，不再自动重跑（D10） | v046-b26 | passed |
+| 94 | v046-b30 | 小修：rule9_same_head 只看这一次的 head_sha；api_error 续跑总带 waited_secs | v046-b29 | pending |
+| 95 | v046-b31 | CI、lint、测试配置列为受保护路径，变异清单加三项（第 16 章第 2 步） | v046-b29 | pending |
+| 96 | v046-b32 | 批次授权：条目点名的受保护路径由 worker 改，不计入受保护文件改动行数（D9） | v046-b31 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -3952,5 +3957,129 @@ v046-b24、b25 加的三处测试没有造出它们名字里说的情形，把�
 - 改动 `src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/acceptance.ts`、`src/roles/`、`src/runner/`、`src/schema/index.ts`；改动任何一条仲裁规则的判定、`rule9_twice` 的判断
 - 在单批次模式里加这条判断；`head_sha` 不同时也停下
 - 为了让测试过而删除或跳过任何测试；改写条目 2 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b30 小修：rule9_same_head 只看这一次的 head_sha；api_error 续跑总带 waited_secs
+
+优先级：94　依赖：v046-b29
+
+v046-b29、b26 通过之后查出来的两处小问题（SPEC 14.35）。改 R2 的队列，不改仲裁。
+
+条目：
+1. 读 SPEC 16.21 的「v046-b30」一段与 14.35「查出来的两处」。`src/run.ts` 队列里 `rule9_same_head` 的判断：现在是「本批次历史上有某个 `head_sha` 被规则 9 降级过两次」，改成只看这一次——
+   这一次运行的 `ci.resolved` 的 `head_sha`，等于本批次此前别的运行里被规则 9 降级那一次的 `head_sha`，才上报；`escalated` 的 `head_sha` 写这一次的。
+   **一个批次在第一次队列里两次被规则 9 降级、`head_sha` 都是 A，以 `rule9_same_head` 停下。把 backlog 里它的状态格改回 pending 并提交，再跑一次队列：worker 这一次有新的代码提交（`head_sha` 是 B），CI 仍失败、被规则 9 降级 → 照常自动重跑，不上报；**
+   **重跑时 worker 没有新提交、仍被规则 9 降级 → 以 `rule9_same_head` 停下，`escalated` 的 `head_sha` 是 B**
+2. `src/run.ts`：`api_error` 的自动续跑，`batch.retried` 总带 `waited_secs`（`api_retry_wait_secs = 0` 时是 0）；别的中断原因仍不带这个字段。
+   **沙箱配置里 `api_retry_wait_secs = 0`，worker 第 1 次以 `api_error` 结束：`batch.retried` 带 `waited_secs: 0`，然后照常重跑一次**
+3. 测试。`test/rule9-same-head.test.ts` 加一条 `second queue with a new head_sha is retried, then escalates on its own repeat`（条目 1 的情形）；
+   `test/api-error-retry.test.ts` 加一条 `api_error with api_retry_wait_secs = 0 still records waited_secs: 0`（条目 2 的情形）。
+   R1 查过：`test/rule9-same-head.test.ts` 现有 3 条都在同一次队列里，结果不变；`test/api-error-retry.test.ts` 的 `idling first → retry does NOT wait, retryDelay never called` 断言 `idling` 的续跑不带 `waited_secs`，仍然成立。已有断言一条都不改。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/run.ts`、`test/rule9-same-head.test.ts`、`test/api-error-retry.test.ts`。不应改动 `test/invariants.test.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 没有 git 全局身份时两个文件的测试通过 | `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/rule9-same-head.test.ts test/api-error-retry.test.ts` | exit 0 |
+| 两条新用例在 | `grep -qF "second queue with a new head_sha is retried, then escalates on its own repeat" test/rule9-same-head.test.ts && grep -qF "api_error with api_retry_wait_secs = 0 still records waited_secs: 0" test/api-error-retry.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`、`templates/collie.toml`
+- 改动 `src/` 下 `src/run.ts` 以外的文件；改动任何一条仲裁规则的判定、`fix_max` 的计数、`rule9_twice` 的判断、收尾（`batchCleanup`）
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；测试里真的等待；用到机器的 git 全局配置；新增依赖
+
+## v046-b31 CI、lint、测试配置列为受保护路径，变异清单加三项（第 16 章第 2 步）
+
+优先级：95　依赖：v046-b29
+
+分工改造第 2 步（SPEC 第 16 章，所有者 2026-11-17 裁定的原 D1）：`.github/`、`eslint.config.js`、`vitest.config.ts` 定义的是检查本身，worker 不能随手改（v045-b07 的 worker 改过 `eslint.config.js` 给自己的目录豁免规则）。
+这一批把它们列为受保护路径。以后要改它们靠批次授权，那是下一批（v046-b32）。
+
+条目：
+1. 读 SPEC 16.21 的「v046-b31」一段。`src/evidence.ts` 的 `PROTECTED_PATHS` 加三项：`.github`、`eslint.config.js`、`vitest.config.ts`（写法照现有各项，每项一行）。
+   **worker 的提交改了 `.github/workflows/ci.yml`、`eslint.config.js`、`vitest.config.ts` 当中任何一个：`spec_diff_lines` 大于 0（于是按规则 2 拦停）**
+2. `scripts/mutation.ts` 的清单加三项 `protected:.github`、`protected:eslint.config.js`、`protected:vitest.config.ts`（写法照已有的 10 项），共 46 项；清单上方注释里的项数相应改掉。
+3. 测试。`test/evidence.test.ts` 加一组 `it.each`，用例名 `counts %s as protected (SPEC 16.21)`，三个路径是 `.github/workflows/ci.yml`、`eslint.config.js`、`vitest.config.ts`；
+   `test/mutation.test.ts` 的 `every protected path is in the mutation list`：10 改成 13（点名允许的改写，在「偏离或疑问」里列出）；
+   `test/invariants.test.ts` 加一条，用例名 `src/evidence.ts has .github, eslint.config.js and vitest.config.ts in PROTECTED_PATHS (v046-b31)`。
+   R1 查过：`test/mutation.test.ts` 的 `has at least 42 items` 用的是「不少于」，不用改；`test/prepare-acceptance.test.ts`、`test/redcheck.test.ts` 往自己的临时仓库里写 `vitest.config.ts`，不经过 R2 的取证，不受影响；
+   没有现有测试让假 worker 的提交带上这三类文件再去取证。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/evidence.ts`、`scripts/mutation.ts`、`test/evidence.test.ts`、`test/mutation.test.ts`、`test/invariants.test.ts`。不应改动 `test/invariants.test.ts` 已有的任何断言与数值上下限。
+注意：你不能改 `.github/`、`eslint.config.js`、`vitest.config.ts` 这三处本身，只是把它们的名字加进清单。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 取证与变异清单的测试通过 | `npm test -- test/evidence.test.ts test/mutation.test.ts` | exit 0 |
+| 三个路径进了清单，新用例在 | `grep -qF "'.github'," src/evidence.ts && grep -qF "'eslint.config.js'," src/evidence.ts && grep -qF "'vitest.config.ts'," src/evidence.ts && grep -qF "as protected (SPEC 16.21)" test/evidence.test.ts` | exit 0 |
+| 变异检查全部被发现，工作区里没有留下报告 | `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" \| tail -n 1 \| grep -qE "^mutation: caught 46 survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` | exit 0 |
+| 不变量同步 | `grep -qF "in PROTECTED_PATHS (v046-b31)" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`、`templates/collie.toml`
+- 改动 `src/` 下 `src/evidence.ts` 以外的文件；改动任何一条仲裁规则的判定；从 `PROTECTED_PATHS` 里去掉或改写已有的项
+- 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b32 批次授权：条目点名的受保护路径由 worker 改，不计入受保护文件改动行数（D9）
+
+优先级：96　依赖：v046-b31
+
+所有者 2026-11-20 裁定 D9：CI、lint、测试配置受保护之后，要改它们由 R1 在批次里点名授权、worker 来改，R2 对点名的路径不按规则 2 拦，别的照拦。这一批让 backlog、任务书和取证认得这种授权。不改仲裁规则本身。
+
+条目：
+1. 读 SPEC 16.21 的「v046-b32」一段。`src/backlog.ts`、`src/schema/index.ts`：批次可以多一个可选小节，标签是「可改的受保护路径」加冒号（全角半角都认，写法照 `LABEL_INTERFACES`），下面是 `- <路径>` 的列表（允许空行，照「接口」一节）；
+   解析结果多一个可选字段 `allowed_protected`。能点名的只有 `.github`、`.github/` 下的路径、`eslint.config.js`、`vitest.config.ts`；别的一律报错并指出是哪一项。
+   `src/roles/worker.ts`：有这一节时，`task.md` 在「本批次条目」之后多一节「本批次可改的受保护路径」，逐条列出，后面一句「只做条目要求的改动，并在『偏离或疑问』里列出改了什么」。
+   **批次有这一节、两行是 `- vitest.config.ts` 与 `- .github/workflows/ci.yml`：`allowed_protected` 是这两项，`task.md` 里有「本批次可改的受保护路径」一节两条；**
+   **点名 `SPEC.md`、`docs/backlog.md`、`test/acceptance/x.test.ts`、`.collie/collie.toml`、`../x`、`/etc/x`、`.github/*` 当中任何一个：解析报错，错误信息里有那一项；没有这一节的批次：没有 `allowed_protected` 这个键，`task.md` 逐字节不变**
+2. `src/evidence.ts`、`src/run.ts`：取证时把本批次 `allowed_protected` 里的路径排除在受保护文件改动行数之外，这部分行数另记在 `evidence.collected` 事件的 `authorized_diff_lines`（批次没有授权时不带这个字段）。别的受保护路径照计。
+   **批次授权了 `vitest.config.ts`，worker 的提交只改了它和普通源码：`spec_diff_lines` 是 0，`evidence.collected` 带 `authorized_diff_lines` 且大于 0，reviewer 判 PASS 时批次通过；**
+   **同一个批次 worker 还改了 `eslint.config.js`（没有授权）：`spec_diff_lines` 大于 0，按规则 2 拦停；没有授权的批次改了 `vitest.config.ts`：按规则 2 拦停，`evidence.collected` 不带 `authorized_diff_lines`**
+3. 测试。`test/backlog.test.ts` 新加一组 `describe('backlog: allowed protected paths', …)`（条目 1 的解析情形）；`test/task-envelope.test.ts` 加条目 1 里任务书的两种情形；
+   新文件 `test/batch-authorisation.test.ts`，一组 `describe('batch authorisation: named protected paths do not count', …)`，用 `Sandbox` 与 `FakeRunner` 跑条目 2 的三种情形（沙箱 backlog 的写法照 `test/tester-step.test.ts` 里带「情形」的那种，自己拼小节）。
+   `test/invariants.test.ts` 加「`src/backlog.ts` 里有 `可改的受保护路径`」与「`src/run.ts` 里有 `authorized_diff_lines`」。
+   R1 查过：`docs/backlog.md` 现有的批次都没有这一节，`test/task-envelope.test.ts` 逐条跑真实批次的那两组不受影响；`evidence.collected` 只在有授权时多一个字段，`test/exit-codes.test.ts` 的事件序列不变；
+   `BatchSchema` 加的是可选字段，现有夹具不用改。已有断言一条都不改。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/backlog.ts`、`src/schema/index.ts`、`src/roles/worker.ts`、`src/evidence.ts`、`src/run.ts`、`test/backlog.test.ts`、`test/task-envelope.test.ts`、`test/batch-authorisation.test.ts`、`test/invariants.test.ts`。
+不应改动 `test/invariants.test.ts` 已有的任何断言与数值上下限。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 没有 git 全局身份时新测试通过 | `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/batch-authorisation.test.ts` | exit 0 |
+| 解析、任务书、取证的测试通过 | `npm test -- test/backlog.test.ts test/task-envelope.test.ts test/evidence.test.ts test/batch-authorisation.test.ts` | exit 0 |
+| 两组新用例在 | `grep -qF "backlog: allowed protected paths" test/backlog.test.ts && grep -qF "batch authorisation: named protected paths do not count" test/batch-authorisation.test.ts` | exit 0 |
+| 解析与取证都认得授权（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/backlog.ts \| grep -qF "可改的受保护路径" && grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qF "authorized_diff_lines"` | exit 0 |
+| 变异检查仍然全部被发现 | `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" \| tail -n 1 \| grep -qE "^mutation: caught 46 survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` | exit 0 |
+| 不变量同步 | `grep -qF "authorized_diff_lines" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`、`templates/collie.toml`、`scripts/mutation.ts`
+- 改动 `src/arbiter.ts`、`src/gate.ts`、`src/acceptance.ts`、`src/redcheck.ts`、`src/roles/reviewer.ts`、`src/roles/tester.ts`、`src/runner/`；改动任何一条仲裁规则的判定；从 `PROTECTED_PATHS` 里去掉任何一项
+- 让授权能点名那三类之外的路径；让授权来自 backlog 之外的任何地方（task、report、配置、环境变量）；有授权时把别的受保护路径也放过
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
