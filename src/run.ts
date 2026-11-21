@@ -2929,12 +2929,13 @@ function hasBatchRule9Downgrade(root: string, batchId: string): boolean {
 }
 
 /**
- * SPEC 16.20: collects ci.resolved head_sha values from runs where the batch
- * had a verdict.downgraded rule=9 event.  Used to detect "rule 9 same head"
- * repeated failure: when the worker reruns without new commits, the head_sha
- * is unchanged and CI cannot produce a different outcome.
+ * SPEC 16.20 / 16.21 (v046-b30): collects ci.resolved head_sha values from
+ * runs (excluding `excludeRunId`) where the batch had a verdict.downgraded
+ * rule=9 event.  Used to detect "rule 9 same head" repeated failure: when
+ * this run's ci.resolved head_sha matches a prior rule 9 downgrade, CI
+ * cannot produce a different outcome for the same sha.
  */
-function findRule9CiHeadShas(root: string, batchId: string): string[] {
+function findRule9CiHeadShas(root: string, batchId: string, excludeRunId?: string): string[] {
   const runsDir = join(root, RUNS_RELATIVE_DIR);
   if (!existsSync(runsDir)) return [];
   const journal = createJournal(root);
@@ -2943,6 +2944,7 @@ function findRule9CiHeadShas(root: string, batchId: string): string[] {
     if (!RunIdSchema.safeParse(dir).success || !existsSync(join(runsDir, dir, EVENTS_FILE_NAME)))
       continue;
     if (dir.startsWith('q-')) continue;
+    if (dir === excludeRunId) continue;
     const events = journal.replay(dir);
     const batchEvents = events.filter((e) => e.batch_id === batchId);
     const hasRule9 = batchEvents.some(
@@ -2955,6 +2957,29 @@ function findRule9CiHeadShas(root: string, batchId: string): string[] {
     }
   }
   return headShas;
+}
+
+/**
+ * SPEC 16.21 (v046-b30): reads the ci.resolved head_sha from a specific run's
+ * journal events for the given batch. Returns undefined when no ci.resolved
+ * event exists (e.g. the run never reached CI evidence collection).
+ */
+function findRunCiResolvedHeadSha(
+  root: string,
+  runId: string,
+  batchId: string,
+): string | undefined {
+  const runsDir = join(root, RUNS_RELATIVE_DIR);
+  const eventsPath = join(runsDir, runId, EVENTS_FILE_NAME);
+  if (!existsSync(eventsPath)) return undefined;
+  const journal = createJournal(root);
+  const events = journal.replay(runId);
+  const batchEvents = events.filter((e) => e.batch_id === batchId);
+  const ciResolved = batchEvents.findLast((e) => e.event === 'ci.resolved');
+  if (ciResolved !== undefined && typeof ciResolved.head_sha === 'string') {
+    return ciResolved.head_sha;
+  }
+  return undefined;
 }
 
 /**
@@ -3244,8 +3269,10 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
         !interruptRetried.has(currentBatchId)
       ) {
         interruptRetried.add(currentBatchId);
-        // SPEC 16.18: api_error waits api_retry_wait_secs before retrying; others don't wait.
-        let waitedSecs = 0;
+        // SPEC 16.18 / 16.21 (v046-b30): api_error waits api_retry_wait_secs
+        // before retrying and always records waited_secs (even when 0);
+        // other interrupt causes don't wait and don't carry waited_secs.
+        let waitedSecs: number | undefined;
         if (outcome.workerStopReason === 'api_error') {
           const waitMs = config.limits.api_retry_wait_secs * MS_PER_SECOND;
           const delayFn = ctx.retryDelay ?? realDelay;
@@ -3256,7 +3283,7 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
           batch_id: currentBatchId,
           cause: 'interrupted',
           stop_reason: outcome.workerStopReason,
-          ...(waitedSecs > 0 ? { waited_secs: waitedSecs } : {}),
+          ...(waitedSecs !== undefined ? { waited_secs: waitedSecs } : {}),
         });
         // Don't count against batchesRun for --max (it's the same batch).
         batchesRun.pop();
@@ -3310,20 +3337,15 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
       };
     }
 
-    // SPEC 16.20: rule 9 same head_sha — if this batch had a prior rule 9
-    // downgrade whose ci.resolved head_sha matches the current one, don't retry.
-    // The worker produced no new commits, so the CI conclusion cannot change.
+    // SPEC 16.21 (v046-b30): rule 9 same head_sha — only look at this run's
+    // ci.resolved head_sha.  If a prior run of this batch had rule 9 with the
+    // same head_sha, the worker produced no new commits and CI cannot change.
+    // `escalated` carries this run's head_sha (not the prior one).
     if (outcome.decision?.downgraded === true && outcome.decision.rule === RULE_EVIDENCE_MISSING) {
-      const rule9HeadShas = findRule9CiHeadShas(root, currentBatchId);
-      // ≥ 2 occurrences of the same sha means current + prior both had rule 9.
-      const counts = new Map<string, number>();
-      for (const sha of rule9HeadShas) {
-        counts.set(sha, (counts.get(sha) ?? 0) + 1);
-      }
-      // eslint-disable-next-line no-restricted-syntax, @typescript-eslint/no-magic-numbers -- SPEC 16.20: ≥ 2 means same sha seen twice
-      const duplicateEntry = [...counts.entries()].find(([, count]) => count >= 2);
-      if (duplicateEntry !== undefined) {
-        const [headSha] = duplicateEntry;
+      const currentHeadSha = findRunCiResolvedHeadSha(root, runId, currentBatchId);
+      const priorRule9Shas = findRule9CiHeadShas(root, currentBatchId, runId);
+      if (currentHeadSha !== undefined && priorRule9Shas.includes(currentHeadSha)) {
+        const headSha = currentHeadSha;
         queueRec.record('escalated', {
           reason: 'rule9_same_head',
           batch_id: currentBatchId,

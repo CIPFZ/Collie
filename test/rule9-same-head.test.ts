@@ -412,4 +412,72 @@ describe('queue: rule 9 twice on the same head_sha escalates', () => {
     const finished = events.find((e) => e.event === 'queue.finished');
     expect(finished?.reason).toBe('limit');
   });
+
+  it('second queue with a new head_sha is retried, then escalates on its own repeat', async () => {
+    // --- First queue: two runs with head_sha A → rule9_same_head stops ---
+    const shaStoreA: string[] = [];
+    const fetch = ciFailureFetch();
+    const runner1 = new FakeRunner([
+      workerWithPush(box, BATCH_ID, shaStoreA),
+      reviewerPass(BATCH_ID),
+      workerSameHead(box, BATCH_ID, shaStoreA),
+      reviewerPass(BATCH_ID),
+    ]);
+    const code1 = await box.cli(['run', '--continue', '--max', '1'], runner1, { fetch });
+    expect(code1).toBe(20); // rule9_same_head
+
+    // --- Reset backlog to pending for a fresh second queue ---
+    // Also clear feature.txt so the second worker creates a different diff.
+    // The commit subject uses 'ops:' prefix, but we also inject an r2.commit
+    // event so collectR2Shas picks it up — otherwise the evidence collection's
+    // sha-based protected-path diff would see this as a worker commit that
+    // changed docs/backlog.md (a protected file), triggering rule 2.
+    box.write('docs/backlog.md', singleBatchBacklog('pending'));
+    box.write('feature.txt', 'reset\n');
+    const resetSha = await box.commitAll('ops: reset backlog to pending');
+    // Inject a fake r2.commit event so collectR2Shas excludes this commit.
+    box.write(
+      '.collie/runs/r-inject0001/events.ndjson',
+      JSON.stringify({
+        ts: '2026-10-19T12:00:50.000Z',
+        run_id: 'r-inject0001',
+        event: 'r2.commit',
+        sha: resetSha,
+        subject: 'ops: reset backlog to pending',
+      }) + '\n',
+    );
+
+    // --- Second queue: worker makes a new commit (head_sha B), CI fails → rule 9 → retry.
+    // Retry: worker reuses B → rule 9 → rule9_same_head, escalated head_sha is B. ---
+    const shaStoreB: string[] = [];
+    const runner2 = new FakeRunner([
+      workerWithPush(box, BATCH_ID, shaStoreB),
+      reviewerPass(BATCH_ID),
+      workerSameHead(box, BATCH_ID, shaStoreB),
+      reviewerPass(BATCH_ID),
+    ]);
+    const code2 = await box.cli(['run', '--continue', '--max', '1'], runner2, { fetch });
+    expect(code2).toBe(20); // rule9_same_head
+
+    // Sanity check: the two head_shas differ.
+    expect(shaStoreA[0]).toBeDefined();
+    expect(shaStoreB[0]).toBeDefined();
+    expect(shaStoreB[0]).not.toBe(shaStoreA[0]);
+
+    // All escalated events with rule9_same_head.
+    const events = box.events();
+    const escalations = events.filter(
+      (e) => e.event === 'escalated' && e.reason === 'rule9_same_head',
+    );
+    // Two escalations total (one per queue).
+    expect(escalations).toHaveLength(2);
+    // First escalation: head_sha A.
+    expect(escalations[0]?.head_sha).toBe(shaStoreA[0]);
+    // Second escalation: head_sha B, not A.
+    expect(escalations[1]?.head_sha).toBe(shaStoreB[0]);
+
+    // Last queue.finished reason should be rule9_same_head.
+    const queueFinishedEvents = events.filter((e) => e.event === 'queue.finished');
+    expect(queueFinishedEvents.at(-1)?.reason).toBe('rule9_same_head');
+  });
 });

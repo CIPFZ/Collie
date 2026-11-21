@@ -318,4 +318,56 @@ describe('queue: api_error counts as a resumable interruption', () => {
     expect(retried?.stop_reason).toBe('idling');
     expect(retried).not.toHaveProperty('waited_secs');
   });
+
+  it('api_error with api_retry_wait_secs = 0 still records waited_secs: 0', async () => {
+    const backlog = makeBacklog([
+      { priority: 1, id: 'v99-a01', title: '已完成', depends: '—', status: 'passed' },
+      { priority: 2, id: 'v99-b01', title: '待跑', depends: 'v99-a01', status: 'pending' },
+    ]);
+    box.write('docs/backlog.md', backlog);
+    // Set api_retry_wait_secs = 0 so there is no wait.
+    const toml = box
+      .read('.collie/collie.toml')
+      .replace(/api_retry_wait_secs\s*=\s*\d+/, 'api_retry_wait_secs = 0');
+    box.write('.collie/collie.toml', toml);
+    await box.commitAll('chore: api_retry_wait_secs = 0 backlog');
+
+    const fp = controllableFingerprint();
+
+    const delayMsCalls: number[] = [];
+    // eslint-disable-next-line @typescript-eslint/require-await -- test stub returns resolved Promise
+    const retryDelay = async (ms: number): Promise<void> => {
+      delayMsCalls.push(ms);
+    };
+
+    const runner = new FakeRunner([
+      // Attempt 1: worker exits with api_error, no report.
+      apiErrorWorker(),
+      // Retry: worker succeeds → reviewer → PASS.
+      queueWorkerScene(box, 'v99-b01'),
+      reviewerPass(box, 'v99-b01'),
+    ]);
+
+    const code = await box.cli(['run', '--continue'], runner, {
+      ...livenessOpts(fp),
+      retryDelay,
+    });
+    expect(code).toBe(0);
+
+    // retryDelay was called with 0 ms (api_retry_wait_secs = 0 → 0 * 1000).
+    expect(delayMsCalls).toEqual([0]);
+
+    const events = box.events();
+
+    // batch.retried with cause=interrupted, stop_reason=api_error, waited_secs=0.
+    const retried = events.find((e) => e.event === 'batch.retried' && e.cause === 'interrupted');
+    expect(retried).toBeDefined();
+    expect(retried?.batch_id).toBe('v99-b01');
+    expect(retried?.stop_reason).toBe('api_error');
+    expect(retried?.waited_secs).toBe(0);
+
+    // queue.finished reason=exhausted.
+    const finished = events.find((e) => e.event === 'queue.finished');
+    expect(finished?.reason).toBe('exhausted');
+  });
 });
