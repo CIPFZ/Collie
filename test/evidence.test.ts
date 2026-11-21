@@ -174,6 +174,15 @@ describe('evidence: protected files and dependencies', () => {
     expect((await collect(head)).evidence.spec_diff_lines).toBe(1);
   });
 
+  it.each(['.github/workflows/ci.yml', 'eslint.config.js', 'vitest.config.ts'])(
+    'counts %s as protected (SPEC 16.21)',
+    async (path) => {
+      write(path, 'changed\n');
+      const head = await commitAll('tamper');
+      expect((await collect(head)).evidence.spec_diff_lines).toBe(1);
+    },
+  );
+
   it('ignores ordinary source changes and the report envelope', async () => {
     write('src.ts', 'x\n');
     write('.collie/batches/v99/report.md', 'r\n');

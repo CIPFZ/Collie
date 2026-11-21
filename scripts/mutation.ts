@@ -55,7 +55,7 @@ export function testFilesFor(file: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Mutation list — 43 items (SPEC 15.1, v045-b13: rule 4 removed; v046-b07: test/acceptance)
+// Mutation list — 46 items (SPEC 15.1, v045-b13: rule 4 removed; v046-b07: test/acceptance; v046-b31: CI/lint/test config)
 // ---------------------------------------------------------------------------
 
 export const MUTATIONS: MutationItem[] = [
@@ -335,6 +335,24 @@ export const MUTATIONS: MutationItem[] = [
     name: 'protected:test/acceptance',
     file: 'src/evidence.ts',
     original: "  'test/acceptance',\n",
+    replacement: '',
+  },
+  {
+    name: 'protected:.github',
+    file: 'src/evidence.ts',
+    original: "  '.github',\n",
+    replacement: '',
+  },
+  {
+    name: 'protected:eslint.config.js',
+    file: 'src/evidence.ts',
+    original: "  'eslint.config.js',\n",
+    replacement: '',
+  },
+  {
+    name: 'protected:vitest.config.ts',
+    file: 'src/evidence.ts',
+    original: "  'vitest.config.ts',\n",
     replacement: '',
   },
 ];

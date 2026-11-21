@@ -40,7 +40,7 @@ describe('mutation list shape (SPEC 15.1)', () => {
     const protectedNames = MUTATIONS.filter((m) => m.name.startsWith('protected:')).map(
       (m) => m.name,
     );
-    expect(protectedNames.length).toBe(10);
+    expect(protectedNames.length).toBe(13);
   });
 });
 

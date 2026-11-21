@@ -38,6 +38,9 @@ export const PROTECTED_PATHS: readonly string[] = [
   'docs/progress.md',
   '.collie/collie.toml',
   'test/acceptance',
+  '.github',
+  'eslint.config.js',
+  'vitest.config.ts',
 ];
 
 /**

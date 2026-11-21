@@ -750,4 +750,11 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
     expect(content).toContain('rule9_same_head');
   });
+
+  it('src/evidence.ts has .github, eslint.config.js and vitest.config.ts in PROTECTED_PATHS (v046-b31)', () => {
+    const content = readFileSync(join(ROOT, 'src/evidence.ts'), 'utf8');
+    expect(content).toContain("'.github'");
+    expect(content).toContain("'eslint.config.js'");
+    expect(content).toContain("'vitest.config.ts'");
+  });
 });
