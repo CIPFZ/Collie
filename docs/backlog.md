@@ -27,9 +27,10 @@
 > R1 签发自查（v046-b19、b20 后，SPEC 14.31）：写「输出不变」时写明是哪些输出（文字、JSON 都算），验收里各比一次；让测试删或改的文件，不能是 R2 自己本来就会重写的那个；
 > 把一段留待以后的事拆成批次时，对着原来的清单逐项点一遍（16.14 留下四项，拆的时候漏了两项）。
 > R1 签发自查（v046-b22 后，SPEC 14.32）：动 git 工作区的批次，加粗情形里要有「工作区里另有未跟踪文件时」；额外禁止里列了的命令（如 `reset`），验收里加一条 grep 守住；冲突类用例写明要内容冲突。
+> R1 签发自查（v046-b24、b25 后，SPEC 14.34）：加粗情形里写了「X 的时候」，就写明测试怎样造出 X，并在验收里放一条「把修复撤掉，这条测试必须失败」由操作员核对；不许用 `.gitignore` 之类的办法绕开要造的情形。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22 已通过（SPEC 14.31、14.32；v046-b21 是第一个带情形的批次）；v046-b23 是 `blocked`（模型接口中断，改签为 v046-b26）；队列从 v046-b24 起，固定版本 `1745544`（不含 v046-b22 的收尾，见 SPEC 14.32）
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；队列从 v046-b26 起，固定版本 `d4c0747`
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -126,9 +127,11 @@
 | 86 | v046-b22 | 批次在队列里最终被拦时的收尾：撤销救援提交的改动、拿掉本批次的验收测试 | v046-b20 | passed |
 | 87 | v046-b23 | 模型接口出错的 worker 会话算可续跑的中断：先等一段时间，自动续跑一次 | v046-b22 | blocked |
 | 88 | v046-b24 | 小修：reviewer 读这一次运行的信封；两处守不住的测试改实 | v046-b20 | passed |
-| 89 | v046-b25 | 收尾只提交自己改的路径：不提交未跟踪文件、冲突时只用 revert --abort | v046-b22 | blocked |
+| 89 | v046-b25 | 收尾只提交自己改的路径：不提交未跟踪文件、冲突时只用 revert --abort | v046-b22 | passed |
 | 90 | v046-b26 | （v046-b23 改签）模型接口出错的 worker 会话算可续跑的中断：先等一段时间，自动续跑一次 | v046-b25 | pending |
 | 91 | v046-b27 | 开跑前检查：运行器退出码非零算不过，写出结束原因与用时 | v046-b20 | passed |
+| 92 | v046-b28 | 测试改实：reviewer 信封、收尾的未跟踪文件与内容冲突三处造出真正的情形 | v046-b25 | pending |
+| 93 | v046-b29 | 同一个 head_sha 第二次被规则 9 降级就上报，不再自动重跑（D10） | v046-b26 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -3873,3 +3876,81 @@ v046-b22 加的收尾（批次在队列里最终被拦时撤掉救援提交、�
 - 为了让测试过而删除或跳过任何测试；改写任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；测试里真的等待；新增依赖
+
+## v046-b28 测试改实：reviewer 信封、收尾的未跟踪文件与内容冲突三处造出真正的情形
+
+优先级：92　依赖：v046-b25
+
+v046-b24、b25 加的三处测试没有造出它们名字里说的情形，把修复撤掉照样全过（SPEC 14.34，操作员撤一次查出来的）。这一批只改测试，不改 `src/`。
+
+条目：
+1. 读 SPEC 14.34「判 PASS 之后才查出的测试缺口」与 16.20。`test/reviewer-rerun.test.ts` 的 `describe('reviewer-rerun: task.md comes from the current run', …)`：第 2 次 worker 改成**不提交任何代码**，只重写 `.collie/batches/<批次>/report.md` 并以 `report(collie): <批次>` 提交、推送，`head_sha` 仍写第 1 次的代码提交。
+   这一组现有的 4 条断言不改，都应当照常通过。
+   **把 `src/run.ts` 里「reviewer 的 `task.md` 用主工作区这一次的信封」那几行撤掉：这一组的 `attempt 2 reviewer sees task.md with attempt: 2 frontmatter` 必须失败**
+2. `test/blocked-cleanup.test.ts` 的 `describe('blocked cleanup: only its own paths', …)` 里两条：
+   `idle workers with note.txt → cleanup only commits rescue paths; note.txt stays`：去掉把 `note.txt` 放进 `.gitignore` 的做法，改成在救援之后、收尾之前的一个场景里（最后一个 reviewer 场景）往主工作区写一个真正未跟踪的 `note.txt`；
+   `content conflict → revert_conflict; no merge markers; workspace clean`：改成真正的内容冲突，沙箱基准里先有 `feature.txt`（两行），救援提交改第 1 行，之后 worker 的提交又改同一行，`fix_max = 1`。
+   两条用例名与现有断言不变，可以加断言。这两处是点名允许的改写，在「偏离或疑问」里列出改了什么。
+   **把 `batchCleanup` 改回提交前 `git add -A`：`note.txt` 那条必须失败；把冲突处理里 `git revert --abort` 之后补上 `git checkout -- .` 与提交：`content conflict` 那条仍要守住「没有任何提交里出现 `<<<<<<<`」**
+3. 不改 `src/`；不改 `test/invariants.test.ts`。R1 查过：这三条用例之外的现有用例不受影响。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `test/reviewer-rerun.test.ts`、`test/blocked-cleanup.test.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 两个文件的测试通过 | `npm test -- test/reviewer-rerun.test.ts test/blocked-cleanup.test.ts` | exit 0 |
+| 不再用 .gitignore 绕开未跟踪文件 | `! grep -qE "gitignore.*note\.txt\|note\.txt.*gitignore" test/blocked-cleanup.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `src/`、`.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 用 `.gitignore`、改配置或跳过步骤的办法绕开要造的情形
+- 为了让测试过而删除或跳过任何测试；删去或改松任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b29 同一个 head_sha 第二次被规则 9 降级就上报，不再自动重跑（D10）
+
+优先级：93　依赖：v046-b26
+
+所有者 2026-11-20 裁定 D10：同一个 `head_sha` 第二次被规则 9 降成 FIX 时，不再重跑，直接上报。现在照常重跑到 `fix_max`，v046-b08 因此白跑过两次（代码没变，CI 的结论不会变）。改 R2 的队列，不改仲裁。
+
+条目：
+1. 读 SPEC 16.20 的「v046-b29」一段（规则 9 见 12.3，超过 `fix_max` 的那条路与收尾见 16.18）。`src/run.ts` 的队列循环：批次判 FIX、降级规则是 9，而本批次此前（本机 journal 里）已有一次规则 9 降级、两次 `ci.resolved` 的 `head_sha` 相同：
+   不再 `fix_retry`；记 `escalated`（`reason: rule9_same_head`、`batch_id`、`head_sha`），批次记 `blocked`，照超过 `fix_max` 那条路提交、推送、收尾，`queue.finished` 的 `reason` 是 `rule9_same_head`，退出码 20。
+   `head_sha` 不同时照旧按 `fix_max` 计数重跑。以 `evidence_unavailable` 停下的判断仍在它之前。
+   **队列里一个批次：第 1 次 CI 失败被规则 9 降成 FIX，自动重跑的第 2 次 worker 没有新提交、CI 仍失败：只重跑了一次，第 2 次之后队列以 `rule9_same_head` 停下，退出码 20，backlog 记 `blocked`，journal 有 `escalated`（`reason: rule9_same_head`，带 `head_sha`）**
+   **同样两次规则 9，但第 2 次 worker 有新的代码提交（`head_sha` 不同）：照常第 3 次重跑（`fix_max` 是 2）**
+2. `src/schema/index.ts` 不加新事件类型（复用 `escalated`）。允许改写的旧用例：`test/invariants.test.ts` 的 `every await push( …` 上限 7 改成 8，前提是新加的推送恰好一处（复用现有那条路就不用改）；在「偏离或疑问」里列出。
+3. 新文件 `test/rule9-same-head.test.ts`，一组 `describe('queue: rule 9 twice on the same head_sha escalates', …)`：条目 1 的两种情形，再加一条：第 1 次规则 9 之后第 2 次 PASS → 照常放行、队列继续。
+   CI 结论用注入的假 `fetch` 给（做法照 `test/scenario-l.test.ts` 的 `scenario L group c` 与 `test/verdict-ci-recheck.test.ts`）。
+   R1 查过：`test/scenario-l.test.ts` 的 group c 是两个不同批次各一次规则 9（`rule9_twice`），不受影响；`test/queue-limit.test.ts`、`test/scenario-j.test.ts` 超过 `fix_max` 的用例里没有规则 9 降级，不受影响。
+   `test/invariants.test.ts` 加「`src/run.ts` 里有 `rule9_same_head`」。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/run.ts`、`test/rule9-same-head.test.ts`、`test/invariants.test.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 没有 git 全局身份时新测试通过 | `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/rule9-same-head.test.ts` | exit 0 |
+| 新的一组用例在 | `grep -qF "queue: rule 9 twice on the same head_sha escalates" test/rule9-same-head.test.ts` | exit 0 |
+| 队列认得这条原因（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qF "rule9_same_head"` | exit 0 |
+| 不变量同步 | `grep -qF "rule9_same_head" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`、`templates/collie.toml`
+- 改动 `src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/acceptance.ts`、`src/roles/`、`src/runner/`、`src/schema/index.ts`；改动任何一条仲裁规则的判定、`rule9_twice` 的判断
+- 在单批次模式里加这条判断；`head_sha` 不同时也停下
+- 为了让测试过而删除或跳过任何测试；改写条目 2 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
