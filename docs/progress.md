@@ -2265,4 +2265,23 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b29 · r-20261121065526 · PASS
+
+- 时间：2026-11-21T07:30:06.105Z
+- 裁定：规则 10，All 7 acceptance commands pass. Implementation correctly adds rule9_same_head detection in runQueue after evidence_unavailable and before fix_max. Three test scenarios cover same-sha escalation, different-sha fallthrough, and PASS-after-rule9. No forbidden files modified, no new dependencies, no protected path changes. CI status unknown (no GitHub credentials); CI verification deferred to R2.
+- 提交：`25e142f` `a11f950`
+- 验收命令：7/7 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1474 passed, 0 failed
+  - `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/rule9-same-head.test.ts` → exit 0，3 passed, 0 failed
+  - `grep -qF "queue: rule 9 twice on the same head_sha escalates" test/rule9-same-head.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qF "rule9_same_head"` → exit 0，exit 0
+  - `grep -qF "rule9_same_head" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44879942539
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
