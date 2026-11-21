@@ -1,11 +1,11 @@
 ---
 schema_version: 1
-run_id: r-20261120104848
+run_id: r-20261121015927
 batch_id: v046-b25
 base_sha: d352068ea6732a8bb56d86115d4755f9cc307b3f
-created_at: 2026-11-20T10:48:52.992Z
-attempt: 2
-interrupted_at: r-20261120095844 blocked run.finished@2026-11-20T10:48:48.651Z
+created_at: 2026-11-21T01:59:32.280Z
+attempt: 3
+interrupted_at: r-20261120104848 blocked run.finished@2026-11-20T10:57:24.398Z
 issued_by: collie
 ---
 
@@ -60,7 +60,7 @@ issued_by: collie
 
 ## 上一轮中断
 
-中断信息：`r-20261120095844 blocked run.finished@2026-11-20T10:48:48.651Z`
+中断信息：`r-20261120104848 blocked run.finished@2026-11-20T10:57:24.398Z`
 上一轮结论：规则 1：verdict unparseable: reviewer returned no final text
 
 上一轮的提交仍在审核范围内，按上面的结论只补缺口。
