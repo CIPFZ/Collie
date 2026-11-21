@@ -2248,4 +2248,21 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b28 · r-20261121062915 · PASS
+
+- 时间：2026-11-21T06:55:22.170Z
+- 裁定：规则 10，全部验收命令通过；三个条目的结构与行为要求逐项核实均满足；无受保护文件被修改；无依赖变化；无断言删除或改松。CI 以 R2 取证为准。
+- 提交：`b380fc1`
+- 验收命令：5/5 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1470 passed, 0 failed
+  - `npm test -- test/reviewer-rerun.test.ts test/blocked-cleanup.test.ts` → exit 0，23 passed, 0 failed
+  - `! grep -qE "gitignore.*note\.txt|note\.txt.*gitignore" test/blocked-cleanup.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44877134934
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
