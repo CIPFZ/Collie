@@ -2210,4 +2210,22 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b27 · r-20261121021057 · PASS
+
+- 时间：2026-11-21T02:26:01.767Z
+- 裁定：规则 10，All 6 acceptance commands pass. Implementation correctly adds exit-code judgement and secs= timing to preflight runner check, and smoke-failed early-exit to cli smoke. Tests use injected clocks, no real waiting, no existing assertions modified. No protected files or forbidden paths touched. CI status unknown — deferred to R2.
+- 提交：`00e6cec`
+- 验收命令：6/6 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1459 passed, 0 failed
+  - `npm test -- test/preflight.test.ts test/cli.test.ts test/scenario-m.test.ts test/follow.test.ts` → exit 0，76 passed, 0 failed
+  - `grep -qF "preflight: runner check judges the exit code" test/preflight.test.ts && grep -qF "smoke exits 1 when the runner returns a non-zero exit code" test/cli.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/cli.ts | grep -qF "smoke failed" && grep -vE "^\s*(//|\*|/\*)" src/preflight.ts | grep -qF "stopReason"` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44855177518
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
