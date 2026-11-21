@@ -110,6 +110,51 @@ function workerScene(
   };
 }
 
+/**
+ * SPEC 14.34 item 1: second worker makes no code commit; only rewrites
+ * report.md pointing to the first worker's head_sha, commits with the
+ * report(collie) message, and pushes.
+ */
+function reportOnlyWorkerScene(
+  box: Sandbox,
+  firstWorkerCaptures: WorkerCapture[],
+): {
+  expectRole: 'worker';
+  effect: (ctx: FakeSceneContext) => Promise<void>;
+  result: { exitCode: number };
+} {
+  return {
+    expectRole: 'worker',
+    effect: async ({ cwd }: FakeSceneContext) => {
+      const head = firstWorkerCaptures[0]?.headSha ?? '';
+      const claims: Claims = {
+        commits: [head],
+        tests_passed: 1,
+        tests_failed: 0,
+        pushed: true,
+        ci_passed: false,
+        new_deps: [],
+        spec_touched: false,
+      };
+      const report: Report = {
+        schema_version: 1,
+        batch_id: BATCH_ID,
+        head_sha: head,
+        claims,
+        open_questions: [],
+      };
+      box.write(
+        `.collie/batches/${BATCH_ID}/report.md`,
+        `# r\n\n## 做了什么\n重写 report，无新代码。\n\n## 测试结果\n见。\n\n## 偏离或疑问\n无\n\n## 下一步建议\n无\n\n${FENCE}json\n${JSON.stringify(report, null, 2)}\n${FENCE}\n`,
+        cwd,
+      );
+      await box.commitAll(`report(collie): ${BATCH_ID}`, cwd);
+      await git(cwd, ['push', '-q', 'origin', 'main']);
+    },
+    result: { exitCode: 0 },
+  };
+}
+
 function reviewerFixScene(
   box: Sandbox,
   captures: ReviewerCapture[],
@@ -416,7 +461,9 @@ describe('reviewer-rerun: task.md comes from the current run', { timeout: 300_00
     const runner = new FakeRunner([
       workerScene(box, workerCaptures, true),
       reviewerCaptureTaskScene('FIX'),
-      workerScene(box, workerCaptures, true),
+      // SPEC 14.34: second worker makes no code commit, only rewrites report.md
+      // with head_sha still pointing to the first worker's code commit.
+      reportOnlyWorkerScene(box, workerCaptures),
       reviewerCaptureTaskScene('PASS'),
     ]);
     const code = await box.cli(['run', '--continue'], runner);

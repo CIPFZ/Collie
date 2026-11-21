@@ -841,13 +841,11 @@ describe('blocked cleanup: only its own paths', () => {
     ]);
     box.write('docs/backlog.md', backlog);
 
-    // Add note.txt to .gitignore so rescue's git add -A doesn't capture it.
-    // This simulates build artifacts / editor files that should stay untracked.
-    const gitignore = box.read('.gitignore') + 'note.txt\n';
-    box.write('.gitignore', gitignore);
-
+    // SPEC 14.34 item 2: the untracked file is injected by the last reviewer
+    // scene (between rescue and cleanup), not hidden via ignore rules.
     let toml = box.read('.collie/collie.toml');
     toml = toml.replace(/progress_secs\s*=\s*\d+/, 'progress_secs = 1');
+    toml = toml.replace(/fix_max\s*=\s*\d+/, 'fix_max = 1');
     box.write('.collie/collie.toml', toml);
     await box.commitAll('chore: idle workers with note.txt test');
 
@@ -855,14 +853,12 @@ describe('blocked cleanup: only its own paths', () => {
 
     const fp = controllableFingerprint();
 
-    // Worker scene that creates both feature.txt (tracked, rescued) and note.txt (ignored).
-    function idleWithNote(fileContent: string): FakeScene {
+    // Idle worker that writes only feature.txt (triggers rescue). No note.txt.
+    function idleWithFeatureOnly(): FakeScene {
       return {
         expectRole: 'worker',
         effect: async (ctx: FakeSceneContext) => {
-          writeFileSync(join(ctx.cwd, 'feature.txt'), fileContent);
-          // note.txt is in .gitignore — rescue won't capture it.
-          writeFileSync(join(ctx.cwd, 'note.txt'), 'should stay in workspace\n');
+          writeFileSync(join(ctx.cwd, 'feature.txt'), 'partial work\n');
           fp.freeze();
           for (let i = 0; i < 10; i++) {
             ctx.opts.onEvent?.({ type: 'assistant', message: 'thinking...' });
@@ -874,9 +870,86 @@ describe('blocked cleanup: only its own paths', () => {
       };
     }
 
+    // Worker that commits code (NOT feature.txt) + report + pushes, so the
+    // subsequent cleanup revert of the rescue commit does not conflict.
+    function workerNoFeature(): FakeScene {
+      return {
+        expectRole: 'worker',
+        effect: async ({ cwd }: FakeSceneContext) => {
+          workerSeq++;
+          box.write('other.txt', `other ${String(workerSeq)}\n`, cwd);
+          box.write('tests/t000.sh', 'exit 0\n', cwd);
+          const head = await box.commitAll('feat: add other', cwd);
+          const claims: Claims = {
+            commits: [head],
+            tests_passed: 1,
+            tests_failed: 0,
+            pushed: true,
+            ci_passed: false,
+            new_deps: [],
+            spec_touched: false,
+          };
+          const report: Report = {
+            schema_version: 1,
+            batch_id: 'v99-b01',
+            head_sha: head,
+            claims,
+            open_questions: [],
+          };
+          box.write(
+            '.collie/batches/v99-b01/report.md',
+            `# r\n\n## 做了什么\n完成。\n\n## 测试结果\n见。\n\n## 偏离或疑问\n无\n\n## 下一步建议\n无\n\n${FENCE}json\n${JSON.stringify(report, null, 2)}\n${FENCE}\n`,
+            cwd,
+          );
+          await box.commitAll('report(collie): v99-b01', cwd);
+          await git(cwd, ['push', '-q', 'origin', 'main']);
+        },
+        result: { exitCode: 0 },
+      };
+    }
+
+    // Reviewer FIX that writes note.txt to the main workspace (last reviewer).
+    function reviewerFixWithNote(): FakeScene {
+      const body: Verdict = {
+        schema_version: 1,
+        batch_id: 'v99-b01',
+        verdict: 'FIX',
+        evidence: {
+          commits_actual: [],
+          verify_results: [{ cmd: TEST_CMD, exit_code: 1, summary: '1 failed | 1 passed (2)' }],
+          remote_has_head: true,
+          ci_conclusion: 'success',
+          ci_run_url: '',
+          ci_branch_matched: true,
+          deps_diff: [],
+          spec_diff_lines: 0,
+        },
+        claim_mismatches: [],
+        gaps: ['a test is failing'],
+        reason: 'test failure',
+      };
+      return {
+        expectRole: 'reviewer',
+        effect: () => {
+          // Write note.txt to the MAIN workspace as a truly untracked file.
+          writeFileSync(join(box.root, 'note.txt'), 'should stay in workspace\n');
+        },
+        result: {
+          exitCode: 0,
+          finalText: `# v\n\n修复。\n\n${FENCE}json\n${JSON.stringify(body, null, 2)}\n${FENCE}\n`,
+        },
+      };
+    }
+
     const runner = new FakeRunner([
-      idleWithNote('partial work attempt 1\n'),
-      idleWithNote('partial work attempt 2\n'),
+      // Run 1: idle worker → rescue commit (feature.txt) → interrupt retry.
+      idleWithFeatureOnly(),
+      // Run 2: worker (doesn't touch feature.txt) + reviewer FIX → fix retry.
+      workerNoFeature(),
+      reviewerFix(box, 'v99-b01'),
+      // Run 3: worker + reviewer FIX (writes note.txt) → fix_max exceeded → blocked → cleanup.
+      workerNoFeature(),
+      reviewerFixWithNote(),
     ]);
 
     const code = await box.cli(['run', '--continue'], runner, livenessOpts(fp));
@@ -943,21 +1016,29 @@ describe('blocked cleanup: only its own paths', () => {
     let toml = box.read('.collie/collie.toml');
     toml = toml.replace(/fix_max\s*=\s*\d+/, 'fix_max = 1');
     toml = toml.replace(/progress_secs\s*=\s*\d+/, 'progress_secs = 1');
+    // SPEC 14.34 item 3: baseline already has feature.txt with two lines so
+    // the rescue and worker changes to the same line produce a real content
+    // conflict (not a modify-vs-delete conflict).
+    box.write('feature.txt', 'original line 1\nline 2\n');
     box.write('.collie/collie.toml', toml);
     await box.commitAll('chore: conflict test setup');
 
     const fp = controllableFingerprint();
 
-    // Worker that creates feature.txt with content that will conflict with rescue.
-    const idleWithFeature = idleWorkerWithDirtyFiles('v99-b01', fp, 'rescue line 1\n');
+    // Rescue changes only line 1 of the two-line file.
+    const idleWithFeature = idleWorkerWithDirtyFiles(
+      'v99-b01',
+      fp,
+      'rescue changed line 1\nline 2\n',
+    );
 
-    // Worker that overwrites feature.txt line 1 with different content + commits + pushes.
+    // Worker that changes the same line 1 to yet another value + commits + pushes.
     function workerOverwriteScene(): FakeScene {
       return {
         expectRole: 'worker',
         effect: async ({ cwd }: FakeSceneContext) => {
           workerSeq++;
-          box.write('feature.txt', `completely different line 1 ${String(workerSeq)}\n`, cwd);
+          box.write('feature.txt', `worker changed line 1 ${String(workerSeq)}\nline 2\n`, cwd);
           box.write('tests/t000.sh', 'exit 0\n', cwd);
           const head = await box.commitAll('feat: overwrite feature', cwd);
           const claims: Claims = {
@@ -989,9 +1070,9 @@ describe('blocked cleanup: only its own paths', () => {
     }
 
     const runner = new FakeRunner([
-      // Run 1: idle → rescue commit (feature.txt = "rescue line 1") → BLOCK → interrupt retry.
+      // Run 1: idle → rescue commit (feature.txt line 1 changed) → interrupt retry.
       idleWithFeature,
-      // Run 2 (interrupt_retry): worker overwrites feature.txt → reviewer FIX.
+      // Run 2 (interrupt_retry): worker changes same line 1 → reviewer FIX.
       workerOverwriteScene(),
       reviewerFix(box, 'v99-b01'),
       // Run 3 (fix_retry): worker + reviewer FIX again → exceeds fix_max.
