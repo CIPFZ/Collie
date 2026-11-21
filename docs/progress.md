@@ -2190,4 +2190,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：1（error）
+
+### v046-b25 · r-20261121015927 · PASS
+
+- 时间：2026-11-21T02:10:18.528Z
+- 裁定：规则 10，All 8 acceptance commands pass. Implementation correctly removes git add -A and git reset from batchCleanup, replaces with selective staging via revert --no-commit + git rm. Conflict handling uses only revert --abort with proper abort_left_changes / revert_conflict distinction. Three new test scenarios cover all bold task requirements. Two new invariant tests added. No existing tests or assertions modified. CI verification deferred to R2.
+- 提交：`80b28b1`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1453 passed, 0 failed
+  - `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/blocked-cleanup.test.ts` → exit 0，9 passed, 0 failed
+  - `grep -qF "blocked cleanup: only its own paths" test/blocked-cleanup.test.ts` → exit 0，exit 0
+  - `! grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qF "'reset'"` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -cF "['add', '-A']" | grep -qx 1` → exit 0，exit 0
+  - `grep -qF "'reset'" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44721121596
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
