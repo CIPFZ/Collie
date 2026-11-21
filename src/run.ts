@@ -2929,6 +2929,35 @@ function hasBatchRule9Downgrade(root: string, batchId: string): boolean {
 }
 
 /**
+ * SPEC 16.20: collects ci.resolved head_sha values from runs where the batch
+ * had a verdict.downgraded rule=9 event.  Used to detect "rule 9 same head"
+ * repeated failure: when the worker reruns without new commits, the head_sha
+ * is unchanged and CI cannot produce a different outcome.
+ */
+function findRule9CiHeadShas(root: string, batchId: string): string[] {
+  const runsDir = join(root, RUNS_RELATIVE_DIR);
+  if (!existsSync(runsDir)) return [];
+  const journal = createJournal(root);
+  const headShas: string[] = [];
+  for (const dir of readdirSync(runsDir).sort()) {
+    if (!RunIdSchema.safeParse(dir).success || !existsSync(join(runsDir, dir, EVENTS_FILE_NAME)))
+      continue;
+    if (dir.startsWith('q-')) continue;
+    const events = journal.replay(dir);
+    const batchEvents = events.filter((e) => e.batch_id === batchId);
+    const hasRule9 = batchEvents.some(
+      (e) => e.event === 'verdict.downgraded' && e.rule === RULE_EVIDENCE_MISSING,
+    );
+    if (!hasRule9) continue;
+    const ciResolved = batchEvents.findLast((e) => e.event === 'ci.resolved');
+    if (ciResolved !== undefined && typeof ciResolved.head_sha === 'string') {
+      headShas.push(ciResolved.head_sha);
+    }
+  }
+  return headShas;
+}
+
+/**
  * SPEC 12.3 / 13.14: checks whether `batch.retried` (rule 1) has already been
  * recorded for a given batch across all journal runs. Returns true if the
  * batch has been retried at least once for rule 1 specifically.
@@ -3279,6 +3308,67 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
         batches: batchesRun,
         pausedCount,
       };
+    }
+
+    // SPEC 16.20: rule 9 same head_sha — if this batch had a prior rule 9
+    // downgrade whose ci.resolved head_sha matches the current one, don't retry.
+    // The worker produced no new commits, so the CI conclusion cannot change.
+    if (outcome.decision?.downgraded === true && outcome.decision.rule === RULE_EVIDENCE_MISSING) {
+      const rule9HeadShas = findRule9CiHeadShas(root, currentBatchId);
+      // ≥ 2 occurrences of the same sha means current + prior both had rule 9.
+      const counts = new Map<string, number>();
+      for (const sha of rule9HeadShas) {
+        counts.set(sha, (counts.get(sha) ?? 0) + 1);
+      }
+      // eslint-disable-next-line no-restricted-syntax, @typescript-eslint/no-magic-numbers -- SPEC 16.20: ≥ 2 means same sha seen twice
+      const duplicateEntry = [...counts.entries()].find(([, count]) => count >= 2);
+      if (duplicateEntry !== undefined) {
+        const [headSha] = duplicateEntry;
+        queueRec.record('escalated', {
+          reason: 'rule9_same_head',
+          batch_id: currentBatchId,
+          head_sha: headSha,
+        });
+        updateBacklogToDisk(root, currentBatchId, 'blocked', queueRec);
+        try {
+          await r2Commit(
+            root,
+            `progress: ${currentBatchId} rule9_same_head`,
+            [BACKLOG_RELATIVE_PATH],
+            queueRec,
+          );
+        } catch {
+          // Best effort: the status was written to disk even if commit fails.
+        }
+        // SPEC 16.20: push per SPEC 12.1; on failure record verdict.push_failed.
+        try {
+          await push(root, ctx.remote, config.ci.expected_branch);
+          const pushSha = await revParse(root, 'HEAD');
+          queueRec.record('verdict.pushed', {
+            sha: pushSha,
+            remote: ctx.remote,
+            branch: config.ci.expected_branch,
+          });
+        } catch (pushError) {
+          queueRec.record('verdict.push_failed', {
+            sha: await revParse(root, 'HEAD').catch(() => 'unknown'),
+            error: message(pushError),
+          });
+        }
+        // SPEC 16.20: cleanup rescue commits and acceptance tests before finishing.
+        await batchCleanup(root, currentBatchId, queueRec, ctx.remote, config.ci.expected_branch);
+        queueRec.record('queue.finished', {
+          reason: 'rule9_same_head',
+          batches: batchesRun,
+          paused_count: pausedCount,
+        });
+        return {
+          exitCode: EXIT_CODES.BLOCK,
+          reason: 'rule9_same_head',
+          batches: batchesRun,
+          pausedCount,
+        };
+      }
     }
 
     // SPEC 12.2 (v03-b04-fix): FIX → check fix_max using in-memory counter.
