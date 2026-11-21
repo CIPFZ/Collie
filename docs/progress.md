@@ -2301,4 +2301,23 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b31 · r-20261121123134 · PASS
+
+- 时间：2026-11-21T12:50:59.644Z
+- 裁定：规则 10，All 7 acceptance commands pass. Three protected paths added to PROTECTED_PATHS, three mutation items added (total 46), three test files updated as specified. No protected files modified, no dependency changes, no scope creep. CI conclusion unknown — CI verification deferred to R2.
+- 提交：`3eab3fe`
+- 验收命令：7/7 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1486 passed, 0 failed
+  - `npm test -- test/evidence.test.ts test/mutation.test.ts` → exit 0，52 passed, 0 failed
+  - `grep -qF "'.github'," src/evidence.ts && grep -qF "'eslint.config.js'," src/evidence.ts && grep -qF "'vitest.config.ts'," src/evidence.ts && grep -qF "as protected (SPEC 16.21)" test/evidence.test.ts` → exit 0，exit 0
+  - `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" | tail -n 1 | grep -qE "^mutation: caught 46 survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` → exit 0，exit 0
+  - `grep -qF "in PROTECTED_PATHS (v046-b31)" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44904663150
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->

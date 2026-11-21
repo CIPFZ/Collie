@@ -135,7 +135,7 @@
 | 92 | v046-b28 | 测试改实：reviewer 信封、收尾的未跟踪文件与内容冲突三处造出真正的情形 | v046-b25 | passed |
 | 93 | v046-b29 | 同一个 head_sha 第二次被规则 9 降级就上报，不再自动重跑（D10） | v046-b26 | passed |
 | 94 | v046-b30 | 小修：rule9_same_head 只看这一次的 head_sha；api_error 续跑总带 waited_secs | v046-b29 | passed |
-| 95 | v046-b31 | CI、lint、测试配置列为受保护路径，变异清单加三项（第 16 章第 2 步） | v046-b29 | pending |
+| 95 | v046-b31 | CI、lint、测试配置列为受保护路径，变异清单加三项（第 16 章第 2 步） | v046-b29 | passed |
 | 96 | v046-b32 | 批次授权：条目点名的受保护路径由 worker 改，不计入受保护文件改动行数（D9） | v046-b31 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
