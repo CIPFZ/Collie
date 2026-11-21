@@ -99,6 +99,12 @@ export interface EvidenceInput {
    * When omitted, falls back to prefix-based filtering (backward compat).
    */
   r2Shas?: ReadonlySet<string>;
+  /**
+   * SPEC 16.21 (v046-b32): paths authorised by the batch's 「可改的受保護路径」
+   * section. Changes to these paths are excluded from spec_diff_lines and
+   * counted separately as authorized_diff_lines.
+   */
+  allowedProtected?: readonly string[];
 }
 
 export interface CollectedEvidence {
@@ -111,6 +117,12 @@ export interface CollectedEvidence {
   ciWait?: CiWait;
   /** Why remote_has_head is false when the remote could not be read. */
   remoteError?: string;
+  /**
+   * SPEC 16.21 (v046-b32): diff lines on authorised protected paths, counted
+   * separately from spec_diff_lines. Only present when the batch has
+   * allowed_protected paths. Used to populate evidence.collected event.
+   */
+  authorizedDiffLines?: number;
 }
 
 /** "Name@range" entries for direct dependencies added or changed between two manifests. */
@@ -219,9 +231,21 @@ export async function collectEvidence(input: EvidenceInput): Promise<CollectedEv
   // r2Shas provided, prefix-based otherwise). commits_actual still uses
   // workerCommits (prefix-based) — the listing is unchanged per SPEC.
   let specDiffLines = 0;
+  let authorizedDiffLines = 0;
+  const allowedPaths = input.allowedProtected;
+  const hasAuthorized = allowedPaths !== undefined && allowedPaths.length > 0;
   for (const c of commitsForDiff) {
     const stat = await diffStat(root, `${c.sha}^`, c.sha, PROTECTED_PATHS);
-    specDiffLines += stat.added + stat.deleted;
+    const totalLines = stat.added + stat.deleted;
+    // SPEC 16.21 (v046-b32): subtract diff lines on authorised paths.
+    if (hasAuthorized && totalLines > 0) {
+      const authStat = await diffStat(root, `${c.sha}^`, c.sha, [...allowedPaths]);
+      const authLines = authStat.added + authStat.deleted;
+      authorizedDiffLines += authLines;
+      specDiffLines += totalLines - authLines;
+    } else {
+      specDiffLines += totalLines;
+    }
   }
 
   const deps = await dependencyDiff(root, baseSha, headSha);
@@ -324,5 +348,6 @@ export async function collectEvidence(input: EvidenceInput): Promise<CollectedEv
     ci,
     ...(ciWait === undefined ? {} : { ciWait }),
     ...(remoteError === undefined ? {} : { remoteError }),
+    ...(hasAuthorized ? { authorizedDiffLines } : {}),
   };
 }

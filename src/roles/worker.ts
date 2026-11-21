@@ -125,6 +125,22 @@ function renderScenarioSections(batch: Batch): string[] {
   return result;
 }
 
+/**
+ * SPEC 16.21 (v046-b32): when a batch has allowed_protected paths, render
+ * a section between 条目 (or scenario sections) and 验收标准.
+ */
+function renderAllowedProtectedSection(batch: Batch): string | undefined {
+  if (batch.allowed_protected === undefined || batch.allowed_protected.length === 0)
+    return undefined;
+  return [
+    '## 本批次可改的受保护路径',
+    '',
+    ...batch.allowed_protected.map((p) => `- ${p}`),
+    '',
+    '只做条目要求的改动，并在「偏离或疑问」里列出改了什么。',
+  ].join('\n');
+}
+
 function renderBody(batch: Batch): string {
   const reportFile = `.collie/batches/${batch.id}/${REPORT_FILE_NAME}`;
   const hasScenarios = batch.scenarios !== undefined && batch.scenarios.length > 0;
@@ -134,6 +150,8 @@ function renderBody(batch: Batch): string {
   const acceptanceNote = hasScenarios
     ? `\n\n\`test/acceptance/${batch.id}/\` 下是本批次的验收测试，由测试 agent 写好，你不能改（受保护路径）。`
     : '';
+
+  const allowedProtectedSection = renderAllowedProtectedSection(batch);
 
   const sections = [
     `# 批次 ${batch.id}：${batch.title}`,
@@ -150,6 +168,8 @@ function renderBody(batch: Batch): string {
     ].join('\n'),
     // SPEC 16.16: scenario + interface sections go between 条目 and 验收标准.
     ...scenarioSections,
+    // SPEC 16.21 (v046-b32): allowed protected paths go between scenarios and 验收标准.
+    ...(allowedProtectedSection !== undefined ? [allowedProtectedSection] : []),
     [
       '## 验收标准（可机器判定）',
       '',

@@ -30,6 +30,7 @@ const LABEL_ACCEPTANCE = new RegExp(`^验收标准${COLON}$`);
 const LABEL_FORBIDDEN = new RegExp(`^额外禁止${COLON}$`);
 const LABEL_SCENARIOS = new RegExp(`^情形${COLON}$`);
 const LABEL_INTERFACES = new RegExp(`^接口${COLON}$`);
+const LABEL_ALLOWED_PROTECTED = new RegExp(`^可改的受保护路径${COLON}$`);
 // e.g. "优先级\uFF1A2\u3000依赖\uFF1Av01-b01": full-width colons, U+3000 between the fields.
 const META_LINE = new RegExp(
   `^优先级${COLON}\\s*(?<priority>\\S+)[\\s\\u3000]+依赖${COLON}\\s*(?<deps>.*)$`,
@@ -378,6 +379,44 @@ interface SectionContent {
   forbidden: string[] | undefined;
   scenarios: Scenario[] | undefined;
   interfaces: string[] | undefined;
+  allowedProtected: string[] | undefined;
+}
+
+/**
+ * SPEC 16.21 (v046-b32): paths that may be named in a 「可改的受保护路径」 section.
+ * Only .github (the directory itself or anything under it), eslint.config.js,
+ * and vitest.config.ts can be authorised; anything else is an error.
+ */
+function isAllowablePath(path: string): boolean {
+  if (path === '.github' || path.startsWith('.github/')) return true;
+  if (path === 'eslint.config.js') return true;
+  if (path === 'vitest.config.ts') return true;
+  return false;
+}
+
+/**
+ * SPEC 16.21 (v046-b32): validates every path in the 「可改的受保护路径」 list.
+ * Returns the validated list or throws a BacklogError for the first invalid item.
+ */
+function validateAllowedProtected(
+  items: string[],
+  source: string,
+  batchId: string,
+  body: readonly Line[],
+  labelIndex: number,
+): string[] {
+  const labelLine = body[labelIndex]?.no ?? 0;
+  for (const item of items) {
+    if (!isAllowablePath(item)) {
+      throw new BacklogError(
+        source,
+        labelLine,
+        batchId,
+        `「可改的受保护路径」 contains "${item}" which is not an allowable protected path (only .github, .github/*, eslint.config.js, vitest.config.ts)`,
+      );
+    }
+  }
+  return items;
 }
 
 function parseSection(section: Section, source: string): SectionContent {
@@ -389,6 +428,7 @@ function parseSection(section: Section, source: string): SectionContent {
     forbidden: undefined,
     scenarios: undefined,
     interfaces: undefined,
+    allowedProtected: undefined,
   };
   const { body, id } = section;
   const once = (key: keyof SectionContent, line: number, label: string): void => {
@@ -440,6 +480,11 @@ function parseSection(section: Section, source: string): SectionContent {
       once('interfaces', line.no, '接口');
       const list = parseListWithBlanks(body, i + 1, BULLET_ITEM);
       content.interfaces = list.items;
+      i = list.end;
+    } else if (LABEL_ALLOWED_PROTECTED.test(text)) {
+      once('allowedProtected', line.no, '可改的受保护路径');
+      const list = parseListWithBlanks(body, i + 1, BULLET_ITEM);
+      content.allowedProtected = validateAllowedProtected(list.items, source, id, body, i);
       i = list.end;
     } else {
       // Free prose (notes for R4, separators) is allowed between blocks.
@@ -636,6 +681,9 @@ export function parseBacklog(text: string, source: string = BACKLOG_RELATIVE_PAT
     // SPEC 16.11: only include scenarios/interfaces when the section is present.
     if (content.scenarios !== undefined) candidate.scenarios = content.scenarios;
     if (content.interfaces !== undefined) candidate.interfaces = content.interfaces;
+    // SPEC 16.21 (v046-b32): only include allowed_protected when the section is present.
+    if (content.allowedProtected !== undefined)
+      candidate.allowed_protected = content.allowedProtected;
     const parsed = BatchSchema.safeParse(candidate);
     if (!parsed.success) {
       const issues = parsed.error.issues

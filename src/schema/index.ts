@@ -242,6 +242,8 @@ export const BatchSchema = z.strictObject({
   scenarios: z.array(ScenarioSchema).optional(),
   /** SPEC 16.11: optional interfaces section; absent when the batch has no 「接口」 heading. */
   interfaces: z.array(z.string()).optional(),
+  /** SPEC 16.21 (v046-b32): optional allowed protected paths; absent when the batch has no such section. */
+  allowed_protected: z.array(NonEmptyString).optional(),
 });
 export type Batch = z.infer<typeof BatchSchema>;
 

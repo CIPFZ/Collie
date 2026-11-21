@@ -2223,6 +2223,10 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         ...(ciTokenValue === undefined ? {} : { ciToken: ciTokenValue }),
         // SPEC 16.14: sha-based R2 commit identification for protected-path diff.
         r2Shas,
+        // SPEC 16.21 (v046-b32): pass authorised protected paths for diff exclusion.
+        ...(batch.allowed_protected !== undefined
+          ? { allowedProtected: batch.allowed_protected }
+          : {}),
       });
       if (collected.ciWait?.timedOut === true) {
         rec.record('ci.wait_timeout', {
@@ -2273,6 +2277,10 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         spec_diff_lines: collected.evidence.spec_diff_lines,
         deps_diff: collected.evidence.deps_diff.length,
         remote_has_head: collected.evidence.remote_has_head,
+        // SPEC 16.21 (v046-b32): authorized_diff_lines only when the batch has authorised paths.
+        ...(collected.authorizedDiffLines !== undefined
+          ? { authorized_diff_lines: collected.authorizedDiffLines }
+          : {}),
       });
 
       return { verdict, collected };
