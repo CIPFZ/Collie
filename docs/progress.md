@@ -2228,4 +2228,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b26 · r-20261121060449 · PASS
+
+- 时间：2026-11-21T06:29:11.281Z
+- 裁定：规则 10，All 8 acceptance commands pass. Three runner scenarios (api_error, interrupted+api_error, error without terminal_reason) tested and passing. Three queue scenarios (api_error→wait→retry→PASS, double api_error→blocked, idling→no wait) tested and passing. Schema, template, CLI forwarding, and invariant all correct. No protected files modified, no forbidden files touched, no new dependencies, no existing assertions deleted or loosened.
+- 提交：`4d17147`
+- 验收命令：8/8 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1470 passed, 0 failed
+  - `npm test -- test/runner-claude.test.ts test/api-error-retry.test.ts test/scenario-n.test.ts test/config.test.ts test/schema.test.ts` → exit 0，212 passed, 0 failed
+  - `grep -qF "runner: api_error stop reason" test/runner-claude.test.ts && grep -qF "queue: api_error counts as a resumable interruption" test/api-error-retry.test.ts` → exit 0，exit 0
+  - `grep -qE "^api_retry_wait_secs = 300" templates/collie.toml && ! grep -qF "api_retry_wait_secs" .collie/collie.toml` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/runner/claude.ts | grep -qF "api_error" && grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qF "api_error"` → exit 0，exit 0
+  - `grep -qF "api_error" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44875103627
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
