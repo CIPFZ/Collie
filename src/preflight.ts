@@ -14,6 +14,9 @@ import type { CollieConfig } from './schema/index.js';
 // eslint-disable-next-line no-restricted-syntax, @typescript-eslint/no-magic-numbers -- byte-to-MB conversion factor, not a threshold
 const BYTES_PER_MB = 1024 * 1024;
 
+// eslint-disable-next-line no-restricted-syntax -- ms-to-seconds conversion factor, not a threshold
+const MS_PER_SEC = 1000;
+
 /** Result of a single preflight check (SPEC 14.1). */
 export interface PreflightCheck {
   name: string;
@@ -39,6 +42,8 @@ export interface PreflightOpts {
     runner: AgentRunner;
     fetch: FetchLike;
   };
+  /** Injected monotonic clock (ms) for runner timing; defaults to Date.now (SPEC 14.33). */
+  now?: () => number;
 }
 
 /** Default disk-free reader using Node.js statfsSync (SPEC 14.1). */
@@ -138,9 +143,17 @@ function checkDiskFree(
 const SMOKE_MAX_TURNS = 1; // SPEC 14.1: same as collie smoke
 const SMOKE_PROMPT = 'Reply with the single word ok.';
 
-/** SPEC 14.1 --smoke runner check: fire a trivial prompt with no tools. */
-async function checkRunner(runner: AgentRunner, root: string): Promise<PreflightCheck> {
+/**
+ * SPEC 14.1 / 14.33 --smoke runner check: fire a trivial prompt with no tools.
+ * exitCode !== 0 → ok: false; detail always ends with secs=<elapsed>.
+ */
+async function checkRunner(
+  runner: AgentRunner,
+  root: string,
+  now: () => number,
+): Promise<PreflightCheck> {
   const name = 'runner';
+  const t0 = now();
   try {
     const result = await runner.run({
       role: 'worker',
@@ -150,7 +163,12 @@ async function checkRunner(runner: AgentRunner, root: string): Promise<Preflight
       cwd: root,
       maxTurns: SMOKE_MAX_TURNS,
     });
-    return { name, ok: true, detail: `exitCode=${String(result.exitCode)}` };
+    const secs = Math.round((now() - t0) / MS_PER_SEC);
+    const ok = result.exitCode === 0;
+    const parts = [`exitCode=${String(result.exitCode)}`];
+    if (result.stopReason !== undefined) parts.push(`stopReason=${result.stopReason}`);
+    parts.push(`secs=${String(secs)}`);
+    return { name, ok, detail: parts.join(' ') };
   } catch (error) {
     return { name, ok: false, detail: error instanceof Error ? error.message : String(error) };
   }
@@ -196,6 +214,7 @@ async function checkCiQuery(
 /** SPEC 14.1: runs all preflight checks and returns the aggregated result. */
 export async function runPreflight(opts: PreflightOpts): Promise<PreflightResult> {
   const diskFn = opts.diskFreeMb ?? realDiskFreeMb;
+  const nowFn = opts.now ?? Date.now;
   const checks: PreflightCheck[] = [];
 
   // Base checks (always run).
@@ -206,7 +225,7 @@ export async function runPreflight(opts: PreflightOpts): Promise<PreflightResult
 
   // Smoke checks (SPEC 14.1 --smoke).
   if (opts.smoke !== undefined) {
-    checks.push(await checkRunner(opts.smoke.runner, opts.root));
+    checks.push(await checkRunner(opts.smoke.runner, opts.root, nowFn));
     checks.push(await checkCiQuery(opts.config, opts.root, opts.smoke.fetch));
   }
 

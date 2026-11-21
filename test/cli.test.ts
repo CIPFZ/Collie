@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AUDIT_EXIT, runIdAt } from '../src/cli.js';
+import type { FetchLike } from '../src/ci.js';
 import { loadConfig, parseConfig } from '../src/config.js';
 import { git, log } from '../src/git.js';
 import { EVENTS_FILE_NAME, RUNS_RELATIVE_DIR } from '../src/journal.js';
@@ -203,6 +204,25 @@ describe('cli: init, show and the R2 commits', () => {
     const output = box.output.join('');
     expect(output).toContain('smoke failed');
     expect(output).toContain('cannot connect');
+  });
+
+  it('smoke exits 1 when the runner returns a non-zero exit code', async () => {
+    // SPEC 14.33: non-zero exitCode → stderr "smoke failed: exitCode=1",
+    // no "smoke ok", CI is never queried.
+    let ciQueried = false;
+    const fetchSpy: FetchLike = (...args) => {
+      ciQueried = true;
+      return box.fetch(...args);
+    };
+    const r = new FakeRunner([
+      { expectRole: 'worker', result: { exitCode: 1, stopReason: 'error' as const } },
+    ]);
+    const code = await box.cli(['smoke'], r, { fetch: fetchSpy });
+    expect(code).toBe(1);
+    const output = box.output.join('');
+    expect(output).toContain('smoke failed: exitCode=1');
+    expect(output).not.toContain('smoke ok');
+    expect(ciQueried).toBe(false);
   });
 });
 

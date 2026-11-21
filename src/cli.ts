@@ -78,6 +78,8 @@ export interface CliDeps {
   watchSleep?: (ms: number) => Promise<void>;
   /** SPEC 14.1: injectable disk-free reader (MB) for preflight. */
   diskFreeMb?: (root: string) => number;
+  /** SPEC 14.33: injectable monotonic clock (ms) for preflight runner timing. */
+  preflightNow?: () => number;
   /** Test hook: overrides the tester step's abort signal (SPEC 16.14). */
   testerSignal?: AbortSignal;
   /** Test hook: injectable red-check function for the tester step (SPEC 16.14). */
@@ -478,6 +480,13 @@ async function smoke(deps: CliDeps, runnerChoice?: RunnerChoice): Promise<number
       cwd: deps.cwd,
       maxTurns: SMOKE_MAX_TURNS,
     });
+    // SPEC 14.33: non-zero exit code → fail, skip CI.
+    if (result.exitCode !== 0) {
+      const parts = [`exitCode=${String(result.exitCode)}`];
+      if (result.stopReason !== undefined) parts.push(`stopReason=${result.stopReason}`);
+      deps.err(`smoke failed: ${parts.join(' ')}\n`);
+      return EXIT_CODES.ERROR;
+    }
     const parts = [`smoke ok: exitCode=${String(result.exitCode)}`];
     if (result.sessionId !== undefined) parts.push(`sessionId=${result.sessionId}`);
     if (result.usage !== undefined) parts.push(`usage=${JSON.stringify(result.usage)}`);
@@ -984,6 +993,7 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
         remote: deps.remote ?? 'origin',
         config,
         ...(deps.diskFreeMb === undefined ? {} : { diskFreeMb: deps.diskFreeMb }),
+        ...(deps.preflightNow === undefined ? {} : { now: deps.preflightNow }),
         ...(smokeOpts === undefined ? {} : { smoke: smokeOpts }),
       });
       if (opts.json === true) {

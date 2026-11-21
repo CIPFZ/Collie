@@ -183,3 +183,103 @@ describe('collie preflight', () => {
     expect(events.some((e) => e.event === 'queue.preflight')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// SPEC 14.33: runner exit-code and timing in preflight --smoke
+// ---------------------------------------------------------------------------
+
+describe('preflight: runner check judges the exit code', () => {
+  let box: Sandbox;
+
+  beforeEach(async () => {
+    box = await Sandbox.create();
+  });
+
+  afterEach(() => {
+    box.dispose();
+  });
+
+  it('exitCode 1 with stopReason → FAIL runner line, preflight fails, --json ok=false', async () => {
+    const runner = new FakeRunner([
+      { expectRole: 'worker', result: { exitCode: 1, stopReason: 'error' as const } },
+    ]);
+    // Inject a deterministic clock that advances 3000 ms (3 seconds).
+    let tick = 0;
+    const clock = (): number => {
+      const v = tick;
+      tick += 3000;
+      return v;
+    };
+    const code = await box.cli(['preflight', '--smoke', '--runner', 'fake'], runner, {
+      preflightNow: clock,
+    });
+    expect(code).toBe(1);
+    const out = box.output.join('');
+    expect(out).toContain('FAIL runner: exitCode=1 stopReason=error');
+    expect(out).toContain('secs=3');
+    expect(out).toMatch(/preflight: failed.*runner/);
+  });
+
+  it('exitCode 0 → ok runner line with secs=', async () => {
+    const runner = new FakeRunner([{ expectRole: 'worker', result: { exitCode: 0 } }]);
+    // Inject clock: 0 ms → 5000 ms = 5 seconds.
+    let tick = 0;
+    const clock = (): number => {
+      const v = tick;
+      tick += 5000;
+      return v;
+    };
+    const code = await box.cli(['preflight', '--smoke', '--runner', 'fake'], runner, {
+      preflightNow: clock,
+    });
+    expect(code).toBe(0);
+    const out = box.output.join('');
+    expect(out).toContain('ok   runner: exitCode=0 secs=5');
+  });
+
+  it('exitCode 1 without stopReason → FAIL runner with no stopReason in detail', async () => {
+    const runner = new FakeRunner([{ expectRole: 'worker', result: { exitCode: 1 } }]);
+    let tick = 0;
+    const clock = (): number => {
+      const v = tick;
+      tick += 1000;
+      return v;
+    };
+    const code = await box.cli(['preflight', '--smoke', '--runner', 'fake'], runner, {
+      preflightNow: clock,
+    });
+    expect(code).toBe(1);
+    const out = box.output.join('');
+    expect(out).toContain('FAIL runner: exitCode=1 secs=1');
+    expect(out).not.toContain('stopReason');
+  });
+
+  it('runner throws → FAIL runner with error message (no secs)', async () => {
+    // FakeRunner with no scenes throws when run() is called.
+    const runner = new FakeRunner([]);
+    const code = await box.cli(['preflight', '--smoke', '--runner', 'fake'], runner);
+    expect(code).toBe(1);
+    const out = box.output.join('');
+    expect(out).toContain('FAIL runner');
+    expect(out).toMatch(/preflight: failed.*runner/);
+  });
+
+  it('--json with exitCode 1 → runner check ok=false', async () => {
+    const runner = new FakeRunner([
+      { expectRole: 'worker', result: { exitCode: 1, stopReason: 'error' as const } },
+    ]);
+    const code = await box.cli(['preflight', '--smoke', '--json', '--runner', 'fake'], runner);
+    expect(code).toBe(1);
+    const out = box.output.join('');
+    const parsed = JSON.parse(out) as {
+      ok: boolean;
+      checks: { name: string; ok: boolean; detail?: string }[];
+    };
+    expect(parsed.ok).toBe(false);
+    const runnerCheck = parsed.checks.find((c) => c.name === 'runner');
+    expect(runnerCheck).toBeTruthy();
+    expect(runnerCheck?.ok).toBe(false);
+    expect(runnerCheck?.detail).toContain('exitCode=1');
+    expect(runnerCheck?.detail).toContain('stopReason=error');
+  });
+});
