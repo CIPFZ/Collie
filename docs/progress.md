@@ -2284,4 +2284,21 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b30 · r-20261121120444 · PASS
+
+- 时间：2026-11-21T12:31:29.812Z
+- 裁定：规则 10，All 5 acceptance commands pass. Code changes are scoped precisely to the 3 task items: rule9_same_head now compares only this run's ci.resolved head_sha against prior rule9 runs (excluding current), api_error retry always records waited_secs (including 0), and two new correctly-named test cases verify the behavior. No protected files modified, no dependency changes, no existing assertions altered. CI verification deferred to R2.
+- 提交：`c6a7e2b`
+- 验收命令：5/5 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1482 passed, 0 failed
+  - `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/rule9-same-head.test.ts test/api-error-retry.test.ts` → exit 0，8 passed, 0 failed
+  - `grep -qF "second queue with a new head_sha is retried, then escalates on its own repeat" test/rule9-same-head.test.ts && grep -qF "api_error with api_retry_wait_secs = 0 still records waited_secs: 0" test/api-error-retry.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44903835275
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
