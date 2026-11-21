@@ -1583,3 +1583,86 @@ describe('runner-claude: more than one result message', () => {
     expect(result.durationMs).toBeTypeOf('number');
   });
 });
+
+describe('runner: api_error stop reason', () => {
+  it('result message with subtype=success, is_error=true, terminal_reason=api_error → stopReason api_error, exitCode 1', async () => {
+    const apiErrorResult: unknown = {
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      result: 'partial work',
+      session_id: 'sess-api',
+      terminal_reason: 'api_error',
+    };
+    const { query } = scripted([apiErrorResult]);
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.exitCode).toBe(1);
+    expect(result.stopReason).toBe('api_error');
+    expect(result.sessionId).toBe('sess-api');
+    expect(result).not.toHaveProperty('finalText');
+  });
+
+  it('same message but session was interrupted → stopReason is stopped (stopped > api_error)', async () => {
+    // A query that yields an api_error result, then when the iterator is asked
+    // for the next value, calls interrupt() to set the interrupted flag.
+    // This simulates the case where the SDK reports api_error and the session
+    // was also interrupted (e.g. by the signal ladder).
+    const apiErrorResult: unknown = {
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      terminal_reason: 'api_error',
+      session_id: 'sess-int',
+    };
+    let _interrupted = false;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- type must match ClaudeQuery
+    const query: ClaudeQuery = (_params: ClaudeQueryParams): ClaudeQueryIterable => {
+      let yielded = false;
+      return {
+        [Symbol.asyncIterator](): AsyncIterator<unknown> {
+          return {
+            async next(): Promise<IteratorResult<unknown>> {
+              await Promise.resolve();
+              if (!yielded) {
+                yielded = true;
+                return { done: false, value: apiErrorResult };
+              }
+              return { done: true, value: undefined };
+            },
+          };
+        },
+        interrupt(): void {
+          _interrupted = true;
+        },
+      };
+    };
+    const runner = new ClaudeRunner(config, { query });
+    const result = await runner.run(
+      opts({
+        onStarted: (h) => {
+          // Interrupt immediately: sets the `interrupted` flag in ClaudeRunner
+          // before aggregateResults runs (the loop has not yet consumed the result).
+          void h.stop('soft');
+        },
+      }),
+    );
+    expect(_interrupted).toBe(true);
+    // stopped > api_error: even though the result carries terminal_reason=api_error,
+    // the interrupted flag takes precedence.
+    expect(result.stopReason).toBe('stopped');
+  });
+
+  it('error result without terminal_reason → stopReason is error (not api_error)', async () => {
+    const errorResult: unknown = {
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      result: 'failed',
+      session_id: 'sess-err',
+    };
+    const { query } = scripted([errorResult]);
+    const result = await new ClaudeRunner(config, { query }).run(opts());
+    expect(result.exitCode).toBe(1);
+    expect(result.stopReason).toBe('error');
+  });
+});

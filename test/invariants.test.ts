@@ -740,4 +740,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     const addAllCount = codeLines.filter((l) => l.includes("['add', '-A']")).length;
     expect(addAllCount, "['add', '-A'] should appear exactly once (rescue commit)").toBe(1);
   });
+
+  it('src/run.ts has api_error (v046-b26)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    expect(content).toContain('api_error');
+  });
 });

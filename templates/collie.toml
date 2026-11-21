@@ -45,6 +45,8 @@ tester_max = 2
 redcheck_secs = 600
 # SPEC 16.16；测试 agent 步骤的墙钟时限（秒，正整数，可选，缺省 1800）
 worktree_secs = 1800
+# SPEC 16.18；模型接口出错后自动重跑前等待秒数（非负整数，可选，缺省 300）
+api_retry_wait_secs = 300
 
 [verify]
 # SPEC 3.1；reviewer 必跑的全局命令，批次级命令在 task 中追加

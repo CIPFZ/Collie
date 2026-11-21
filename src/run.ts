@@ -2830,6 +2830,8 @@ export interface QueueContext {
   testerSignal?: AbortSignal;
   /** Test hook: injectable red-check function for the tester step (SPEC 16.14). */
   redCheck?: RedCheckFn;
+  /** SPEC 16.18: injectable delay for api_error retry wait; defaults to real setTimeout. */
+  retryDelay?: (ms: number) => Promise<void>;
 }
 
 export interface QueueOutcome {
@@ -3198,12 +3200,13 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
         // Second rule 1 BLOCK: fall through to normal BLOCK handling.
       }
 
-      // SPEC 13.14: interrupt auto-retry — escalation path with worker_stop_reason
-      // in { idling, stalled, wallclock } gets one automatic retry per batch per session.
+      // SPEC 13.14 / 16.18: interrupt auto-retry — escalation path with worker_stop_reason
+      // in { idling, stalled, wallclock, api_error } gets one automatic retry per batch per session.
       const INTERRUPT_STOP_REASONS: ReadonlySet<string> = new Set([
         'idling',
         'stalled',
         'wallclock',
+        'api_error',
       ]);
       if (
         outcome.escalation !== undefined &&
@@ -3212,10 +3215,19 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
         !interruptRetried.has(currentBatchId)
       ) {
         interruptRetried.add(currentBatchId);
+        // SPEC 16.18: api_error waits api_retry_wait_secs before retrying; others don't wait.
+        let waitedSecs = 0;
+        if (outcome.workerStopReason === 'api_error') {
+          const waitMs = config.limits.api_retry_wait_secs * MS_PER_SECOND;
+          const delayFn = ctx.retryDelay ?? realDelay;
+          await delayFn(waitMs);
+          waitedSecs = config.limits.api_retry_wait_secs;
+        }
         queueRec.record('batch.retried', {
           batch_id: currentBatchId,
           cause: 'interrupted',
           stop_reason: outcome.workerStopReason,
+          ...(waitedSecs > 0 ? { waited_secs: waitedSecs } : {}),
         });
         // Don't count against batchesRun for --max (it's the same batch).
         batchesRun.pop();

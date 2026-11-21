@@ -47,6 +47,13 @@ export const DEFAULT_REDCHECK_SECS = 600;
 // eslint-disable-next-line no-restricted-syntax -- SPEC 16.16: tester worktree timeout default, named constant
 export const DEFAULT_WORKTREE_SECS = 1800;
 
+/**
+ * SPEC 16.18: default api_retry_wait_secs — how long to wait before retrying
+ * after an api_error interruption.  Used when the field is absent from collie.toml.
+ */
+// eslint-disable-next-line no-restricted-syntax -- SPEC 16.18: api retry wait default, named constant
+export const DEFAULT_API_RETRY_WAIT_SECS = 300;
+
 /** JSON value, the only payload an NDJSON event line can round-trip losslessly (SPEC 3.6). */
 export type JsonValue =
   string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -150,6 +157,13 @@ export const LimitsSchema = z.strictObject({
   redcheck_secs: z.number().int().positive().optional().default(DEFAULT_REDCHECK_SECS),
   /** SPEC 16.16: tester step wall-clock timeout in seconds; optional, defaults to 1800. */
   worktree_secs: z.number().int().positive().optional().default(DEFAULT_WORKTREE_SECS),
+  /** SPEC 16.18: seconds to wait before retrying after api_error; optional, defaults to 300. */
+  api_retry_wait_secs: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .default(DEFAULT_API_RETRY_WAIT_SECS),
 });
 export type Limits = z.infer<typeof LimitsSchema>;
 

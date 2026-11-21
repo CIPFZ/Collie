@@ -55,6 +55,7 @@ const validConfig: CollieConfig = {
     tester_max: 2,
     redcheck_secs: 600,
     worktree_secs: 1800,
+    api_retry_wait_secs: 300,
   },
   verify: { commands: ['npm run lint', 'npm run typecheck', 'npm test'] },
   ci: { provider: 'github-actions', expected_branch: 'main' },

@@ -71,8 +71,8 @@ export interface RunResult {
    * arrives here and R2 persists it as verdict.md (SPEC 3.5).
    */
   finalText?: string;
-  /** Why the run ended abnormally (SPEC 11.2); absent on a clean finish. */
-  stopReason?: 'turns_exhausted' | 'stopped' | 'error';
+  /** Why the run ended abnormally (SPEC 11.2, 16.18); absent on a clean finish. */
+  stopReason?: 'turns_exhausted' | 'stopped' | 'api_error' | 'error';
   /** SPEC 13.1: number of turns the agent took (optional, v0.4). */
   numTurns?: number;
   /** SPEC 13.1: total cost in USD reported by the SDK (optional, v0.4). */

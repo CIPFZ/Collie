@@ -84,6 +84,8 @@ export interface CliDeps {
   testerSignal?: AbortSignal;
   /** Test hook: injectable red-check function for the tester step (SPEC 16.14). */
   redCheck?: RedCheckFn;
+  /** SPEC 16.18: injectable delay for api_error retry wait; forwarded to QueueContext. */
+  retryDelay?: (ms: number) => Promise<void>;
 }
 
 const TEMPLATE = join(import.meta.dirname, '..', 'templates', 'collie.toml');
@@ -273,6 +275,7 @@ async function runContinue(
     ...(deps.diskFreeMb === undefined ? {} : { diskFreeMb: deps.diskFreeMb }),
     ...(deps.testerSignal === undefined ? {} : { testerSignal: deps.testerSignal }),
     ...(deps.redCheck === undefined ? {} : { redCheck: deps.redCheck }),
+    ...(deps.retryDelay === undefined ? {} : { retryDelay: deps.retryDelay }),
   });
   const batchSummary =
     outcome.batches.map((b) => `${b.batch_id}:${b.verdict}`).join(', ') || 'none';

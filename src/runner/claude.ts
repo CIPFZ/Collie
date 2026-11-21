@@ -192,6 +192,8 @@ interface ResultMessage {
   total_cost_usd?: number;
   /** SPEC 13.1: number of turns from the SDK (v0.4). */
   num_turns?: number;
+  /** SPEC 16.18: terminal reason from the SDK result message. */
+  terminal_reason?: string;
 }
 
 function isResultMessage(message: unknown): message is ResultMessage {
@@ -254,7 +256,7 @@ function sumUsage(a: Usage | undefined, b: Usage | undefined): Usage | undefined
  * - Turns & token fields: sum across all messages.
  * - Cost: last message that carries a cost.
  * - Success: every message must be successful.
- * - stopReason: stopped > turns_exhausted > error > undefined (see SPEC).
+ * - stopReason: stopped > turns_exhausted > api_error > error > undefined (see SPEC 16.18).
  * - finalText: only when all succeed; texts joined by blank line.
  * - sessionId: last message's.
  */
@@ -267,10 +269,18 @@ function aggregateResults(
   // Every result must be a success for the aggregate to be a success.
   const allSucceeded = results.every((r) => r.subtype === 'success' && r.is_error !== true);
 
-  // stopReason priority: stopped (interrupted) > turns_exhausted > error.
+  // stopReason priority: stopped (interrupted) > turns_exhausted > api_error > error.
   const stopReason: RunResult['stopReason'] = (() => {
     if (interrupted) return 'stopped';
     if (results.some((r) => r.subtype === 'error_max_turns')) return 'turns_exhausted';
+    // SPEC 16.18: api_error from terminal_reason on a success+is_error result.
+    // A stopped (interrupted) session that also has api_error keeps 'stopped'.
+    if (
+      results.some(
+        (r) => r.subtype === 'success' && r.is_error === true && r.terminal_reason === 'api_error',
+      )
+    )
+      return 'api_error';
     if (!allSucceeded) return 'error';
     return undefined;
   })();
