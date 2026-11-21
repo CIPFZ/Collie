@@ -2320,4 +2320,25 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b32 · r-20261121125105 · PASS
+
+- 时间：2026-11-21T13:45:28.625Z
+- 裁定：规则 10，全部 9 条验收命令通过，受保护文件零改动，无新依赖，diff 范围在条目之内，条目要求与额外禁止逐条核对均满足，已有断言零修改。CI 以 R2 取证为准。
+- 提交：`d1f1646` `0885886`
+- 验收命令：9/9 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1506 passed, 0 failed
+  - `e=$(mktemp) && GIT_CONFIG_GLOBAL=$e GIT_CONFIG_NOSYSTEM=1 npm test -- test/batch-authorisation.test.ts` → exit 0，3 passed, 0 failed
+  - `npm test -- test/backlog.test.ts test/task-envelope.test.ts test/evidence.test.ts test/batch-authorisation.test.ts` → exit 0，278 passed, 0 failed
+  - `grep -qF "backlog: allowed protected paths" test/backlog.test.ts && grep -qF "batch authorisation: named protected paths do not count" test/batch-authorisation.test.ts` → exit 0，exit 0
+  - `grep -vE "^\s*(//|\*|/\*)" src/backlog.ts | grep -qF "可改的受保护路径" && grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qF "authorized_diff_lines"` → exit 0，exit 0
+  - `out=$(npx tsx scripts/mutation.ts 2>&1) && printf '%s\n' "$out" | tail -n 1 | grep -qE "^mutation: caught 46 survived 0 invalid 0 timeout 0 stale 0$" && ! test -e .vitest` → exit 0，exit 0
+  - `grep -qF "authorized_diff_lines" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/44907675133
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
