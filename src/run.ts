@@ -63,6 +63,14 @@ import type {
 } from './schema/index.js';
 import { RunIdSchema } from './schema/index.js';
 
+/** SPEC 16.23: maximum number of output lines kept in acceptance.failed output_tail. */
+// eslint-disable-next-line no-restricted-syntax -- SPEC 16.23: named constant
+export const OUTPUT_TAIL_MAX_LINES = 20;
+
+/** SPEC 16.23: maximum characters per line in acceptance.failed output_tail. */
+// eslint-disable-next-line no-restricted-syntax -- SPEC 16.23: named constant
+export const OUTPUT_TAIL_MAX_LINE_LENGTH = 300;
+
 /** SPEC 5 exit codes of `collie run`. */
 /* eslint-disable no-restricted-syntax, @typescript-eslint/no-magic-numbers -- SPEC 5 exit codes */
 export const EXIT_CODES: Readonly<Record<VerdictValue | 'ERROR' | 'PAUSED', number>> = {
@@ -499,6 +507,13 @@ export function renderFixSection(info: FixInfo): string {
     lines.push('');
     for (const fa of info.failedAcceptance) {
       lines.push(`- \`${fa.cmd}\` → exit ${String(fa.exit_code)}`);
+      // SPEC 16.23: render output_tail as a fenced code block when present.
+      if (fa.output_tail !== undefined && fa.output_tail !== '') {
+        lines.push('');
+        lines.push('```');
+        lines.push(fa.output_tail);
+        lines.push('```');
+      }
     }
     lines.push('');
   }
@@ -629,8 +644,8 @@ function classifyRun(events: readonly Event[]): 'pass' | 'fix' | 'interrupted' {
 export interface FixInfo {
   /** Verbatim gaps from the previous verdict. */
   gaps: readonly string[];
-  /** Acceptance commands that failed, with exit codes. */
-  failedAcceptance: readonly { cmd: string; exit_code: number }[];
+  /** Acceptance commands that failed, with exit codes and optional output tail (SPEC 16.23). */
+  failedAcceptance: readonly { cmd: string; exit_code: number; output_tail?: string }[];
   /** Code commits from the previous run's evidence (R2 commits excluded, SPEC 13.10). */
   commits: readonly string[];
   /** SPEC 13.10 (v04-b07): downgrade rule, reason, and optional cause/detail. */
@@ -825,6 +840,8 @@ export async function batchHistory(
         .map((e) => ({
           cmd: typeof e.cmd === 'string' ? e.cmd : '',
           exit_code: typeof e.exit_code === 'number' ? e.exit_code : -1,
+          // SPEC 16.23: extract output_tail from the journal event when present.
+          ...(typeof e.output_tail === 'string' ? { output_tail: e.output_tail } : {}),
         }));
 
       // SPEC 13.10 (v04-b07): collect downgrade info from journal.
@@ -2354,6 +2371,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         cmd: r.cmd,
         exit_code: r.exit_code,
         expect: expectOf(r.cmd, verifyCommands(config.verify.commands, batch)),
+        // SPEC 16.23: build output_tail from the command's stdout and stderr.
+        output_tail: buildOutputTail(r.stdout, r.stderr, redact),
       }));
     const decision = arbitrate({
       claims: report.claims,
@@ -2379,6 +2398,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         cmd: f.cmd,
         exit_code: f.exit_code,
         expect: toJson(f.expect),
+        // SPEC 16.23: include output_tail when the command produced output.
+        ...(f.output_tail !== undefined ? { output_tail: f.output_tail } : {}),
       });
     }
     // SPEC 13.9: detect evidence_unavailable when rule 9 fired due to environment failures.
@@ -2560,6 +2581,44 @@ export function truncate(text: string, max: number): string {
 /** Narrows an arbitrary claim or measurement to a JSON value for the journal. */
 function toJson(value: unknown): Event[string] {
   return JSON.parse(JSON.stringify(value ?? null)) as Event[string];
+}
+
+/**
+ * SPEC 16.23: builds output_tail from a command's stdout and stderr.
+ * - stdout first, stderr after, trailing blank lines stripped
+ * - last OUTPUT_TAIL_MAX_LINES lines kept
+ * - each line truncated to OUTPUT_TAIL_MAX_LINE_LENGTH characters
+ * - sensitive values in `redact` replaced with `***`
+ * Returns undefined when the combined output is empty.
+ */
+export function buildOutputTail(
+  stdout: string,
+  stderr: string,
+  redact: readonly string[],
+): string | undefined {
+  // Combine stdout (first) and stderr (after).
+  let combined = stdout + stderr;
+  // Redact sensitive values before splitting/truncating.
+  for (const secret of redact) {
+    if (secret === '') continue;
+    // Replace all occurrences of the secret with ***.
+    while (combined.includes(secret)) {
+      combined = combined.replace(secret, '***');
+    }
+  }
+  // Split into lines, strip trailing blank lines.
+  const allLines = combined.split('\n');
+  while (allLines.length > 0 && allLines[allLines.length - 1]?.trim() === '') {
+    allLines.pop();
+  }
+  if (allLines.length === 0) return undefined;
+  // Take last N lines.
+  const kept = allLines.slice(-OUTPUT_TAIL_MAX_LINES);
+  // Truncate each line to max characters.
+  const truncated = kept.map((line) =>
+    line.length > OUTPUT_TAIL_MAX_LINE_LENGTH ? line.slice(0, OUTPUT_TAIL_MAX_LINE_LENGTH) : line,
+  );
+  return truncated.join('\n');
 }
 
 /** Reads a batch envelope, or undefined when it does not exist. */
