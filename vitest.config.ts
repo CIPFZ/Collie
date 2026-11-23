@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
     environment: 'node',
-    testTimeout: 120_000,
-    hookTimeout: 120_000, // SPEC 15.3: high-load machines hit 30s; no assertion depends on this value
+    testTimeout: 300_000,
+    hookTimeout: 300_000, // SPEC 16.22: slow machines need ~160s for beforeEach hooks; no assertion depends on this value
   },
 });
