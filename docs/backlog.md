@@ -33,10 +33,12 @@
 > R1 签发自查（v046-b30 后，SPEC 14.36、16.22）：加粗情形里写到的操作步骤（如「把状态格改回 pending 再跑」），先核对这条路在 R2 里走不走得通；走不通的不写。
 > 有可测行为的批次按「情形」写，验收只留 lint、类型检查、全量测试与本批次的验收测试；变异检查已在全局命令里，验收表里不再单独写。
 > R1 签发自查（v046-b34 后，SPEC 14.37）：情形里每一个期望都单独想一遍在现有代码上成不成立：测试 agent 会把一条情形拆成几条用例，[新] 里混着现在就成立的期望，会被红检查判成「本该失败却通过」；现在就成立的归到 [保持]。
+> R1 签发自查（v046-b35、b36 后，SPEC 14.38）：一批是为了某个真实的命令或数据做的，情形里至少有一条用它的真实形状（b35 为变异检查做，情形里的脚本却都只往一个输出流打印）；
+> 条目里要 worker 一定做到的事写成「必须」，并在验收里放一条能判定的命令，不写「能……就……」。
 > 情形要用到现有类型上还没有的字段时，在「接口」里写明；「接口」里点出可以照着搭的现有测试文件。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；v046-b30、b31、b32 已通过（SPEC 14.36）；v046-b33、b34 已通过（SPEC 14.37）；队列从 v046-b35 起，固定版本 `d19d890`；本项目配置的全局命令里有变异检查，每次取证都跑
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；v046-b30、b31、b32 已通过（SPEC 14.36）；v046-b33、b34 已通过（SPEC 14.37）；v046-b35、b36 已通过（SPEC 14.38）；队列从 v046-b37 起，固定版本 `3f3a833`；本项目配置的全局命令里有变异检查，每次取证都跑
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -145,6 +147,8 @@
 | 98 | v046-b34 | 授权路径的两处补全：报错信息的说法、带 .. 的写法有测试守着（带情形） | v046-b32 | passed |
 | 99 | v046-b35 | 没过的验收命令留下输出的末尾：进运行日志与重跑的任务书（带情形） | v046-b34 | passed |
 | 100 | v046-b36 | worker 认为验收测试写错了：汇报里声明，R2 不拉审核、不计返工、上报停下（带情形） | v046-b34 | passed |
+| 101 | v046-b37 | 输出末尾按两个输出流各取，变异检查没过时看得到是哪一项（带情形） | v046-b35 | pending |
+| 102 | v046-b38 | 三处上报合成一个函数，推送由 9 处变成 7 处（只重构） | v046-b36, v046-b37 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -4265,3 +4269,92 @@ v046-b32 加了批次授权。操作员核对时查出两处（SPEC 14.36）：�
 - 为了让测试过而删除或跳过任何测试；改写条目 2 点名之外的任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b37 输出末尾按两个输出流各取，变异检查没过时看得到是哪一项（带情形）
+
+优先级：101　依赖：v046-b35
+
+v046-b35 让没过的验收命令把输出的最后 20 行留在 `acceptance.failed` 事件与重跑的 task 里。它是为变异检查做的，可真的变异检查没过时用不上：
+`scripts/mutation.ts` 把 46 项的进度写标准错误，把没被发现的各项与结论行写标准输出；现在的取法是「标准输出在前、标准错误在后、合起来取最后 20 行」，留下的全是进度（SPEC 14.38）。
+这一批把取法改成两个输出流各取末尾。按新流程走：下面的「情形」先由测试 agent 写成验收测试，放在 `test/acceptance/v046-b37/`；你只写实现，不能改那个目录。
+
+情形：
+- S1 [新] 沙箱的全局验收命令里多一条 `sh split.sh`，它向标准输出打印一行 `result: 1 survived`，再向标准错误依次打印 `progress 1` 到 `progress 30`，以 1 退出；假 worker 如实提交、假 reviewer 判 PASS，跑一次：`cmd` 为 `sh split.sh` 的 `acceptance.failed` 事件的 `output_tail` 按行拆开，第一行是 `result: 1 survived`，第二行是 `--- stderr ---`
+- S2 [新] 同样的沙箱，`split.sh` 改成向标准输出依次打印 `o1` 到 `o25`、向标准错误依次打印 `e1` 到 `e25`，以 1 退出：`output_tail` 恰好 41 行，第一行是 `o6`，第 21 行是 `--- stderr ---`，第 22 行是 `e6`
+- S3 [新] 同样的沙箱，`split.sh` 只向标准错误依次打印 `e1`、`e2`、`e3`，以 1 退出：`output_tail` 恰好 4 行，第一行是 `--- stderr ---`，第二行是 `e1`
+- S4 [新] `renderFixSection` 拿到的 `failedAcceptance` 里那一项的 `output_tail` 是三行：`before`、恰好三个反引号的一行、`after`：返回的文字里，这条命令下面的代码块以恰好四个反引号的一行开头、以恰好四个反引号的一行结尾，这两行之间依次是 `before`、三个反引号、`after`
+- K1 [保持] 同样的沙箱，`split.sh` 只向标准输出依次打印 `out 1` 到 `out 30`，以 1 退出：`output_tail` 恰好 20 行，第一行是 `out 11`，最后一行是 `out 30`，其中没有 `--- stderr ---` 这一行
+- K2 [保持] S1 那一次运行：`output_tail` 里有单独成行的 `progress 30`，没有单独成行的 `progress 10`；这条 `acceptance.failed` 事件的 `cmd`、`exit_code`、`expect` 三个字段都在
+- K3 [保持] 同样的沙箱，测试里把环境变量 `GITHUB_TOKEN` 设成 `tok-secret-12345`（用完还原），`split.sh` 向标准错误打印一行 `token=tok-secret-12345` 后以 1 退出：`output_tail` 里有 `token=***`，没有 `tok-secret-12345`
+- K4 [保持] `renderFixSection` 拿到的那一项的 `output_tail` 是两行 `line A`、`line B`：代码块以恰好三个反引号的一行开头、以恰好三个反引号的一行结尾，这两行之间依次是 `line A`、`line B`
+- K5 [保持] 同样的沙箱，`split.sh` 什么都不打印、以 1 退出：`cmd` 为 `sh split.sh` 的 `acceptance.failed` 事件没有 `output_tail` 这个键
+
+接口：
+- `src/run.ts` 已有的导出，签名都不变：`renderFixSection(info: FixInfo): string`、类型 `FixInfo`（`failedAcceptance` 每一项是 `{ cmd, exit_code, output_tail? }`）
+- `acceptance.failed` 事件的 `output_tail` 是一个多行字符串，用换行分隔；读事件用 `Sandbox` 的 `events()`
+- 沙箱怎么搭、怎样往全局验收命令里加一条、假 worker 与假 reviewer 怎么写，照上一批的验收测试 `test/acceptance/v046-b35/new.test.ts` 与 `keep.test.ts`（那里的脚本叫 `noisy.sh`）；脚本里往标准错误打印用 `>&2`
+
+条目：
+1. 读 SPEC 16.25 的「`output_tail` 的取法」一段与 14.38「判 PASS 之后查出来的」第 1、3 条。`src/run.ts` 的 `buildOutputTail`：标准输出与标准错误分开取（各去掉末尾空行、各取最后 `OUTPUT_TAIL_MAX_LINES` 行、每行照旧截断、各自脱敏），
+   标准错误有内容时在两段之间加一行 `--- stderr ---`；两边都没有内容时照旧返回 `undefined`。
+   `renderFixSection`：围栏用的反引号个数，比内容里行首最长的一串反引号多一个，最少三个。
+2. 不许变的：只往标准输出打印的命令，`output_tail` 与现在逐字节相同；`acceptance.failed` 的其余字段；`docs/progress.md` 的摘要；`why` 与 `report` 的输出。
+   `test/acceptance/v046-b35/` 下的测试（上一批的验收测试，现在是回归测试）必须照常通过，你不能改它们。R1 查过：它们的脚本都只往标准输出打印，新取法不影响它们。已有断言一条都不改。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/run.ts`。`test/acceptance/` 下的文件你不能改：你认为某条验收测试写错了，停下，照 `AGENT-worker.md` 第 5 节在汇报里写明并列进 `disputed_tests`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过（含验收测试） | `npm test` | exit 0 |
+| 本批次与上一批的验收测试通过 | `npm test -- test/acceptance/v046-b37 test/acceptance/v046-b35` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `test/acceptance/`、`AGENT-*.md`、`.collie/collie.toml`、`.github/`、`eslint.config.js`、`vitest.config.ts`）
+- 改动 `src/run.ts` 之外的 `src/` 文件；改动 `scripts/mutation.ts`（不靠改变异脚本的输出来解决）；改任何一条规则的判定
+- 把整段输出不截断、不脱敏地写进 journal 或 task
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b38 三处上报合成一个函数，推送由 9 处变成 7 处（只重构）
+
+优先级：102　依赖：v046-b36, v046-b37
+
+`src/run.ts` 里有三条上报路径：没有有效汇报（`escalate`）、验收测试没有准备好（`testerEscalate`）、worker 认为验收测试有错（v046-b36 加的那一段）。三处各有一份几乎相同的代码：
+取提交清单与推送状态、写 progress、`--continue` 下改状态格、提交、推送。v046-b36 的条目要求合并，没有做到（SPEC 14.38）。这一批把它们合成一个函数。只重构，三条路径的行为一个字都不变；不带情形。
+
+条目：
+1. 读 SPEC 16.25 的「三处上报合成一个」一段。`src/run.ts`：三条上报路径**必须**共用同一个函数来做「取提交清单与推送状态、写 progress、改状态格、提交、推送、返回 BLOCK」。
+   三处不同的地方作为参数传进去：`escalated` 事件的 `reason` 与附加字段（如 `disputed`）、progress 说明文字的前缀（「上报：无 report — 」「上报：验收测试没有准备好 — 」「上报：worker 认为验收测试有错 — 」）、
+   随裁定提交一起提交的附加文件（如 `tester.md`）、取提交清单用的基准（「没有有效汇报」那条路径上可以没有）。
+   各条路径记的事件、事件的字段与先后、progress 里的文字、提交里的文件、退出码，都与现在相同。
+2. `test/invariants.test.ts` 的 `every await push( in run.ts has push_failed or verdict within 5 lines above (v03-b01-fix)`：上限 9 改成 7，上面那句注释里的清单相应改（点名允许的改写，是改严；在「偏离或疑问」里列出）。
+   合并之后 `src/run.ts` 的非注释行里 `await push(` 必须恰好 7 处。
+3. 不加新测试，不改别的测试。三条路径现在各有测试守着：`test/exit-codes.test.ts`、`test/scenario-e.test.ts`、`test/tester-step.test.ts`、`test/blocked-cleanup.test.ts`、`test/acceptance/v046-b36/`。它们都必须照常通过。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/run.ts`、`test/invariants.test.ts`（仅条目 2 点名的那一处）。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 三条上报路径的测试通过 | `npm test -- test/exit-codes.test.ts test/scenario-e.test.ts test/tester-step.test.ts test/blocked-cleanup.test.ts test/acceptance/v046-b36` | exit 0 |
+| 推送恰好 7 处（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -cF "await push(" \| grep -qx 7` | exit 0 |
+| 不变量的上限同步成 7 | `grep -qF "toBeLessThanOrEqual(7)" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `test/acceptance/`）；改动 `.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
+- 改动 `src/run.ts` 之外的 `src/` 文件；改变任何一条上报路径的事件、字段、文字、提交的文件或退出码；改任何一条规则的判定、队列的重跑与收尾
+- 顺手做别的重构或改名
+- 为了让测试过而删除或跳过任何测试；改写条目 2 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 新增依赖

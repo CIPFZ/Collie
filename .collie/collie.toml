@@ -27,7 +27,7 @@ bash_deny = ["^\\s*git\\s+(push|commit|add|reset|checkout|rebase|merge|cherry-pi
 # SPEC 16.10、16.18（R1 2026-11-20 启用）：测试 agent；有写工具，git 写操作被拦（和 reviewer 同一套 bash_deny）
 model = "claude-opus-4-6"
 allowed_tools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
-max_turns = 100
+max_turns = 150                         # R1 2026-11-23：100 → 150（v046-b36 的测试 agent 用了 92 轮，SPEC 14.38）；模板里的缺省值仍是 100
 permission_mode = "bypassPermissions"
 bash_deny = ["^\\s*git\\s+(push|commit|add|reset|checkout|rebase|merge|cherry-pick|tag|branch\\s+-[dDm]|worktree|stash)(?=\\s|$)", "^\\s*gh\\s"]   # SPEC 16.10；与 reviewer 相同
 
