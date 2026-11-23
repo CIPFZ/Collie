@@ -2439,4 +2439,23 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b38 · r-20261123144144 · PASS
+
+- 时间：2026-11-23T15:07:36.842Z
+- 裁定：规则 10，CI 以 R2 取证为准。全部验收命令通过，重构正确保持了三条 escalation 路径的行为不变。不变量上限 9→7 是条目 2 明确要求的改严。
+- 提交：`57866f6`
+- 验收命令：7/7 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1556 passed, 0 failed
+  - `npm run test:mutation` → exit 0，mutation: caught 46 survived 0 invalid 0 timeout 0 stale 0
+  - `npm test -- test/exit-codes.test.ts test/scenario-e.test.ts test/tester-step.test.ts test/blocked-cleanup.test.ts test/acceptance/v046-b36` → exit 0，77 passed, 0 failed
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -cF "await push(" | grep -qx 7` → exit 0，exit 0
+  - `grep -qF "toBeLessThanOrEqual(7)" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/45199295505
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
