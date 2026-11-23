@@ -389,6 +389,13 @@ export const ClaimsSchema = z.strictObject({
 });
 export type Claims = z.infer<typeof ClaimsSchema>;
 
+/** SPEC 16.23: each item in disputed_tests (strict: no extra keys). */
+export const DisputedTestItemSchema = z.strictObject({
+  test: NonEmptyString,
+  why: NonEmptyString,
+});
+export type DisputedTestItem = z.infer<typeof DisputedTestItemSchema>;
+
 /** Trailing JSON block of report.md (SPEC 3.4). Written by R3, read by R2, never by R4. */
 export const ReportSchema = z.strictObject({
   schema_version: z.literal(SCHEMA_VERSION),
@@ -397,6 +404,8 @@ export const ReportSchema = z.strictObject({
   head_sha: ShaSchema,
   claims: ClaimsSchema,
   open_questions: z.array(z.string()),
+  /** SPEC 16.23: worker disputes acceptance tests; optional, absent or empty = no dispute. */
+  disputed_tests: z.array(DisputedTestItemSchema).optional(),
 });
 export type Report = z.infer<typeof ReportSchema>;
 

@@ -1978,6 +1978,90 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     } catch (error) {
       return await escalate(`no valid report: ${message(error)}`, baseSha);
     }
+
+    // SPEC 16.23 (v046-b36): worker disputes acceptance tests → escalate without
+    // reviewer, without evidence collection, without counting toward fix_max.
+    const disputed = report.disputed_tests ?? [];
+    if (disputed.length > 0) {
+      const bareReason = `acceptance_disputed: ${disputed.map((d) => d.test).join('；')}`;
+      rec.record('escalated', { reason: bareReason, disputed });
+      const escalationDesc = `上报：worker 认为验收测试有错 — ${bareReason}`;
+      const decision = escalationDecision(escalationDesc);
+
+      let evidence = emptyEvidence();
+      try {
+        const commits = await log(root, baseSha, 'HEAD');
+        let remoteHasHead = false;
+        try {
+          remoteHasHead = await remoteContains(
+            root,
+            ctx.remote,
+            config.ci.expected_branch,
+            await revParse(root, 'HEAD'),
+          );
+        } catch {
+          // Best effort
+        }
+        evidence = {
+          ...evidence,
+          commits_actual: commits.map((c) => c.sha),
+          remote_has_head: remoteHasHead,
+        };
+      } catch {
+        // Best effort
+      }
+
+      const progressPath = writeProgress(root, {
+        batchId,
+        runId,
+        at: ctx.now().toISOString(),
+        decision,
+        evidence,
+        workerExitCode,
+        workerStopReason,
+      });
+      const disputeEnvelopes = [relative(root, progressPath)];
+      if (ctx.updateBacklogStatus === true) {
+        const backlogFile = join(root, BACKLOG_RELATIVE_PATH);
+        try {
+          const backlogText = readFileSync(backlogFile, 'utf8');
+          const result = setBatchStatus(backlogText, batchId, 'blocked');
+          if (result.changed) {
+            writeFileSync(backlogFile, result.text);
+            disputeEnvelopes.push(BACKLOG_RELATIVE_PATH);
+            rec.record('batch.status', {
+              batch_id: batchId,
+              from: result.from ?? '',
+              to: 'blocked',
+            });
+          } else {
+            rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
+          }
+        } catch {
+          rec.record('batch.status', { batch_id: batchId, to: 'unchanged' });
+        }
+      }
+      await r2Commit(root, `progress: ${batchId} ${decision.final}`, disputeEnvelopes, rec);
+
+      // SPEC 12.1: push the verdict commit to remote (disputed escalation path).
+      try {
+        await push(root, ctx.remote, config.ci.expected_branch);
+        const pushSha = await revParse(root, 'HEAD');
+        rec.record('verdict.pushed', {
+          sha: pushSha,
+          remote: ctx.remote,
+          branch: config.ci.expected_branch,
+        });
+      } catch (pushError) {
+        rec.record('verdict.push_failed', {
+          sha: await revParse(root, 'HEAD').catch(() => 'unknown'),
+          error: message(pushError),
+        });
+      }
+
+      return finish('BLOCK', { escalation: bareReason, decision });
+    }
+
     // SPEC 13.17 / 13.21: sha validation in three steps.
     // eslint-disable-next-line no-restricted-syntax -- SPEC 13.17: reason truncation bound
     const SHA_REASON_MAX = 300;

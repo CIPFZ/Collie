@@ -178,9 +178,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     const pushLines = lines
       .map((line, i) => ({ line, i }))
       .filter(({ line }) => line.includes('await push('));
-    // SPEC 12.1: expect exactly 8 push calls after v046-b29 (3 from v03-b01-fix + 1 for fix_max + 1 for unresolvable sha FIX + 1 for tester escalation + 1 for batch cleanup + 1 for rule9_same_head).
+    // SPEC 12.1: expect exactly 9 push calls after v046-b36 (3 from v03-b01-fix + 1 for fix_max + 1 for unresolvable sha FIX + 1 for tester escalation + 1 for batch cleanup + 1 for rule9_same_head + 1 for disputed acceptance).
     expect(pushLines.length).toBeGreaterThanOrEqual(1);
-    expect(pushLines.length).toBeLessThanOrEqual(8);
+    expect(pushLines.length).toBeLessThanOrEqual(9);
     for (const { line, i } of pushLines) {
       const start = Math.max(0, i - 5);
       const context = lines.slice(start, i).join('\n');
