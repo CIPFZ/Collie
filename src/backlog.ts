@@ -415,7 +415,7 @@ function validateAllowedProtected(
         source,
         labelLine,
         batchId,
-        `「可改的受保护路径」 contains "${item}" which is not an allowable protected path (only .github, .github/*, eslint.config.js, vitest.config.ts)`,
+        `「可改的受保护路径」 contains "${item}" which is not an allowable protected path (only .github, paths under .github/, eslint.config.js, vitest.config.ts)`,
       );
     }
   }

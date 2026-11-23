@@ -100,7 +100,7 @@ export interface EvidenceInput {
    */
   r2Shas?: ReadonlySet<string>;
   /**
-   * SPEC 16.21 (v046-b32): paths authorised by the batch's 「可改的受保護路径」
+   * SPEC 16.21 (v046-b32): paths authorised by the batch's 「可改的受保护路径」
    * section. Changes to these paths are excluded from spec_diff_lines and
    * counted separately as authorized_diff_lines.
    */
