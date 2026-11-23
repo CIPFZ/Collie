@@ -2409,4 +2409,16 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b37 · r-20261123115255 · BLOCK
+
+- 时间：2026-11-23T12:20:45.720Z
+- 裁定：上报：worker 认为验收测试有错 — acceptance_disputed: test/acceptance/v046-b37/new.test.ts: S4: output_tail with triple backticks renders with 4-backtick fences
+- 提交：`b86382a` `3bcbb9c` `23a87db`
+- 验收命令：0/0 通过
+- 已推送：是
+- CI：unknown，监听分支未能取证
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
