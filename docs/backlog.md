@@ -32,9 +32,11 @@
 > v046-b32 之后：「可改的受保护路径」加冒号独占一行就是小节标签，说明文字里提到它时不要让它独占一行。
 > R1 签发自查（v046-b30 后，SPEC 14.36、16.22）：加粗情形里写到的操作步骤（如「把状态格改回 pending 再跑」），先核对这条路在 R2 里走不走得通；走不通的不写。
 > 有可测行为的批次按「情形」写，验收只留 lint、类型检查、全量测试与本批次的验收测试；变异检查已在全局命令里，验收表里不再单独写。
+> R1 签发自查（v046-b34 后，SPEC 14.37）：情形里每一个期望都单独想一遍在现有代码上成不成立：测试 agent 会把一条情形拆成几条用例，[新] 里混着现在就成立的期望，会被红检查判成「本该失败却通过」；现在就成立的归到 [保持]。
+> 情形要用到现有类型上还没有的字段时，在「接口」里写明；「接口」里点出可以照着搭的现有测试文件。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；v046-b30、b31、b32 已通过（SPEC 14.36）；队列从 v046-b33 起，固定版本 `a1e35e5`；本项目配置的全局命令里有变异检查，每次取证都跑
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；v046-b30、b31、b32 已通过（SPEC 14.36）；v046-b33、b34 已通过（SPEC 14.37）；队列从 v046-b35 起，固定版本 `d19d890`；本项目配置的全局命令里有变异检查，每次取证都跑
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -141,6 +143,8 @@
 | 96 | v046-b32 | 批次授权：条目点名的受保护路径由 worker 改，不计入受保护文件改动行数（D9） | v046-b31 | passed |
 | 97 | v046-b33 | 测试时限提到 300 秒（第一个用批次授权的批次） | v046-b32 | passed |
 | 98 | v046-b34 | 授权路径的两处补全：报错信息的说法、带 .. 的写法有测试守着（带情形） | v046-b32 | passed |
+| 99 | v046-b35 | 没过的验收命令留下输出的末尾：进运行日志与重跑的任务书（带情形） | v046-b34 | pending |
+| 100 | v046-b36 | worker 认为验收测试写错了：汇报里声明，R2 不拉审核、不计返工、上报停下（带情形） | v046-b34 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -4162,3 +4166,102 @@ v046-b32 加了批次授权。操作员核对时查出两处（SPEC 14.36）：�
 - 为了让测试过而删除或跳过任何测试；改写任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；新增依赖
+
+## v046-b35 没过的验收命令留下输出的末尾：进运行日志与重跑的任务书（带情形）
+
+优先级：99　依赖：v046-b34
+
+变异检查现在每次取证都跑。它没过时，R2 只在 `docs/progress.md` 里留输出的最后一行，`acceptance.failed` 事件与重跑的 task 里只有命令和退出码：哪一项没被发现，worker 要自己重跑才知道（SPEC 14.37）。
+这一批让没过的验收命令把输出的末尾留下来。按新流程走：下面的「情形」先由测试 agent 写成验收测试，放在 `test/acceptance/v046-b35/`；你只写实现，不能改那个目录。
+
+情形：
+- S1 [新] `renderFixSection` 拿到的 `failedAcceptance` 里有一项是 `cmd` 为 `sh noisy.sh`、`exit_code` 为 1、`output_tail` 为两行文字 `line A` 与 `line B`：返回的文字里，`sh noisy.sh` 那一行之后有一个围栏代码块，块里依次是 `line A`、`line B` 两行
+- S2 [新] 沙箱的全局验收命令里多一条 `sh noisy.sh`，它依次打印 `out 1` 到 `out 30` 共 30 行后以 1 退出；假 worker 如实提交、假 reviewer 判 PASS，跑一次：journal 里 `cmd` 为 `sh noisy.sh` 的 `acceptance.failed` 事件带 `output_tail`，按行拆开恰好 20 行，第一行是 `out 11`，最后一行是 `out 30`
+- S3 [新] 同样的沙箱，`noisy.sh` 改成先打印一行 500 个 `x` 再以 1 退出：`output_tail` 里那一行恰好是 300 个 `x`
+- S4 [新] 同样的沙箱，测试里把环境变量 `GITHUB_TOKEN` 设成 `tok-secret-12345`（用完还原），`noisy.sh` 打印一行 `token=tok-secret-12345` 后以 1 退出：`output_tail` 恰好是一行 `token=***`
+- S5 [新] 接着 S2 那一次（结论是 FIX）再跑一次，第 2 次的假 worker 把它拿到的 `task.md` 读出来：`task.md` 里有单独成行的 `out 11`，也有单独成行的 `out 30`
+- K1 [保持] `renderFixSection` 拿到的 `failedAcceptance` 里那一项不带 `output_tail`：返回的文字里有一行 ``- `sh noisy.sh` → exit 1``，并且「未通过的验收命令」那一节里没有围栏代码块
+- K2 [保持] S2 那一次运行里，`acceptance.failed` 事件的 `cmd`、`exit_code`、`expect` 三个字段照旧都在；结论是 FIX、规则 8，退出码 10
+- K3 [保持] 全局验收命令都通过的一次运行：journal 里没有 `acceptance.failed` 事件
+
+接口：
+- `src/run.ts` 已有的导出：`renderFixSection(info: FixInfo): string` 与类型 `FixInfo`。`FixInfo.failedAcceptance` 每一项现在是 `{ cmd, exit_code }`，本批次起多一个可选的 `output_tail?: string`（多行文字，用换行分隔）；实现之前类型上还没有它
+- `acceptance.failed` 事件本批次起多一个字段 `output_tail`（字符串）；读事件用 `Sandbox` 的 `events()`
+- 沙箱、假 worker、假 reviewer 怎么搭，照 `test/scenario-d.test.ts`（它就是「worker 如实、验收命令没过、reviewer 判 PASS」）与 `test/support/sandbox.ts` 导出的 `Sandbox`、`workerScene`、`fooledReviewerScene`、`honestClaims`、`TEST_CMD`；
+  往全局验收命令里加一条的办法：改写沙箱里 `.collie/collie.toml` 的 `commands` 一行并提交，`noisy.sh` 写在沙箱仓库根并提交；第 2 次运行里读 `task.md` 的假 worker 自己写一个场景
+
+条目：
+1. 读 SPEC 16.23 的「没过的验收命令留下输出的末尾」一段。`src/run.ts`：记 `acceptance.failed` 的地方带上 `output_tail`；从上一次运行的 journal 重建 `failedAcceptance` 的地方把它取出来；`renderFixSection` 把它渲染成那条命令下面的围栏代码块。
+   取多少行、每行截到多少字符写成具名常量（20、300）；脱敏用这次运行已有的那份清单，替换成 `***`；命令没有输出时不带这个字段。
+2. 不许变的：`acceptance.failed` 原有的三个字段；`docs/progress.md` 里每条命令的摘要；`why` 与 `report` 的输出；命令通过时不记事件；事件类型的个数。
+   R1 查过：`test/scenario-d.test.ts` 对 `acceptance.failed` 的断言用的是 `objectContaining`，多一个字段不影响；`test/scenario-n.test.ts`、`test/why.test.ts` 里涉及这个事件的用例不受影响。已有断言一条都不改。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/run.ts`（确有需要时加 `src/verify.ts`，在「偏离或疑问」里写明为什么）。`test/acceptance/` 下的文件你不能改：你认为某条验收测试写错了，停下，在「偏离或疑问」里写明是哪一条、错在哪。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过（含验收测试） | `npm test` | exit 0 |
+| 本批次的验收测试通过 | `npm test -- test/acceptance/v046-b35` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `test/acceptance/`、`AGENT-*.md`、`.collie/collie.toml`、`.github/`、`eslint.config.js`、`vitest.config.ts`）
+- 改动 `src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/view.ts`、`src/progress.ts`、`src/schema/index.ts`、`src/roles/`、`src/runner/`；改任何一条规则的判定
+- 把整段输出不截断、不脱敏地写进 journal 或 task
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b36 worker 认为验收测试写错了：汇报里声明，R2 不拉审核、不计返工、上报停下（带情形）
+
+优先级：100　依赖：v046-b34
+
+分工改造第 4 步（SPEC 第 16 章）：验收测试是测试 agent 写的，worker 改不了。worker 认为某条验收测试和情形对不上时，现在只能在汇报里写一句，批次照常被判验收没过、返工到上限才停。
+这一批给它一条正路：在汇报的 JSON 里声明，R2 就不拉审核、不计返工，直接上报停下，等 R1 裁定。按新流程走：下面的「情形」先由测试 agent 写成验收测试，放在 `test/acceptance/v046-b36/`；你只写实现，不能改那个目录。
+
+情形：
+- S1 [新] `ReportSchema` 解析一份别的字段都合法、另带 `disputed_tests` 的汇报，`disputed_tests` 是只有一项的数组，那一项的 `test` 为 `test/acceptance/v99-b01/new.test.ts: S1: x`、`why` 为 `情形要的是 A，测试断言的是 B`：解析成功，结果里这一项原样在
+- S2 [新] 单批次运行（`run <批次>`），假 worker 照常提交代码与汇报，汇报的 JSON 里 `disputed_tests` 有 S1 的那一项，脚本里只给了 worker 一个场景：journal 里 `escalated` 事件的 `reason` 以 `acceptance_disputed: ` 开头并含 `S1: x`，它的 `disputed` 等于汇报里那个数组；`docs/progress.md` 里有「worker 认为验收测试有错」
+- S3 [新] 汇报的 JSON 里 `disputed_tests` 是空数组，假 worker 如实、验收全过、假 reviewer 判 PASS：运行器被调用的先后是 worker、reviewer，退出码 0
+- K1 [保持] 汇报的 JSON 里没有 `disputed_tests` 这个键，其余同 S3：运行器被调用的先后是 worker、reviewer，退出码 0，journal 里没有 `escalated`
+- K2 [保持] `ReportSchema` 解析带 `disputed_tests` 的汇报，其中那一项的 `test` 是空串，或 `why` 是空串，或多出一个 `note` 键：三种都解析失败
+- K3 [保持] S2 那一次运行：退出码 20；运行器只被调用 1 次、角色是 worker；journal 里没有 `reviewer.started`，也没有 `evidence.collected`（现在这样的汇报会被当成格式不对而上报，这几样已经如此；实现之后上报的原因变了，这几样不变）
+- K4 [保持] 队列运行（`run --continue`），同 S2 的假 worker：退出码 20；`docs/backlog.md` 里这个批次的状态是 `blocked`；队列 journal 里这个批次的 `queue.batch_started` 只有 1 条；`queue.finished` 的 `reason` 是 `blocked`
+
+接口：
+- `src/schema/index.ts` 已有的导出 `ReportSchema`（zod 的严格对象，用 `safeParse`）；本批次起多一个可选字段 `disputed_tests`，实现之前带这个键的汇报会被拒绝
+- 汇报是 `.collie/batches/<批次>/report.md` 末尾的围栏 JSON 块；一份合法的汇报怎么写、假 worker 怎么提交它，照 `test/support/sandbox.ts` 的 `workerScene`。它不支持多出来的键：要带 `disputed_tests` 时在测试文件里自己写一个假 worker 的场景，JSON 用不带类型标注的对象拼
+- 沙箱与两种运行方式照 `test/support/sandbox.ts` 导出的 `Sandbox`（`run(runner)` 是单批次，`cli(['run', '--continue'], runner)` 是队列）、`fooledReviewerScene`、`honestClaims`、`BATCH`；运行器被调用了几次、各是什么角色，读 `FakeRunner` 的 `calls`
+- `escalated` 事件本批次起在这条路上多带 `disputed`（数组）；读事件用 `Sandbox` 的 `events()`，队列 journal 的读法照 `test/queue-limit.test.ts`
+
+条目：
+1. 读 SPEC 16.23 的「worker 认为验收测试写错了」一段。`src/schema/index.ts`：`ReportSchema` 加可选的 `disputed_tests`（数组，每项是只有 `test`、`why` 两个非空字符串的严格对象）。
+2. `src/run.ts`：读到有效的汇报而 `disputed_tests` 非空时，照那一段上报（不拉 reviewer、不取证；`escalated` 的 `reason` 与 `disputed`；progress 的说明文字「上报：worker 认为验收测试有错 — …」；`--continue` 下记 `blocked`；裁定提交经 `r2Commit` 并按 12.1 推送；BLOCK、退出码 20）。
+   做法照现有的 `escalate` 与 `testerEscalate`；能合成一个带说明文字参数的函数就合，不要再抄一份。队列的循环不用改：它走现有 BLOCK 那一支，停下之前照常收尾。
+   `test/invariants.test.ts` 的 `every await push( in run.ts has push_failed or verdict within 5 lines above (v03-b01-fix)`：你新加了一处推送时上限 8 改成 9（点名允许的改写）；复用现有函数、没有新加推送就不改。在「偏离或疑问」里写明是哪一种。
+3. 不许变的：没有这个字段或它是空数组时的全部行为；`escalated` 在别的上报路径上的字段；事件类型的个数（复用 `escalated`，不加新类型）。`test/support/` 不许改。
+   R1 查过：`test/envelope.test.ts`、`test/worker.test.ts` 与 `test/support/sandbox.ts` 里的汇报都不带这个字段，加一个可选字段不影响它们。已有断言除上面点名的那一处外都不改。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/schema/index.ts`、`src/run.ts`、`test/invariants.test.ts`（仅条目 2 点名的那一处）。`test/acceptance/` 下的文件你不能改：你认为某条验收测试写错了，停下，在「偏离或疑问」里写明是哪一条、错在哪（这一批还没生效，你不要在自己的汇报里用 `disputed_tests`）。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过（含验收测试） | `npm test` | exit 0 |
+| 本批次的验收测试通过 | `npm test -- test/acceptance/v046-b36` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `test/acceptance/`、`AGENT-*.md`、`.collie/collie.toml`、`.github/`、`eslint.config.js`、`vitest.config.ts`）
+- 改动 `src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/acceptance.ts`、`src/roles/`、`src/runner/`、`src/view.ts`、`test/support/`；改任何一条规则的判定、`fix_max` 的计数、队列自动重跑的条件、收尾
+- 在这条路上拉起 reviewer 或自动重跑；让 worker 的声明改动、删除或跳过任何验收测试
+- 为了让测试过而删除或跳过任何测试；改写条目 2 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
