@@ -507,12 +507,23 @@ export function renderFixSection(info: FixInfo): string {
     lines.push('');
     for (const fa of info.failedAcceptance) {
       lines.push(`- \`${fa.cmd}\` → exit ${String(fa.exit_code)}`);
-      // SPEC 16.23: render output_tail as a fenced code block when present.
+      // SPEC 16.25: render output_tail as a fenced code block when present.
+      // Fence length = max(3, longest leading backtick run in content + 1).
       if (fa.output_tail !== undefined && fa.output_tail !== '') {
+        // eslint-disable-next-line no-restricted-syntax -- SPEC 16.25: minimum fence width
+        let fenceLen = 3;
+        for (const contentLine of fa.output_tail.split('\n')) {
+          const m = /^(`+)/.exec(contentLine);
+          const backticks = m?.[1];
+          if (backticks !== undefined && backticks.length >= fenceLen) {
+            fenceLen = backticks.length + 1;
+          }
+        }
+        const fence = '`'.repeat(fenceLen);
         lines.push('');
-        lines.push('```');
+        lines.push(fence);
         lines.push(fa.output_tail);
-        lines.push('```');
+        lines.push(fence);
       }
     }
     lines.push('');
@@ -2668,11 +2679,12 @@ function toJson(value: unknown): Event[string] {
 }
 
 /**
- * SPEC 16.23: builds output_tail from a command's stdout and stderr.
- * - stdout first, stderr after, trailing blank lines stripped
- * - last OUTPUT_TAIL_MAX_LINES lines kept
- * - each line truncated to OUTPUT_TAIL_MAX_LINE_LENGTH characters
- * - sensitive values in `redact` replaced with `***`
+ * SPEC 16.25: builds output_tail from a command's stdout and stderr.
+ * Each stream is processed independently: strip trailing blank lines,
+ * take last OUTPUT_TAIL_MAX_LINES lines, truncate each line to
+ * OUTPUT_TAIL_MAX_LINE_LENGTH chars, redact secrets.
+ * When stderr has content, a `--- stderr ---` separator is inserted
+ * between the two streams. When both are empty, returns undefined.
  * Returns undefined when the combined output is empty.
  */
 export function buildOutputTail(
@@ -2680,29 +2692,40 @@ export function buildOutputTail(
   stderr: string,
   redact: readonly string[],
 ): string | undefined {
-  // Combine stdout (first) and stderr (after).
-  let combined = stdout + stderr;
-  // Redact sensitive values before splitting/truncating.
-  for (const secret of redact) {
-    if (secret === '') continue;
-    // Replace all occurrences of the secret with ***.
-    while (combined.includes(secret)) {
-      combined = combined.replace(secret, '***');
+  /** Redact, strip trailing blanks, take last N lines, truncate each line. */
+  function processStream(raw: string): string[] {
+    let text = raw;
+    for (const secret of redact) {
+      if (secret === '') continue;
+      while (text.includes(secret)) {
+        text = text.replace(secret, '***');
+      }
     }
+    const lines = text.split('\n');
+    // Strip trailing blank lines.
+    while (lines.length > 0 && lines[lines.length - 1]?.trim() === '') {
+      lines.pop();
+    }
+    if (lines.length === 0) return [];
+    // Take last N lines.
+    const kept = lines.slice(-OUTPUT_TAIL_MAX_LINES);
+    // Truncate each line to max characters.
+    return kept.map((line) =>
+      line.length > OUTPUT_TAIL_MAX_LINE_LENGTH ? line.slice(0, OUTPUT_TAIL_MAX_LINE_LENGTH) : line,
+    );
   }
-  // Split into lines, strip trailing blank lines.
-  const allLines = combined.split('\n');
-  while (allLines.length > 0 && allLines[allLines.length - 1]?.trim() === '') {
-    allLines.pop();
+
+  const outLines = processStream(stdout);
+  const errLines = processStream(stderr);
+
+  if (outLines.length === 0 && errLines.length === 0) return undefined;
+
+  const parts: string[] = [...outLines];
+  if (errLines.length > 0) {
+    parts.push('--- stderr ---');
+    parts.push(...errLines);
   }
-  if (allLines.length === 0) return undefined;
-  // Take last N lines.
-  const kept = allLines.slice(-OUTPUT_TAIL_MAX_LINES);
-  // Truncate each line to max characters.
-  const truncated = kept.map((line) =>
-    line.length > OUTPUT_TAIL_MAX_LINE_LENGTH ? line.slice(0, OUTPUT_TAIL_MAX_LINE_LENGTH) : line,
-  );
-  return truncated.join('\n');
+  return parts.join('\n');
 }
 
 /** Reads a batch envelope, or undefined when it does not exist. */
