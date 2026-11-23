@@ -139,7 +139,7 @@
 | 94 | v046-b30 | 小修：rule9_same_head 只看这一次的 head_sha；api_error 续跑总带 waited_secs | v046-b29 | passed |
 | 95 | v046-b31 | CI、lint、测试配置列为受保护路径，变异清单加三项（第 16 章第 2 步） | v046-b29 | passed |
 | 96 | v046-b32 | 批次授权：条目点名的受保护路径由 worker 改，不计入受保护文件改动行数（D9） | v046-b31 | passed |
-| 97 | v046-b33 | 测试时限提到 300 秒（第一个用批次授权的批次） | v046-b32 | pending |
+| 97 | v046-b33 | 测试时限提到 300 秒（第一个用批次授权的批次） | v046-b32 | passed |
 | 98 | v046-b34 | 授权路径的两处补全：报错信息的说法、带 .. 的写法有测试守着（带情形） | v046-b32 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
