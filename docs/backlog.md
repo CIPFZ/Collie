@@ -30,9 +30,11 @@
 > R1 签发自查（v046-b24、b25 后，SPEC 14.34）：加粗情形里写了「X 的时候」，就写明测试怎样造出 X，并在验收里放一条「把修复撤掉，这条测试必须失败」由操作员核对；不许用 `.gitignore` 之类的办法绕开要造的情形。
 > R1 签发自查（v046-b24 的时限后，SPEC 14.35）：条目里写到工具的行为（如「钩子跟着用例的时限走」）先查证再写，那一句是错的：vitest 的钩子时限是配置里的 `hookTimeout`。
 > v046-b32 之后：「可改的受保护路径」加冒号独占一行就是小节标签，说明文字里提到它时不要让它独占一行。
+> R1 签发自查（v046-b30 后，SPEC 14.36、16.22）：加粗情形里写到的操作步骤（如「把状态格改回 pending 再跑」），先核对这条路在 R2 里走不走得通；走不通的不写。
+> 有可测行为的批次按「情形」写，验收只留 lint、类型检查、全量测试与本批次的验收测试；变异检查已在全局命令里，验收表里不再单独写。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；队列从 v046-b30 起，固定版本 `e28d50f`
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；v046-b30、b31、b32 已通过（SPEC 14.36）；队列从 v046-b33 起，固定版本 `a1e35e5`；本项目配置的全局命令里有变异检查，每次取证都跑
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -137,6 +139,8 @@
 | 94 | v046-b30 | 小修：rule9_same_head 只看这一次的 head_sha；api_error 续跑总带 waited_secs | v046-b29 | passed |
 | 95 | v046-b31 | CI、lint、测试配置列为受保护路径，变异清单加三项（第 16 章第 2 步） | v046-b29 | passed |
 | 96 | v046-b32 | 批次授权：条目点名的受保护路径由 worker 改，不计入受保护文件改动行数（D9） | v046-b31 | passed |
+| 97 | v046-b33 | 测试时限提到 300 秒（第一个用批次授权的批次） | v046-b32 | pending |
+| 98 | v046-b34 | 授权路径的两处补全：报错信息的说法、带 .. 的写法有测试守着（带情形） | v046-b32 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -4083,3 +4087,78 @@ v046-b29、b26 通过之后查出来的两处小问题（SPEC 14.35）。改 R2 
 - 为了让测试过而删除或跳过任何测试；改写任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b33 测试时限提到 300 秒（第一个用批次授权的批次）
+
+优先级：97　依赖：v046-b32
+
+`vitest.config.ts` 里用例与钩子的时限现在都是 120 秒。R1 的机器比操作员的机器慢十几倍，那里有两个测试文件的 `beforeEach` 要 160 秒左右，全量测试 3 次里有 2 次因此到点（SPEC 14.35）。没有任何断言依赖这两个数。
+`vitest.config.ts` 是受保护路径（v046-b31）；这一批用下面的授权小节点名它，你只许改这一个文件。
+
+条目：
+1. 读 SPEC 16.22 的第一段。`vitest.config.ts`：`testTimeout` 与 `hookTimeout` 都改成 `300_000`，那一行的注释相应改成说明现在的值与原因（慢机器上钩子要 160 秒左右；没有断言依赖这个值）。别的配置项不动。
+   在「偏离或疑问」里列出你对这个文件做的每一处改动。
+
+可改的受保护路径：
+- vitest.config.ts
+
+本批次只改 `vitest.config.ts`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过 | `npm test` | exit 0 |
+| 两个时限都是 300 秒 | `grep -qE "testTimeout: 300_000" vitest.config.ts && grep -qE "hookTimeout: 300_000" vitest.config.ts` | exit 0 |
+
+额外禁止：
+- 改动授权小节点名之外的任何受保护路径（含 `.github/`、`eslint.config.js`）；改动 `vitest.config.ts` 里两个时限与那一行注释之外的任何内容
+- 改动 `src/`、`test/`、`scripts/`、`templates/`、`package.json`
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 新增依赖
+
+## v046-b34 授权路径的两处补全：报错信息的说法、带 .. 的写法有测试守着（带情形）
+
+优先级：98　依赖：v046-b32
+
+v046-b32 加了批次授权。操作员核对时查出两处（SPEC 14.36）：报错信息里把 `.github/*` 列成能点名的写法，可它正好拒绝字面上的 `.github/*`；`.github/../SPEC.md` 这类写法现在是拒绝的，但没有测试守着。
+这一批按新流程走：下面的「情形」先由测试 agent 写成验收测试，放在 `test/acceptance/v046-b34/`，随 task 信封一起提交；你只写实现，不能改那个目录。
+
+情形：
+- S1 [新] 批次的授权小节点名 `SPEC.md`：`parseBacklog` 抛出 `BacklogError`，它的 `message` 里有 `only .github, paths under .github/, eslint.config.js, vitest.config.ts`，并且整条 `message` 里不出现 `.github/*`
+- K1 [保持] 授权小节点名 `.github/../SPEC.md`：`parseBacklog` 抛出 `BacklogError`，`message` 里有 `.github/../SPEC.md`
+- K2 [保持] 授权小节点名 `.github/workflows/../../docs/backlog.md`：`parseBacklog` 抛出 `BacklogError`
+- K3 [保持] 授权小节点名 `/etc/x`、`../x`、`.github/*`、`.github/workflows/?.yml` 当中任何一个：`parseBacklog` 抛出 `BacklogError`，`message` 里有被点名的那一项
+- K4 [保持] 授权小节依次点名 `.github`、`.github/workflows/ci.yml`、`eslint.config.js`、`vitest.config.ts`：不报错，那个批次的 `allowed_protected` 就是这四项、次序相同
+- K5 [保持] 没有授权小节的批次：解析结果里没有 `allowed_protected` 这个键
+
+接口：
+- `src/backlog.ts` 已有的导出，签名不变：`parseBacklog(text: string, source?: string): Batch[]`、`class BacklogError extends Error`（有 `message`、`batchId`、`line`）
+- 授权小节的标签是「可改的受保护路径」后面跟一个冒号、独占一行，下面每行一个 `- <路径>`（SPEC 16.21）；一份最小的 backlog 文本怎么拼，照 `test/backlog.test.ts` 里 `describe('backlog: allowed protected paths', …)` 一组用的辅助函数
+
+条目：
+1. 读 SPEC 16.21 的「v046-b32」一段与 14.36「判 PASS 之后才查出来的」第 2、3 条。`src/backlog.ts`：授权小节里点名了不许点名的路径时，报错信息末尾括号里的说法改成
+   `(only .github, paths under .github/, eslint.config.js, vitest.config.ts)`。哪些路径能点名、哪些被拒绝，一概不变。
+2. `src/evidence.ts` 第 103 行附近那条注释里的「受保護」改成「受保护」（只改这一个字）。
+   R1 查过：`test/backlog.test.ts` 的 `rejects %s as not allowable` 一组只断言报错信息里有被点名的那一项，改说法不影响它；别的测试没有断言这句括号里的文字。已有断言一条都不改。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/backlog.ts`、`src/evidence.ts`。`test/acceptance/` 下的文件你不能改：你认为某条验收测试写错了，停下，在「偏离或疑问」里写明是哪一条、错在哪。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过（含验收测试） | `npm test` | exit 0 |
+| 本批次的验收测试通过 | `npm test -- test/acceptance/v046-b34` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `test/acceptance/`、`AGENT-*.md`、`.collie/collie.toml`、`.github/`、`eslint.config.js`、`vitest.config.ts`）
+- 改动 `src/backlog.ts`、`src/evidence.ts` 之外的 `src/` 文件；改变哪些路径能被授权；改动 `src/evidence.ts` 里那一个字之外的任何内容
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；新增依赖

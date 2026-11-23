@@ -46,7 +46,7 @@ worktree_secs = 1800    # SPEC 16.16；测试 agent 这一步的墙钟
 
 [verify]
 # SPEC 3.1；reviewer 必跑的全局命令，批次级命令在 task 中追加
-commands = ["npm run lint", "npm run typecheck", "npm test"]
+commands = ["npm run lint", "npm run typecheck", "npm test", "npm run test:mutation"]   # 最后一项：变异检查每批必过（所有者 2026-11-17，SPEC 16.22；R1 2026-11-23 加）
 static = ["npm run lint", "npm run typecheck"]   # SPEC 16.12；红检查在只多了验收测试的树上跑的静态检查
 
 [ci]

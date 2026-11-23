@@ -47,6 +47,7 @@
 | CI 实际结论 | 你没有 GitHub 凭据，查不到是常态：`ci_conclusion` 填 `unknown`、`ci_branch_matched` 填 `null`、`ci_run_url` 留空，`reason` 里写一句「CI 以 R2 取证为准」。CI 的实测由 R2 用 token 完成并写进 progress 与 journal（`ci.resolved`），仲裁规则 7 只用 R2 的结果。若你碰巧能查到，照实填并核对监听分支 |
 | 受保护路径是否被改 | `git diff --stat <base>..<head> -- SPEC.md CONSTRAINTS.md ROADMAP.md ROLES.md 'AGENT-*.md' docs/backlog.md docs/decisions docs/progress.md .collie/collie.toml test/acceptance .github eslint.config.js vitest.config.ts`，清单与 AGENT-worker.md 第 2 节一致，不要只 diff 前三个。task 里有「本批次可改的受保护路径」一节时，那一节点名的路径上的改动是 R1 授权的，R2 不计入受保护文件改动行数；你要核对的是这些改动有没有超出条目要求的范围，超出的写进 `gaps`。带情形的批次里，`test/acceptance/<批次>/` 下的验收测试是测试 Agent 写的，由 R2 随 `docs: issue` 开头的信封提交放进来，不是 worker 的改动；要查的是 worker 有没有动它：`git log --format='%h %s' <base>..<head> -- test/acceptance` 里，除了 `docs: issue` 开头的提交不应有别的 |
 | 依赖变化 | diff `package.json` 与 lock 文件 |
+| 变异检查的清单 | `git diff <base>..<head> -- scripts/mutation.ts`：有项被删掉，或某一项的原文、改法被改写，逐项列出，并核对是不是因为它盯着的那行代码在这一批里确实变了；不是的写进 `gaps`。变异检查本身由 R2 取证时跑，你不用重跑 |
 | 测试真实数字 | 从实跑输出中提取，不要从汇报中抄 |
 
 关于 CI 的特别提醒：本项目有明确教训——某仓库 CI 配置监听的分支与实际使用的分支
