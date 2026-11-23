@@ -2421,4 +2421,22 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b39 · r-20261123141659 · PASS
+
+- 时间：2026-11-23T14:41:38.252Z
+- 裁定：规则 10，全部验收命令通过，9 个情形各有至少一条用例且全部实跑通过（40 条断言），仅新增 test/output-tail.test.ts 一个文件，无受保护路径改动，无依赖变更。CI 以 R2 取证为准。
+- 提交：`8838cd4`
+- 验收命令：6/6 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1556 passed, 0 failed
+  - `npm run test:mutation` → exit 0，mutation: caught 46 survived 0 invalid 0 timeout 0 stale 0
+  - `npm test -- test/output-tail.test.ts test/acceptance/v046-b35` → exit 0，17 passed, 0 failed
+  - `grep -qF "output_tail: per-stream tail and fence width (SPEC 16.25)" test/output-tail.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/45194696530
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
