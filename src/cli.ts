@@ -8,7 +8,7 @@ import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { FakeRunner } from './runner/fake.js';
 import { Command, CommanderError } from 'commander';
-import { loadBacklog } from './backlog.js';
+import { BACKLOG_RELATIVE_PATH, loadBacklog } from './backlog.js';
 import { loadConfig } from './config.js';
 import { queryCi, type Clock, type FetchLike } from './ci.js';
 import { CONFIG_RELATIVE_PATH, parseConfig } from './config.js';
@@ -577,10 +577,36 @@ function root(deps: CliDeps): string {
 }
 
 /**
+ * SPEC 16.28: shared backlog loader for status / why / report.
+ * - `docs/backlog.md` does not exist → return empty array (no error).
+ * - exists but loadBacklog throws → return `{ error: message }`.
+ * - success → return the parsed batches.
+ */
+function tryLoadBacklog(
+  cwd: string,
+): { ok: true; batches: ReturnType<typeof loadBacklog> } | { ok: false; error: string } {
+  if (!existsSync(join(cwd, BACKLOG_RELATIVE_PATH))) {
+    return { ok: true, batches: [] };
+  }
+  try {
+    return { ok: true, batches: loadBacklog(cwd) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
  * SPEC 13.2: `collie status [--json]`. Three sections: current, queue, last queue run.
  * No journal at all → text prints "no runs recorded", JSON still outputs same structure (SPEC 13.13).
  */
 function status(deps: CliDeps, json: boolean): number {
+  // SPEC 16.28: read backlog up front; file-exists-but-broken → exit 1.
+  const backlogResult = tryLoadBacklog(deps.cwd);
+  if (!backlogResult.ok) {
+    deps.err(`collie: ${backlogResult.error}\n`);
+    return EXIT_CODES.ERROR;
+  }
+
   const runDataList = loadRuns(deps.cwd);
 
   // SPEC 13.13: text mode prints "no runs recorded" for empty; --json always outputs same structure.
@@ -589,13 +615,7 @@ function status(deps: CliDeps, json: boolean): number {
     return EXIT_CODES.PASS;
   }
 
-  let batches: readonly { id: string; title: string; status: string; depends_on: string[] }[];
-  try {
-    batches = loadBacklog(deps.cwd);
-  } catch {
-    // If backlog is unavailable, still show what we can with an empty batch list.
-    batches = [];
-  }
+  const batches = backlogResult.batches;
   const view = buildStatus(runDataList, batches, deps.now());
   if (json) {
     // eslint-disable-next-line no-restricted-syntax, @typescript-eslint/no-magic-numbers -- standard JSON indent
@@ -663,14 +683,15 @@ function timeline(
  * Exit 0 = data, 1 = not in backlog, 2 = in backlog but no journal.
  */
 function why(deps: CliDeps, batchId: string, opts: { attempt?: number; json?: boolean }): number {
-  // Check if batch is in backlog.
-  let batches: readonly { id: string }[];
-  try {
-    batches = loadBacklog(deps.cwd);
-  } catch {
-    batches = [];
+  // SPEC 16.28: read backlog up front; file-exists-but-broken → exit 1.
+  const backlogResult = tryLoadBacklog(deps.cwd);
+  if (!backlogResult.ok) {
+    deps.err(`collie: ${backlogResult.error}\n`);
+    return EXIT_CODES.ERROR;
   }
-  const inBacklog = batches.some((b) => b.id === batchId);
+
+  // Check if batch is in backlog.
+  const inBacklog = backlogResult.batches.some((b) => b.id === batchId);
   if (!inBacklog) {
     deps.err(`batch ${batchId} is not in docs/backlog.md\n`);
     return WHY_EXIT.NOT_IN_BACKLOG;
@@ -699,6 +720,13 @@ function why(deps: CliDeps, batchId: string, opts: { attempt?: number; json?: bo
  * Exit 0 = data; 2 = no queue journal on this machine.
  */
 function report(deps: CliDeps, opts: { queue?: string; json?: boolean }): number {
+  // SPEC 16.28: read backlog up front; file-exists-but-broken → exit 1.
+  const backlogResult = tryLoadBacklog(deps.cwd);
+  if (!backlogResult.ok) {
+    deps.err(`collie: ${backlogResult.error}\n`);
+    return EXIT_CODES.ERROR;
+  }
+
   const runDataList = loadRuns(deps.cwd);
 
   // Find the target queue run.
@@ -743,12 +771,7 @@ function report(deps: CliDeps, opts: { queue?: string; json?: boolean }): number
   const queueTimelineLines = targetRun.events.map(describeEvent).join('\n');
 
   // §7: queue remaining from backlog
-  let batches: readonly { id: string; title: string; status: string; depends_on: string[] }[];
-  try {
-    batches = loadBacklog(deps.cwd);
-  } catch {
-    batches = [];
-  }
+  const batches = backlogResult.batches;
   const pendingBatches = batches.filter((b) => b.status === 'pending');
   const blockedBatches = batches.filter((b) => b.status === 'blocked');
   const remainingParts: string[] = [];

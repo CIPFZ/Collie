@@ -276,7 +276,7 @@ export const MUTATIONS: MutationItem[] = [
     replacement: 'return { pass: true, reasons };',
   },
 
-  // ── Protected paths (11) ──────────────────────────────────────────────
+  // ── Protected paths (14) ──────────────────────────────────────────────
   {
     name: 'protected:SPEC.md',
     file: 'src/evidence.ts',
