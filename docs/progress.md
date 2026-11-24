@@ -2544,4 +2544,23 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 依赖变化：无
 - 声称与实测不符：tests
 - worker 退出码：0
+
+### v046-b43 · r-20261124101003 · PASS
+
+- 时间：2026-11-24T10:46:49.700Z
+- 裁定：规则 10，All 6 acceptance commands pass. Implementation matches SPEC 16.29: evidence collection moved before reviewer, pre-arbitration with synthetic PASS verdict, reviewer.skipped event recorded when non-PASS, assumed:true on verdict.downgraded. src/arbiter.ts unchanged. All test changes within allowed categories (a)(b)(c). Guard tests (rule9-same-head, scenario-l, queue-limit) pass. Mutation check: 47 caught, 0 stale. No protected files modified, no new dependencies. CI 以 R2 取证为准。
+- 提交：`9381223` `90e25a6` `ffada9a`
+- 验收命令：7/7 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1599 passed, 0 failed
+  - `npm run test:mutation` → exit 0，mutation: caught 47 survived 0 invalid 0 timeout 0 stale 0
+  - `npm test -- test/acceptance/v046-b43` → exit 0，8 passed, 0 failed
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qF "reviewer.skipped" && grep -qF "reviewer.skipped" src/schema/index.ts` → exit 0，exit 0
+  - `grep -qF "records reviewer.skipped (v046-b43)" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/45374395888
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
