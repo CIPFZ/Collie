@@ -95,7 +95,7 @@
 | 104 | v046-b40 | 批次清单归档：已了结的批次挪进归档文件，解析时两处都读（带情形） | v046-b38 | passed |
 | 105 | v046-b41 | status、why、report 不再吞掉批次清单的错误（带情形） | v046-b40 | passed |
 | 106 | v046-b42 | preflight --smoke 的用时上限：调一次模型超过 60 秒算不过（带情形） | v046-b27 | passed |
-| 107 | v046-b43 | 先取证再审核：取证没过就不拉起 reviewer（需求审查第 1 批，带情形） | v046-b38 | pending |
+| 107 | v046-b43 | 先取证再审核：取证没过就不拉起 reviewer（需求审查第 1 批，带情形） | v046-b38 | blocked |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
