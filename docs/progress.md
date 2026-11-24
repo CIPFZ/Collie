@@ -2597,4 +2597,21 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b46 · r-20261124140249 · PASS
+
+- 时间：2026-11-24T14:38:34.965Z
+- 裁定：规则 10，All 4 acceptance commands exit 0; 1624 tests pass across 94 files; commit fca77e2 pushed to remote (ancestor of remote main 059939c); no protected files modified; no dependency changes; implementation matches SPEC 16.30 format exactly; only the allowed test assertion was modified (reviewer-isolation adding 'evidence'); CI 以 R2 取证为准。
+- 提交：`fca77e2`
+- 验收命令：5/5 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1624 passed, 0 failed
+  - `npm run test:mutation` → exit 0，mutation: caught 47 survived 0 invalid 0 timeout 0 stale 0
+  - `npm test -- test/acceptance/v046-b46` → exit 0，8 passed, 0 failed
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/45413531357
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
