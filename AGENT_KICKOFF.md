@@ -191,6 +191,13 @@ v0.1 已完成并验证；从 v0.2 起 Collie 用自己开发自己。你不写 
   退出码 0 = 跑完 N 个或队列空；10 不会出现（FIX 在里面自动重跑）；20 = BLOCK 或 fix_max 用完；30 = 停表（PASS 了但有话要说，看 `queue.paused.reasons`）。
   一次 `--continue` 可能跑多个批次，汇报文件按**每个批次**一份（`docs/ops/<batch>-r<attempt>.md`），外加一份 `docs/ops/queue-<日期>.md`
   写队列层面的事：选中顺序、`batch.skipped`、`batch.status`、`queue.finished`。`collie audit` 对每个 run_id 各跑一次。
+- **由 `collie follow` 跑的轮次（第三十二次队列起，SPEC 14.42、14.43）**：next.md 写明「由 `collie follow` 来跑」时，你不手工做开跑前检查、不手工起队列、不手工生成队列汇报。
+  1. `git pull --ff-only`；确认 `git status --porcelain` 为空、没有 `.collie/heartbeat.json`、没有残留的 Collie 进程；不对就停下报告，不起 `follow`。
+  2. 在主仓库根起一条：`nohup npx tsx src/cli.ts follow --timeout <秒数> > <仓库外的日志文件> 2>&1 &`（秒数照 next.md 写的）。固定版本的目录、开跑前检查、队列、队列汇报的提交与推送都由它自己做。
+  3. 它在跑的时候你只读地观察，**不碰主仓库**（不提交、不推送、不在里面跑别的 Collie 命令）。R1 在这段时间也不会推送任何东西。
+  4. 看到远端有了 `ops: report queue <q_run_id> (base …)` 的提交，让它再空转两圈，然后 `kill -INT` 停下它。它退出之后你才可以往主仓库写东西。
+  5. 之后做 next.md 里的核对，写你自己的汇报并推送。队列汇报 `docs/ops/queue-<q_run_id>.md` 是 `follow` 写的，你不用再生成。
+  它没能把汇报推上去就退出了（`git log origin/main..HEAD` 里还有 `ops: report queue` 的提交）：原样记下，手工 `git push`，在汇报里写明。
 - `docs/ops/` 是你唯一可写的仓库路径，只放这两类文件；不在里面写总结、不改别人的文件。
 - **R1 的约束（你可以据此拒绝 next.md）**：同一批次在 attempt 之间，R1 不得往 main 推受保护路径（SPEC / CONSTRAINTS / 手册 / toml / backlog）的改动，
   否则下一次 attempt 的取证范围会把 R1 的 diff 算到 worker 头上。next.md 若让你对一个已有 attempt 的批次再跑一次，
