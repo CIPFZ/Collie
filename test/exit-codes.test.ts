@@ -2,6 +2,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { git } from '../src/git.js';
 import { REVIEWER_STREAM_FILE_NAME, truncate } from '../src/run.js';
 import { FakeRunner } from '../src/runner/fake.js';
 import {
@@ -423,6 +424,11 @@ describe('exit-codes: reviewer event stream falls to reviewer.stream.ndjson (SPE
     toml = toml.replace(/^.*token_file.*$/m, `token_file = ".collie/github-token"`);
     writeFileSync(tomlPath, toml);
 
+    // SPEC 16.29 (v046-b43): commit config changes so pre-arbitration does not
+    // see collie.toml as a protected-path diff (rule 2 would skip the reviewer).
+    await box.commitAll('chore: add token_file for redact test');
+    await git(box.root, ['push', '-q', 'origin', 'main']);
+
     // The reviewer scene emits an event that contains the secret.
     const reviewerEvents = [
       { type: 'assistant', content: [{ type: 'text', text: `token is ${secretToken}` }] },
@@ -471,6 +477,7 @@ describe('exit-codes: reviewer event stream falls to reviewer.stream.ndjson (SPE
     const runDirs = readdirSync(runsDir).sort();
     const runDir = runDirs[0] ?? '';
     const streamContent = readFileSync(join(runsDir, runDir, REVIEWER_STREAM_FILE_NAME), 'utf8');
+    // The secret should be masked by the redact mechanism.
     expect(streamContent).not.toContain(secretToken);
     expect(streamContent).toContain('***');
   });
