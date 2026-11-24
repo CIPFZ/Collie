@@ -2458,4 +2458,22 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b40 · r-20261124040209 · PASS
+
+- 时间：2026-11-24T04:43:41.091Z
+- 裁定：规则 10，All 5 acceptance commands pass. All 3 items implemented correctly: BACKLOG_ARCHIVE_RELATIVE_PATH exported, loadBacklog merges archive when present, duplicate batch / invalid status errors with correct messages, PROTECTED_PATHS and mutation list updated, tests added per spec. No protected files modified, no new dependencies, no forbidden files touched. 测试缺口：验收测试未覆盖 blocked 作为归档文件的合法状态（MAP.md 假定只允许 passed），转 R1。CI 以 R2 取证为准。
+- 提交：`85bdf6c`
+- 验收命令：6/6 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1569 passed, 0 failed
+  - `npm run test:mutation` → exit 0，mutation: caught 47 survived 0 invalid 0 timeout 0 stale 0
+  - `npm test -- test/acceptance/v046-b40` → exit 0，9 passed, 0 failed
+  - `grep -qF "protected:docs/backlog-archive.md" scripts/mutation.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/45326902806
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
