@@ -758,6 +758,11 @@ describe('structural invariants (SPEC 3.2)', () => {
     expect(content).toContain("'vitest.config.ts'");
   });
 
+  it('src/evidence.ts has docs/backlog-archive.md in PROTECTED_PATHS (v046-b40)', () => {
+    const content = readFileSync(join(ROOT, 'src/evidence.ts'), 'utf8');
+    expect(content).toContain("'docs/backlog-archive.md'");
+  });
+
   it('src/backlog.ts has 可改的受保护路径 (v046-b32)', () => {
     const content = readFileSync(join(ROOT, 'src/backlog.ts'), 'utf8');
     expect(content).toContain('可改的受保护路径');

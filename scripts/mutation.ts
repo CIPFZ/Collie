@@ -55,7 +55,7 @@ export function testFilesFor(file: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Mutation list — 46 items (SPEC 15.1, v045-b13: rule 4 removed; v046-b07: test/acceptance; v046-b31: CI/lint/test config)
+// Mutation list — 47 items (SPEC 15.1, v045-b13: rule 4 removed; v046-b07: test/acceptance; v046-b31: CI/lint/test config; v046-b40: backlog-archive)
 // ---------------------------------------------------------------------------
 
 export const MUTATIONS: MutationItem[] = [
@@ -276,7 +276,7 @@ export const MUTATIONS: MutationItem[] = [
     replacement: 'return { pass: true, reasons };',
   },
 
-  // ── Protected paths (10) ──────────────────────────────────────────────
+  // ── Protected paths (11) ──────────────────────────────────────────────
   {
     name: 'protected:SPEC.md',
     file: 'src/evidence.ts',
@@ -311,6 +311,12 @@ export const MUTATIONS: MutationItem[] = [
     name: 'protected:docs/backlog.md',
     file: 'src/evidence.ts',
     original: "  'docs/backlog.md',\n",
+    replacement: '',
+  },
+  {
+    name: 'protected:docs/backlog-archive.md',
+    file: 'src/evidence.ts',
+    original: "  'docs/backlog-archive.md',\n",
     replacement: '',
   },
   {

@@ -34,6 +34,7 @@ export const PROTECTED_PATHS: readonly string[] = [
   'ROLES.md',
   ':(glob)AGENT-*.md',
   'docs/backlog.md',
+  'docs/backlog-archive.md',
   'docs/decisions',
   'docs/progress.md',
   '.collie/collie.toml',

@@ -1,7 +1,7 @@
 // Parses docs/backlog.md into validated Batch[] (SPEC 3.2).
 // The file is hand-written by R1, so the accepted format is deliberately
 // narrow: anything unexpected is an error with a line number, never a guess.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BatchSchema,
@@ -14,6 +14,7 @@ import {
 } from './schema/index.js';
 
 export const BACKLOG_RELATIVE_PATH = join('docs', 'backlog.md');
+export const BACKLOG_ARCHIVE_RELATIVE_PATH = join('docs', 'backlog-archive.md');
 
 const OVERVIEW_HEADING = '## 队列总览';
 const OVERVIEW_COLUMNS = ['优先级', '批次', '标题', '依赖', '状态'];
@@ -586,12 +587,19 @@ function skipScenarioList(body: readonly Line[], start: number): number {
   return i;
 }
 
-/** Parses backlog Markdown. Any invalid batch fails the whole parse. */
-export function parseBacklog(text: string, source: string = BACKLOG_RELATIVE_PATH): Batch[] {
+/** Parses backlog Markdown. Any invalid batch fails the whole parse.
+ *  @param externalIds — batch IDs known from another file (e.g. archive); deps referencing these are accepted (SPEC 16.27). */
+export function parseBacklog(
+  text: string,
+  source: string = BACKLOG_RELATIVE_PATH,
+  externalIds?: ReadonlySet<string>,
+): Batch[] {
   const lines: Line[] = text.split('\n').map((t, i) => ({ text: t.replace(/\r$/, ''), no: i + 1 }));
   const overview = parseOverview(lines, source);
   const sections = splitSections(lines);
   const ids = new Set(overview.map((r) => r.id));
+  /** All known IDs: this file + external (SPEC 16.27). */
+  const knownIds = externalIds !== undefined ? new Set([...ids, ...externalIds]) : ids;
 
   const byId = new Map<string, Section>();
   for (const section of sections) {
@@ -621,7 +629,7 @@ export function parseBacklog(text: string, source: string = BACKLOG_RELATIVE_PAT
     for (const dep of row.dependsOn) {
       if (dep === row.id)
         throw new BacklogError(source, row.line, row.id, 'batch depends on itself');
-      if (!ids.has(dep))
+      if (!knownIds.has(dep))
         throw new BacklogError(
           source,
           row.line,
@@ -729,7 +737,18 @@ export function setBatchStatus(
   return { text, changed: false };
 }
 
-/** Reads and parses `<root>/docs/backlog.md`. */
+/** Allowed statuses for batches in the archive file (SPEC 16.27). */
+const ARCHIVE_ALLOWED_STATUSES = new Set<BatchStatus>(['passed', 'blocked']);
+
+/** Extracts batch IDs from the overview table without full validation (SPEC 16.27).
+ *  Used to get one file's IDs before parsing the other, so cross-file deps are accepted. */
+function extractOverviewIds(text: string, source: string): Set<string> {
+  const lines: Line[] = text.split('\n').map((t, i) => ({ text: t.replace(/\r$/, ''), no: i + 1 }));
+  const rows = parseOverview(lines, source);
+  return new Set(rows.map((r) => r.id));
+}
+
+/** Reads and parses `<root>/docs/backlog.md`, merging `<root>/docs/backlog-archive.md` when present (SPEC 16.27). */
 export function loadBacklog(root: string): Batch[] {
   const path = join(root, BACKLOG_RELATIVE_PATH);
   let text: string;
@@ -739,5 +758,54 @@ export function loadBacklog(root: string): Batch[] {
     const reason = error instanceof Error ? error.message : String(error);
     throw new BacklogError(path, undefined, undefined, `cannot read file: ${reason}`);
   }
-  return parseBacklog(text, path);
+
+  const archivePath = join(root, BACKLOG_ARCHIVE_RELATIVE_PATH);
+  if (!existsSync(archivePath)) {
+    return parseBacklog(text, path);
+  }
+
+  let archiveText: string;
+  try {
+    archiveText = readFileSync(archivePath, 'utf8');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new BacklogError(archivePath, undefined, undefined, `cannot read file: ${reason}`);
+  }
+
+  // Parse archive first (without external IDs — its own deps must resolve internally or we
+  // re-check in the union below). Then parse main with archive IDs as external so that
+  // cross-file deps are accepted during single-file validation.
+  // Extract IDs from both files first so both can reference each other's batches (SPEC 16.27).
+  const mainIds = extractOverviewIds(text, path);
+  const archiveIds = extractOverviewIds(archiveText, archivePath);
+  const archiveBatches = parseBacklog(archiveText, archivePath, mainIds);
+
+  // SPEC 16.27: archive batches must have status passed or blocked.
+  for (const batch of archiveBatches) {
+    if (!ARCHIVE_ALLOWED_STATUSES.has(batch.status)) {
+      throw new BacklogError(
+        archivePath,
+        undefined,
+        batch.id,
+        `archive batch has status "${batch.status}" but only passed or blocked are allowed`,
+      );
+    }
+  }
+
+  const mainBatches = parseBacklog(text, path, archiveIds);
+
+  // SPEC 16.27: same batch id in both files is an error.
+  for (const batch of mainBatches) {
+    if (archiveIds.has(batch.id)) {
+      throw new BacklogError(
+        path,
+        undefined,
+        batch.id,
+        `batch also exists in ${BACKLOG_ARCHIVE_RELATIVE_PATH}`,
+      );
+    }
+  }
+
+  // Merge: archive batches first, then main batches (SPEC 16.27).
+  return [...archiveBatches, ...mainBatches];
 }
