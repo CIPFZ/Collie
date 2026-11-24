@@ -36,11 +36,13 @@
 > R1 签发自查（v046-b34 后，SPEC 14.37）：情形里每一个期望都单独想一遍在现有代码上成不成立：测试 agent 会把一条情形拆成几条用例，[新] 里混着现在就成立的期望，会被红检查判成「本该失败却通过」；现在就成立的归到 [保持]。
 > R1 签发自查（v046-b35、b36 后，SPEC 14.38）：一批是为了某个真实的命令或数据做的，情形里至少有一条用它的真实形状（b35 为变异检查做，情形里的脚本却都只往一个输出流打印）；
 > R1 签发自查（v046-b37 后，SPEC 14.39）：被拦的批次代码已经在主分支上时，补测试的批次不带情形（情形会全是 [保持]，测试 agent 那一步要至少一条 [新]）。
+> R1 签发自查（v046-b40 后，SPEC 14.41）：情形只写了「被拒绝的」时，补一条「被接受的」；[新] 情形里不夹「输出是合法 JSON」这类现在就成立的话；
+> 要测试 agent 往沙箱配置里加一个键时，模板里不能有同名的真键（实现之后会重复）；写进规格的自查办法，先确认用到的命令出错时会报错。
 > 条目里要 worker 一定做到的事写成「必须」，并在验收里放一条能判定的命令，不写「能……就……」。
 > 情形要用到现有类型上还没有的字段时，在「接口」里写明；「接口」里点出可以照着搭的现有测试文件。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；v046-b30、b31、b32 已通过（SPEC 14.36）；v046-b33、b34 已通过（SPEC 14.37）；v046-b35、b36 已通过（SPEC 14.38）；v046-b37 是 `blocked`（代码采纳，补测试的是 v046-b39，SPEC 14.39）；v046-b39、b38 已通过（SPEC 14.40）；队列从 v046-b40 起，固定版本 `8c908ef`；本项目配置的全局命令里有变异检查，每次取证都跑
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；v046-b30、b31、b32 已通过（SPEC 14.36）；v046-b33、b34 已通过（SPEC 14.37）；v046-b35、b36 已通过（SPEC 14.38）；v046-b37 是 `blocked`（代码采纳，补测试的是 v046-b39，SPEC 14.39）；v046-b39、b38 已通过（SPEC 14.40）；v046-b40 已通过，最早的 63 个批次已归档到 `docs/backlog-archive.md`（SPEC 14.41）；队列从 v046-b41 起，固定版本 `ae932f8`；本项目配置的全局命令里有变异检查，每次取证都跑
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -90,6 +92,8 @@
 | 102 | v046-b38 | 三处上报合成一个函数，推送由 9 处变成 7 处（只重构） | v046-b36, v046-b39 | passed |
 | 103 | v046-b39 | 给 v046-b37 已在主分支上的输出末尾取法补测试（只改测试） | v046-b35 | passed |
 | 104 | v046-b40 | 批次清单归档：已了结的批次挪进归档文件，解析时两处都读（带情形） | v046-b38 | passed |
+| 105 | v046-b41 | status、why、report 不再吞掉批次清单的错误（带情形） | v046-b40 | pending |
+| 106 | v046-b42 | preflight --smoke 的用时上限：调一次模型超过 60 秒算不过（带情形） | v046-b27 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -1933,3 +1937,102 @@ v046-b37 改了 `src/run.ts` 里的 `buildOutputTail` 与 `renderFixSection`：�
 - 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b41 status、why、report 不再吞掉批次清单的错误（带情形）
+
+优先级：105　依赖：v046-b40
+
+`status`、`why`、`report` 三条命令读批次清单出错时，现在把错误吞掉、当成「没有批次」接着走：`status` 退出码 0，只是少了几行；`why` 会说批次不在 backlog 里。
+批次清单分成两个文件（归档）之后更容易出这种错，而且看不出来（SPEC 14.41）。这一批让它们报错。按新流程走：下面的「情形」先由测试 agent 写成验收测试，放在 `test/acceptance/v046-b41/`；你只写实现，不能改那个目录。
+
+情形：
+- S1 [新] 沙箱里把 `docs/backlog.md` 中 `v99-b01` 的依赖改成一个不存在的批次号 `v00-x99`（总览表「依赖」一格与小节里「依赖：」那一行都改），执行 `status`：退出码 1；命令的输出里有 `v00-x99`
+- S2 [新] 同样的沙箱，执行 `status --json`：退出码 1；命令的输出里有 `v00-x99`
+- S3 [新] 同样的沙箱，执行 `why v99-b01`：命令的输出里有 `v00-x99`，没有 `is not in docs/backlog.md`
+- S4 [新] 同样的沙箱，执行 `report`：退出码 1；命令的输出里有 `v00-x99`
+- K1 [保持] 沙箱的批次清单没有动过、还没有任何运行记录，执行 `status`：退出码 0，输出里有 `no runs recorded`
+- K2 [保持] 沙箱的批次清单没有动过，执行 `why v99-b99`：退出码 1，输出里有 `batch v99-b99 is not in docs/backlog.md`
+- K3 [保持] S1 那个沙箱，执行 `show v99-b01`：退出码 1，输出里有 `v00-x99`
+- K4 [保持] 一个目录下 `docs/backlog-archive.md` 里有两个批次，状态依次是 `blocked`、`passed`，`docs/backlog.md` 里有一个 `pending` 的批次：`loadBacklog` 不报错，返回恰好三个批次，前两个的 `status` 依次是 `blocked`、`passed`
+
+接口：
+- 命令经 `test/support/sandbox.ts` 的 `Sandbox` 执行：`await box.cli(['status'], undefined)` 返回退出码；标准输出与标准错误都进 `box.output`（字符串数组，`join('')` 之后看），所以「命令的输出」指两者合起来
+- 沙箱自带的 `docs/backlog.md` 只有 `v99-b01` 一个批次，依赖写的是「无」（总览表里是 `—`）：用 `box.read` 读出来，把这两处改成 `v00-x99`，再 `box.write` 写回，不必提交
+- K4 直接测 `src/backlog.ts` 的 `loadBacklog(root)`：目录用 `mkdtempSync` 建在系统临时目录下、`afterEach` 里删掉；两个文件怎么拼，照 `test/acceptance/v046-b40/new.test.ts`
+
+条目：
+1. 读 SPEC 16.28 的第一段与 14.41「判 PASS 之后查出来的」第 1 条。`src/cli.ts` 的 `status`、`why`、`report`：一开头就读批次清单。`docs/backlog.md` 存在而加载失败时，把错误信息写到标准错误（一行，以 `collie: ` 开头，与 `show` 报错的写法相同），
+   返回退出码 1，别的什么都不输出（`--json` 时也一样）。`docs/backlog.md` 不存在时照现在的做法，当成没有批次。三条命令**必须**共用同一个读法（一个函数），不要各写一份 `try`。
+2. `scripts/mutation.ts` 里 `Protected paths (11)` 那句注释的项数改成 14（只改这个数）。
+   不许变的：批次清单合法时这三条命令的输出与退出码；`show`、`run`、`timeline`、`preflight` 的行为。
+   R1 没有查到在「批次清单存在却解析不了」的目录里跑这三条命令的现有用例；在没有 `docs/backlog.md` 的临时目录里跑它们的用例走「文件不存在」那一支，不应受影响。已有断言一条都不改。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/cli.ts`、`scripts/mutation.ts`（仅条目 2 那一处）。`test/acceptance/` 下的文件你不能改：你认为某条验收测试写错了，停下，照 `AGENT-worker.md` 第 5 节在汇报里写明并列进 `disputed_tests`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过（含验收测试） | `npm test` | exit 0 |
+| 本批次的验收测试通过 | `npm test -- test/acceptance/v046-b41` | exit 0 |
+| 变异脚本注释里的项数对了 | `grep -qF "Protected paths (14)" scripts/mutation.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `test/acceptance/`、`docs/backlog.md`、`docs/backlog-archive.md`、`AGENT-*.md`、`.collie/collie.toml`、`.github/`、`eslint.config.js`、`vitest.config.ts`）
+- 改动 `src/cli.ts` 之外的 `src/` 文件；改动 `scripts/mutation.ts` 里那个数之外的任何内容；改变批次清单合法时任何命令的输出
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26；条目 2 点名的那一处除外）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b42 preflight --smoke 的用时上限：调一次模型超过 60 秒算不过（带情形）
+
+优先级：106　依赖：v046-b27
+
+`preflight --smoke` 会调一次模型来确认接口能用（v046-b27 起，退出码非零算不过，并写出用了几秒）。接口有时不报错、只是极慢：第二十七次队列开跑前有一次用了 95 秒才返回成功，照现在的代码算通过（SPEC 14.38）。
+操作员一直是手工按「60 秒以内」判断的；`collie follow` 以后靠这条命令的退出码自己判断，所以把这个上限做进去（SPEC 16.28）。按新流程走：下面的「情形」先由测试 agent 写成验收测试，放在 `test/acceptance/v046-b42/`；你只写实现，不能改那个目录。
+
+情形：
+- S1 [新] 假运行器返回 `exitCode: 0`，注入的时钟让 `runner` 这一项用了 61 秒，沙箱配置里没有 `smoke_max_secs`，执行 `preflight --smoke --runner fake`：退出码不是 0；输出里有一行以 `FAIL runner: exitCode=0 secs=61` 开头；输出的最后一行是 `preflight: failed (runner)`
+- S2 [新] 同 S1，但沙箱的 `.collie/collie.toml` 在 `[limits]` 一节里多了一行 `smoke_max_secs = 120`（已提交）：退出码是 0；输出里有一行以 `ok   runner: exitCode=0 secs=61` 开头
+- S3 [新] 同 S1，命令再加 `--json`，把输出按 JSON 解析：`checks` 里 `name` 为 `runner` 的那一项的 `ok` 是 false，顶层的 `ok` 是 false
+- K1 [保持] 假运行器返回 `exitCode: 0`，注入的时钟让这一项用了恰好 60 秒，沙箱配置里没有 `smoke_max_secs`：退出码是 0；输出里有一行以 `ok   runner: exitCode=0 secs=60` 开头
+- K2 [保持] 假运行器返回 `exitCode: 1`，这一项用了 3 秒：输出里有一行以 `FAIL runner: exitCode=1` 开头，输出的最后一行是 `preflight: failed (runner)`
+- K3 [保持] 不带 `--smoke` 执行 `preflight`：退出码是 0；输出里没有以 `ok   runner` 或 `FAIL runner` 开头的行
+
+接口：
+- `test/support/sandbox.ts` 的 `Sandbox`：`await box.cli(argv, runner, extra)`，第三个参数可以传 `{ preflightNow: () => number }`（毫秒）。`runner` 一项的用时是它在这一项前后两次返回值的差，四舍五入到秒；搭法照 `test/preflight.test.ts` 里 `describe('preflight: runner check judges the exit code', …)` 一组
+- 假运行器：`new FakeRunner([{ expectRole: 'worker', result: { exitCode: 0 } }])`（来自 `src/runner/fake.ts`）
+- 往沙箱配置里加一项：`box.read('.collie/collie.toml')`，在 `[limits]` 那一行后面插入一行，`box.write` 写回并 `box.commitAll`（开跑前检查要求工作区干净）。实现之前这个键不被认得，配置读不出来，所以 S2 现在是红的
+- `--json` 的输出是 `{ "ok": boolean, "checks": [{ "name", "ok", "detail" }] }`；输出末尾有一个换行，「最后一行」指去掉它之后的最后一行
+
+条目：
+1. 读 SPEC 16.28 的第二段（来历在 14.33）。`src/schema/index.ts`：`[limits]` 加可选的 `smoke_max_secs`（整数，必须大于 0，缺省 60；写法照 `api_retry_wait_secs`）。
+   `src/preflight.ts` 的 `runner` 一项：运行器的退出码是 0，而用时（就是 `secs=` 那个数）大于 `smoke_max_secs` 时，这一项不过，`detail` 是 `exitCode=0 secs=<N> exceeds smoke_max_secs=<M>`；不大于时与现在相同。退出码非零、运行器抛错两种情况不变。
+2. `templates/collie.toml` 的 `[limits]` 里加一行**注释掉的**说明：`# smoke_max_secs = 60   # 可选；preflight --smoke 调一次模型超过这么多秒就算不过（SPEC 16.28）`。
+   **不要加成真的键**：验收测试会往沙箱配置里自己加这一项，模板里已有同名的键就重复了。本仓库的 `.collie/collie.toml` 不许动。`collie smoke` 命令不改。
+3. 点名允许改写的旧用例（因为解析结果里多了一个带缺省值的字段），在「偏离或疑问」里列出：`test/config.test.ts` 的 `has the limits of SPEC 3.1`（期望对象加 `smoke_max_secs: 60`）；`test/schema.test.ts` 的夹具 `validConfig.limits`（加这一项，只在它因此失败时才加）。
+   R1 查过：`test/preflight.test.ts` 现有用例里注入的用时都在 60 秒以内；`test/follow.test.ts` 用假的子进程代替 `preflight`，不受影响。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/schema/index.ts`、`src/preflight.ts`、`templates/collie.toml`、`test/config.test.ts`、`test/schema.test.ts`。`test/acceptance/` 下的文件你不能改：你认为某条验收测试写错了，停下，照 `AGENT-worker.md` 第 5 节在汇报里写明并列进 `disputed_tests`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过（含验收测试） | `npm test` | exit 0 |
+| 本批次的验收测试通过 | `npm test -- test/acceptance/v046-b42` | exit 0 |
+| 模板里只有注释掉的说明，本仓库的配置没动 | `grep -qE "^# smoke_max_secs = 60" templates/collie.toml && ! grep -qE "^smoke_max_secs" templates/collie.toml && ! grep -qF "smoke_max_secs" .collie/collie.toml` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `test/acceptance/`、`AGENT-*.md`、`.collie/collie.toml`、`.github/`、`eslint.config.js`、`vitest.config.ts`）
+- 改动 `src/cli.ts`、`src/follow.ts`、`src/run.ts`、`src/runner/`；改动 `preflight` 别的检查项、`collie smoke`、队列开头那次检查
+- 把模板里那一行加成真的键；在 `detail` 或输出里写出模型的回复、token 或文件的绝对路径
+- 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；测试里真的等待；新增依赖
