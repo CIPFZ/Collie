@@ -1,13 +1,12 @@
 ---
 schema_version: 1
-run_id: r-20261124091911
+run_id: r-20261124101003
 batch_id: v046-b43
 base_sha: 920a9194beb3220c300d7f87671afb8bf22e41f1
-created_at: 2026-11-24T09:19:11.926Z
-attempt: 2
-interrupted_at: r-20261124080901 wallclock run.finished@2026-11-24T09:19:11.088Z
+created_at: 2026-11-24T10:10:04.385Z
+attempt: 3
+interrupted_at: null
 issued_by: collie
-rescue_sha: 9381223ae46097841ee7007db71edbb05773817e
 ---
 
 # 批次 v046-b43：先取证再审核：取证没过就不拉起 reviewer（需求审查第 1 批，带情形）
@@ -78,9 +77,62 @@ rescue_sha: 9381223ae46097841ee7007db71edbb05773817e
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v046-b43` 为提交信息单独提交并推送该文件。
 
-## 上一轮中断
+## 上一轮判 FIX
 
-中断信息：`r-20261124080901 wallclock run.finished@2026-11-24T09:19:11.088Z`
-救援提交：`9381223ae46097841ee7007db71edbb05773817e`
+### 声称不符
 
-请先核实 `9381223ae46097841ee7007db71edbb05773817e` 中的半成品是否完整，不要把它当作已完成。
+- tests：claimed ``，actual ``
+
+sha 一律抄 `git rev-parse` 的输出。
+
+### Gaps
+
+- test/exit-codes.test.ts 第 413 行 `reviewer.stream.ndjson masks secrets with redact` 失败：测试 setup 用 writeFileSync 改了 .collie/collie.toml（受保护路径）但未提交；workerScene 的 git add -A 把它带进了提交；新代码 pre-arbitration 检测到 spec_diff_lines > 0 → rule 2 → BLOCK → reviewer 被跳过 → 没有 reviewer.stream.ndjson。修法：在 workerScene 之前将 collie.toml 和 token 文件的变更提交到 base（如 addFailScript 所做），或将测试拆成 reviewer 确实被调用的场景。这属于条目 2 的 (b) 类改动：测试里有一个因新行为而不再被调用的 reviewer 场景，setup 需要调整使 pre-arbitration 仍给 PASS
+- test/exit-codes.test.ts 第 474 行删了注释 `// The secret should be masked by the redact mechanism.`，不属于条目 2 的三类允许改动 (a)(b)(c)。影响不大但需在偏离中说明
+
+### 未通过的验收命令
+
+- `npm test` → exit 1
+
+```
+
+> collie@0.1.0 test
+> vitest run
+
+
+ RUN  v5.0.5 /data/tmp/collie-v046-b43-s3susS/tree
+
+ ❯ test/exit-codes.test.ts (29 tests | 1 failed) 18600ms
+   ❯ exit-codes: reviewer event stream falls to reviewer.stream.ndjson (SPEC 12.1) (2)
+     × reviewer.stream.ndjson masks secrets with redact (SPEC 12.1) 842ms
+
+ Test Files  1 failed | 87 passed (88)
+      Tests  1 failed | 1598 passed (1599)
+   Start at  18:03:31
+   Duration  28.83s (tests 96%, import 3%)
+--- stderr ---
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/exit-codes.test.ts > exit-codes: reviewer event stream falls to reviewer.stream.ndjson (SPEC 12.1) > reviewer.stream.ndjson masks secrets with redact (SPEC 12.1)
+Error: ENOENT: no such file or directory, open '/data/tmp/collie-sandbox-8eK7ex/project/.collie/runs/r-20261019120000/reviewer.stream.ndjson'
+ ❯ test/exit-codes.test.ts:473:27
+    471|     const runDirs = readdirSync(runsDir).sort();
+    472|     const runDir = runDirs[0] ?? '';
+    473|     const streamContent = readFileSync(join(runsDir, runDir, REVIEWER_…
+       |                           ^
+    474|     expect(streamContent).not.toContain(secretToken);
+    475|     expect(streamContent).toContain('***');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+```
+
+### 上一轮代码提交
+
+- `90e25a69c809ef5dce3453d5953436b4b9ef7d75`
+- `16256ad82a6e15e875f874331ae724d8f7b0c8c6`
+- `75f390c5b84a8cd2be0613394aca87b42b52af56`
+- `9381223ae46097841ee7007db71edbb05773817e`
+- `ed433b86eb23eb4ff9ea8e187acfda4f3f10ba61`
+
+这些提交已在审核范围内，只补缺口，不要重做。
