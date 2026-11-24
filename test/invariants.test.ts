@@ -772,4 +772,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
     expect(content).toContain('authorized_diff_lines');
   });
+
+  it('src/run.ts records reviewer.skipped (v046-b43)', () => {
+    const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
+    expect(content).toContain('reviewer.skipped');
+  });
 });
