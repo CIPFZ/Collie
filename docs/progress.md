@@ -2494,4 +2494,22 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b42 · r-20261124063235 · PASS
+
+- 时间：2026-11-24T07:03:29.540Z
+- 裁定：规则 10，CI 以 R2 取证为准。全部验收命令通过，实现符合条目要求，无受保护文件改动，无依赖变化，无范围蔓延。
+- 提交：`aaf78da`
+- 验收命令：6/6 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1587 passed, 0 failed
+  - `npm run test:mutation` → exit 0，mutation: caught 47 survived 0 invalid 0 timeout 0 stale 0
+  - `npm test -- test/acceptance/v046-b42` → exit 0，6 passed, 0 failed
+  - `grep -qE "^# smoke_max_secs = 60" templates/collie.toml && ! grep -qE "^smoke_max_secs" templates/collie.toml && ! grep -qF "smoke_max_secs" .collie/collie.toml` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/45343420346
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
