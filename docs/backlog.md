@@ -39,7 +39,7 @@
 > 情形要用到现有类型上还没有的字段时，在「接口」里写明；「接口」里点出可以照着搭的现有测试文件。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；v046-b30、b31、b32 已通过（SPEC 14.36）；v046-b33、b34 已通过（SPEC 14.37）；v046-b35、b36 已通过（SPEC 14.38）；v046-b37 是 `blocked`（代码采纳，补测试的是 v046-b39，SPEC 14.39）；队列从 v046-b39 起，固定版本 `3f3a833`；本项目配置的全局命令里有变异检查，每次取证都跑
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；v046-b30、b31、b32 已通过（SPEC 14.36）；v046-b33、b34 已通过（SPEC 14.37）；v046-b35、b36 已通过（SPEC 14.38）；v046-b37 是 `blocked`（代码采纳，补测试的是 v046-b39，SPEC 14.39）；v046-b39、b38 已通过（SPEC 14.40）；队列从 v046-b40 起，固定版本 `8c908ef`；本项目配置的全局命令里有变异检查，每次取证都跑
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -151,6 +151,7 @@
 | 101 | v046-b37 | 输出末尾按两个输出流各取，变异检查没过时看得到是哪一项（带情形） | v046-b35 | blocked |
 | 102 | v046-b38 | 三处上报合成一个函数，推送由 9 处变成 7 处（只重构） | v046-b36, v046-b39 | passed |
 | 103 | v046-b39 | 给 v046-b37 已在主分支上的输出末尾取法补测试（只改测试） | v046-b35 | passed |
+| 104 | v046-b40 | 批次清单归档：已了结的批次挪进归档文件，解析时两处都读（带情形） | v046-b38 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -4403,5 +4404,59 @@ v046-b37 改了 `src/run.ts` 里的 `buildOutputTail` 与 `renderFixSection`：�
 - 改动 `src/`、`scripts/`、任何受保护路径（含 `test/acceptance/`）、`.github/`、`eslint.config.js`、`vitest.config.ts`、`package.json`
 - 用「以三个以上反引号开头」这类会被内容匹配到的模式找收尾围栏
 - 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b40 批次清单归档：已了结的批次挪进归档文件，解析时两处都读（带情形）
+
+优先级：104　依赖：v046-b38
+
+`docs/backlog.md` 已有 4400 多行、一百多个批次，九成已经通过。这一批让 R2 认得一个归档文件 `docs/backlog-archive.md`：已了结的批次可以挪进去，加载时两处都读（SPEC 16.27）。
+这一批只做「认得」，不挪任何批次（那是 R1 之后的事）。按新流程走：下面的「情形」先由测试 agent 写成验收测试，放在 `test/acceptance/v046-b40/`；你只写实现，不能改那个目录。
+
+情形：
+- S1 [新] 一个目录下 `docs/backlog-archive.md` 里有一个状态为 `passed` 的批次 `v01-a01`，`docs/backlog.md` 里有一个状态为 `pending`、依赖 `v01-a01` 的批次 `v01-b01`：`loadBacklog` 返回恰好两个批次，依次是 `v01-a01`、`v01-b01`，后者的 `depends_on` 是只含 `v01-a01` 的数组
+- S2 [新] 批次号 `v01-a01` 在 `docs/backlog-archive.md` 与 `docs/backlog.md` 里各有一个（两个文件单独看都合法）：`loadBacklog` 抛出 `BacklogError`，它的 `message` 里有 `v01-a01`，也有 `backlog-archive.md`
+- S3 [新] `docs/backlog-archive.md` 里那个批次的状态是 `pending`，或者是 `running`（`docs/backlog.md` 单独看合法）：两种都让 `loadBacklog` 抛出 `BacklogError`，`message` 里有归档里那个批次的批次号
+- S4 [新] 沙箱里 `docs/backlog-archive.md` 有一个 `passed` 的批次 `v98-a01`，`docs/backlog.md` 里 `v99-b01` 是 `pending`、依赖 `v98-a01`，两个文件都已提交；假 worker 如实提交、假 reviewer 判 PASS，队列模式跑一次（`run --continue`）：退出码 0，`docs/backlog.md` 里 `v99-b01` 的状态是 `passed`
+- S5 [新] 沙箱里 `docs/backlog-archive.md` 有一个 `passed` 的批次 `v98-a01`（已提交），`docs/backlog.md` 里 `v99-b01` 是 `pending`、不依赖别的；假 worker 在它的代码提交里另外往 `docs/backlog-archive.md` 末尾加了一个空行和一行文字 `note`，假 reviewer 判 PASS，单批次跑一次：退出码 20，`evidence.collected` 事件的 `spec_diff_lines` 大于 0
+- K1 [保持] 目录下没有 `docs/backlog-archive.md`，`docs/backlog.md` 里有一个批次：`loadBacklog` 返回恰好这一个批次
+- K2 [保持] `docs/backlog-archive.md` 存在且合法，`docs/backlog.md` 里的批次依赖一个两个文件里都没有的批次号 `v00-x99`：`loadBacklog` 抛出 `BacklogError`，`message` 里有 `v00-x99`
+- K3 [保持] S4 那一次运行之后，`docs/backlog-archive.md` 的内容与运行之前逐字节相同
+
+接口：
+- `src/backlog.ts` 已有的导出，签名不变：`loadBacklog(root: string): Batch[]`、`class BacklogError extends Error`（有 `message`、`batchId`）。归档文件是 `<root>/docs/backlog-archive.md`，格式与 `docs/backlog.md` 完全相同：自己的「队列总览」表加各批次的小节
+- 一份最小的 backlog 文本怎么拼，照 `test/backlog.test.ts` 里的辅助函数；直接测 `loadBacklog` 时，目录用 `mkdtempSync` 建在系统临时目录下、`afterEach` 里删掉
+- 沙箱用 `test/support/sandbox.ts` 导出的 `Sandbox`（`run(runner)` 是单批次，`cli(['run', '--continue'], runner)` 是队列；`read`、`write`、`commitAll`、`events()`）、`workerScene`、`fooledReviewerScene`、`honestClaims`、`BATCH`（就是 `v99-b01`）。
+  沙箱自带一份 `docs/backlog.md`：要让 `v99-b01` 依赖别的批次，用 `box.read` 读出来改（总览表里「依赖」那一格与小节里「依赖：」那一行要一致）再提交；要在提交里多改一个文件的假 worker 自己写一个场景，写法照 `test/acceptance/v046-b36/`
+
+条目：
+1. 读 SPEC 16.27。`src/backlog.ts`：导出常量 `BACKLOG_ARCHIVE_RELATIVE_PATH`（`docs/backlog-archive.md`）；`loadBacklog` 在归档文件存在时两处都读，归档里的批次排在前面；
+   依赖在两处的并集里核对；同一个批次号两处都有时报错（信息里有批次号与归档文件名）；归档里的批次状态不是 `passed` 或 `blocked` 时报错（信息里有批次号）。
+   `parseBacklog` 对单份文本的现有检查都不变（需要的话给它加一个可选参数，传「另一处已有的批次号」）。R2 改状态格的地方不动，仍只写 `docs/backlog.md`。
+2. `src/evidence.ts` 的 `PROTECTED_PATHS` 加 `docs/backlog-archive.md`（写法照现有各项，每项一行）；`scripts/mutation.ts` 的清单**必须**加一项 `protected:docs/backlog-archive.md`（写法照已有的 13 项），共 47 项，清单上方注释里的项数相应改。
+3. 测试。`test/evidence.test.ts` 加一条 `counts docs/backlog-archive.md as protected (SPEC 16.27)`；`test/mutation.test.ts` 的 `every protected path is in the mutation list`：13 改成 14（点名允许的改写，在「偏离或疑问」里列出）；
+   `test/invariants.test.ts` 加一条，用例名 `src/evidence.ts has docs/backlog-archive.md in PROTECTED_PATHS (v046-b40)`。
+   R1 查过：仓库里现在没有归档文件，所有读真实 `docs/backlog.md` 的测试结果不变；`test/backlog.test.ts` 测的是 `parseBacklog` 单份文本的行为，不受影响；`test/mutation.test.ts` 的 `has at least 42 items` 用的是「不少于」，不用改。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/backlog.ts`、`src/evidence.ts`、`scripts/mutation.ts`、`test/evidence.test.ts`、`test/mutation.test.ts`、`test/invariants.test.ts`。不要新建 `docs/backlog-archive.md`。
+`test/acceptance/` 下的文件你不能改：你认为某条验收测试写错了，停下，照 `AGENT-worker.md` 第 5 节在汇报里写明并列进 `disputed_tests`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过（含验收测试） | `npm test` | exit 0 |
+| 本批次的验收测试通过 | `npm test -- test/acceptance/v046-b40` | exit 0 |
+| 变异清单里有新的一项 | `grep -qF "protected:docs/backlog-archive.md" scripts/mutation.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `test/acceptance/`、`docs/backlog.md`、`AGENT-*.md`、`.collie/collie.toml`、`.github/`、`eslint.config.js`、`vitest.config.ts`）；新建或改动 `docs/backlog-archive.md`
+- 改动 `src/run.ts`、`src/cli.ts`、`src/view.ts`、`src/arbiter.ts`、`src/gate.ts`、`src/roles/`、`src/runner/`；让 R2 写归档文件；让批次授权能点名归档文件
+- 改变没有归档文件时的任何行为；从 `PROTECTED_PATHS` 里去掉或改写已有的项
+- 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖

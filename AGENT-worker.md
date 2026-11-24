@@ -39,7 +39,7 @@
 **禁写**（写入任何一项即属严重违规）：
 - `SPEC.md`、`CONSTRAINTS.md`、`ROADMAP.md`、`ROLES.md`
 - `AGENT-*.md`
-- `docs/backlog.md`、`docs/decisions/`
+- `docs/backlog.md`、`docs/backlog-archive.md`（已通过批次的归档，v046-b40 起）、`docs/decisions/`
 - `docs/progress.md`
 - `test/acceptance/` 下的文件（验收测试，由测试 Agent 在你之前写好；v046-b07 起受保护）
 - `.github/`、`eslint.config.js`、`vitest.config.ts`（CI、lint、测试的配置：它们定义的是检查本身；v046-b31 起受保护）。
