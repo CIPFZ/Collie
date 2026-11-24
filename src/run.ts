@@ -1,5 +1,6 @@
-// R2's single-batch loop (SPEC 6): task -> worker -> report -> reviewer in a
-// head_sha worktree -> verdict -> own evidence -> arbiter -> progress.
+// R2's single-batch loop (SPEC 6): task -> worker -> report -> own evidence ->
+// (pre-arbitrate: skip reviewer if non-PASS) -> reviewer in a head_sha worktree
+// -> verdict -> arbiter -> progress.  SPEC 16.29 (v046-b43).
 // Deterministic: no LLM decides anything here (ROLES 2 R2).
 import {
   appendFileSync,
@@ -61,7 +62,7 @@ import type {
   Verdict,
   VerdictValue,
 } from './schema/index.js';
-import { RunIdSchema } from './schema/index.js';
+import { RunIdSchema, SCHEMA_VERSION } from './schema/index.js';
 
 /** SPEC 16.23: maximum number of output lines kept in acceptance.failed output_tail. */
 // eslint-disable-next-line no-restricted-syntax -- SPEC 16.23: named constant
@@ -2105,93 +2106,13 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
 
     // Worker output is taskSha..head_sha: the task commit is R2's, not the worker's (SPEC 3.3).
     const outcome = await withHeadWorktree(root, batchId, report.head_sha, async (tree) => {
-      // SPEC 11.3 (v02-e-fix): reviewer phase clears worker_pid from heartbeat —
-      // the worker is done, so its pid is no longer relevant for orphan detection.
+      // SPEC 16.29 (v046-b43): collect evidence BEFORE reviewer (ci phase first).
+      // Clears worker_pid — the worker is done (SPEC 11.3).
       updateHeartbeat(root, {
-        phase: 'reviewer',
+        phase: 'ci',
         worker_pid: null,
         updated_at: ctx.now().toISOString(),
       });
-
-      // E5: the reviewer works in the head_sha worktree, where report.md does not exist (SPEC 3.5).
-      let finalText: string | undefined;
-      rec.record('reviewer.started', {
-        head_sha: report.head_sha,
-        model: config.agent.reviewer.model,
-        max_turns: config.agent.reviewer.max_turns,
-      });
-      // SPEC 12.1: reviewer event stream falls to reviewer.stream.ndjson with redaction.
-      const reviewerOnEvent = (event: unknown): void => {
-        appendStream(root, runId, event, REVIEWER_STREAM_FILE_NAME);
-      };
-      try {
-        const reviewer = await runReviewer(
-          ctx.runner,
-          config,
-          {
-            batch_id: batchId,
-            // SPEC 11.7 (v02-e-fix): use the first run's base_sha for the reviewer,
-            // not taskSha. This means attempt ≥ 2 diffs include prior attempt commits.
-            base_sha: baseSha,
-            head_sha: report.head_sha,
-            items: batch.items,
-            acceptance: batch.acceptance,
-            spec_paths: ['SPEC.md', 'CONSTRAINTS.md'],
-          },
-          tree,
-          {
-            onEvent: reviewerOnEvent,
-            ...(redact.length > 0 ? { redact } : {}),
-          },
-        );
-        finalText = reviewer.finalText;
-        // SPEC 13.1 (v0.4): reviewer.finished before verdict parsing.
-        rec.record('reviewer.finished', {
-          exit_code: reviewer.exitCode,
-          ...(reviewer.numTurns !== undefined ? { num_turns: reviewer.numTurns } : {}),
-          ...(reviewer.costUsd !== undefined ? { cost_usd: reviewer.costUsd } : {}),
-          ...(reviewer.durationMs !== undefined ? { duration_ms: reviewer.durationMs } : {}),
-          ...(reviewer.usage !== undefined
-            ? {
-                usage: {
-                  input_tokens: reviewer.usage.inputTokens,
-                  output_tokens: reviewer.usage.outputTokens,
-                  ...(reviewer.usage.cacheCreationInputTokens !== undefined
-                    ? { cache_creation_input_tokens: reviewer.usage.cacheCreationInputTokens }
-                    : {}),
-                  ...(reviewer.usage.cacheReadInputTokens !== undefined
-                    ? { cache_read_input_tokens: reviewer.usage.cacheReadInputTokens }
-                    : {}),
-                },
-              }
-            : {}),
-        });
-      } catch (error) {
-        finalText = undefined;
-        rec.record('escalated', { reason: `reviewer failed: ${message(error)}` });
-      }
-      const verdict = persistVerdict(root, batchId, finalText);
-      // SPEC 13.1 (v0.4): truncate each gap to 300 chars, at most 20.
-      // eslint-disable-next-line no-restricted-syntax -- SPEC 13.1: fixed format bounds
-      const MAX_GAPS = 20;
-      // eslint-disable-next-line no-restricted-syntax -- SPEC 13.1: fixed format bounds
-      const MAX_GAP_CHARS = 300;
-      const truncatedGaps = verdict.ok
-        ? verdict.value.gaps.slice(0, MAX_GAPS).map((g) => truncate(g, MAX_GAP_CHARS))
-        : [];
-      rec.record(
-        'reviewer.verdict',
-        verdict.ok
-          ? {
-              verdict: verdict.value.verdict,
-              // SPEC 13.10: gaps is always present when verdict is parseable.
-              gaps: truncatedGaps,
-            }
-          : { error: verdict.error },
-      );
-
-      // SPEC 11.3: heartbeat transitions to ci phase (evidence collection includes CI polling).
-      updateHeartbeat(root, { phase: 'ci', updated_at: ctx.now().toISOString() });
 
       // R2's own measurements, also on the committed head_sha tree.
       // SPEC 16.14: collect R2's own commit shas from journals for protected-path diff.
@@ -2275,21 +2196,192 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
           : {}),
       });
 
-      return { verdict, collected };
-    });
-    const { verdict, collected } = outcome;
-
-    // SPEC 14.1: audit reviewer tools (both single-batch and --continue modes).
-    // Only when the reviewer ran (stream file exists).
-    let auditResult: 'match' | 'mismatch' | 'no_init' | undefined;
-    const auditOutcome = auditReviewerTools(root, runId, [...config.agent.reviewer.allowed_tools]);
-    if (auditOutcome !== undefined) {
-      auditResult = auditOutcome.outcome;
-      rec.record('audit.result', {
-        outcome: auditOutcome.outcome,
-        ...(auditOutcome.extra.length > 0 ? { extra: auditOutcome.extra } : {}),
-        ...(auditOutcome.missing.length > 0 ? { missing: auditOutcome.missing } : {}),
+      // SPEC 16.29: pre-arbitration — assume reviewer judged PASS and check
+      // whether evidence alone overrides it (rules 2, 3, 5–9).
+      const r2FailedAcceptance = collected.verify
+        .filter((r) => !r.passed)
+        .map((r) => ({
+          cmd: r.cmd,
+          exit_code: r.exit_code,
+          expect: expectOf(r.cmd, verifyCommands(config.verify.commands, batch)),
+          // SPEC 16.23: build output_tail from the command's stdout and stderr.
+          output_tail: buildOutputTail(r.stdout, r.stderr, redact),
+        }));
+      const syntheticVerdict: { ok: true; value: Verdict } = {
+        ok: true,
+        value: {
+          schema_version: SCHEMA_VERSION,
+          batch_id: batchId,
+          verdict: 'PASS',
+          evidence: collected.evidence,
+          claim_mismatches: [],
+          gaps: [],
+          reason: 'assumed PASS for pre-arbitration',
+        },
+      };
+      const preDecision = arbitrate({
+        claims: report.claims,
+        verdict: syntheticVerdict,
+        approvedDeps: APPROVED_DEPENDENCIES,
+        testCommand: collected.testCommand ?? 'npm test',
+        failedAcceptance: r2FailedAcceptance,
       });
+
+      // SPEC 16.29: if pre-arbitration says not PASS, skip reviewer entirely.
+      if (preDecision.final !== 'PASS') {
+        rec.record('reviewer.skipped', {
+          rule: preDecision.rule,
+          reason: preDecision.reason,
+        });
+        return {
+          skipped: true as const,
+          collected,
+          preDecision,
+          r2FailedAcceptance,
+        };
+      }
+
+      // SPEC 16.29: pre-arbitration says PASS — proceed to run reviewer.
+      updateHeartbeat(root, { phase: 'reviewer', updated_at: ctx.now().toISOString() });
+
+      // E5: the reviewer works in the head_sha worktree, where report.md does not exist (SPEC 3.5).
+      let finalText: string | undefined;
+      rec.record('reviewer.started', {
+        head_sha: report.head_sha,
+        model: config.agent.reviewer.model,
+        max_turns: config.agent.reviewer.max_turns,
+      });
+      // SPEC 12.1: reviewer event stream falls to reviewer.stream.ndjson with redaction.
+      const reviewerOnEvent = (event: unknown): void => {
+        appendStream(root, runId, event, REVIEWER_STREAM_FILE_NAME);
+      };
+      try {
+        const reviewer = await runReviewer(
+          ctx.runner,
+          config,
+          {
+            batch_id: batchId,
+            // SPEC 11.7 (v02-e-fix): use the first run's base_sha for the reviewer,
+            // not taskSha. This means attempt ≥ 2 diffs include prior attempt commits.
+            base_sha: baseSha,
+            head_sha: report.head_sha,
+            items: batch.items,
+            acceptance: batch.acceptance,
+            spec_paths: ['SPEC.md', 'CONSTRAINTS.md'],
+          },
+          tree,
+          {
+            onEvent: reviewerOnEvent,
+            ...(redact.length > 0 ? { redact } : {}),
+          },
+        );
+        finalText = reviewer.finalText;
+        // SPEC 13.1 (v0.4): reviewer.finished before verdict parsing.
+        rec.record('reviewer.finished', {
+          exit_code: reviewer.exitCode,
+          ...(reviewer.numTurns !== undefined ? { num_turns: reviewer.numTurns } : {}),
+          ...(reviewer.costUsd !== undefined ? { cost_usd: reviewer.costUsd } : {}),
+          ...(reviewer.durationMs !== undefined ? { duration_ms: reviewer.durationMs } : {}),
+          ...(reviewer.usage !== undefined
+            ? {
+                usage: {
+                  input_tokens: reviewer.usage.inputTokens,
+                  output_tokens: reviewer.usage.outputTokens,
+                  ...(reviewer.usage.cacheCreationInputTokens !== undefined
+                    ? { cache_creation_input_tokens: reviewer.usage.cacheCreationInputTokens }
+                    : {}),
+                  ...(reviewer.usage.cacheReadInputTokens !== undefined
+                    ? { cache_read_input_tokens: reviewer.usage.cacheReadInputTokens }
+                    : {}),
+                },
+              }
+            : {}),
+        });
+      } catch (error) {
+        finalText = undefined;
+        rec.record('escalated', { reason: `reviewer failed: ${message(error)}` });
+      }
+      const verdict = persistVerdict(root, batchId, finalText);
+      // SPEC 13.1 (v0.4): truncate each gap to 300 chars, at most 20.
+      // eslint-disable-next-line no-restricted-syntax -- SPEC 13.1: fixed format bounds
+      const MAX_GAPS = 20;
+      // eslint-disable-next-line no-restricted-syntax -- SPEC 13.1: fixed format bounds
+      const MAX_GAP_CHARS = 300;
+      const truncatedGaps = verdict.ok
+        ? verdict.value.gaps.slice(0, MAX_GAPS).map((g) => truncate(g, MAX_GAP_CHARS))
+        : [];
+      rec.record(
+        'reviewer.verdict',
+        verdict.ok
+          ? {
+              verdict: verdict.value.verdict,
+              // SPEC 13.10: gaps is always present when verdict is parseable.
+              gaps: truncatedGaps,
+            }
+          : { error: verdict.error },
+      );
+
+      return { skipped: false as const, verdict, collected };
+    });
+    // SPEC 16.29 (v046-b43): branch on whether the reviewer was skipped.
+    const { collected } = outcome;
+    const reviewerSkipped = outcome.skipped;
+    let decision: ArbiterDecision;
+    let r2FailedAcceptance: {
+      cmd: string;
+      exit_code: number;
+      expect: Acceptance['expect'];
+      output_tail?: string;
+    }[];
+    let auditResult: 'match' | 'mismatch' | 'no_init' | undefined;
+    let gaps: string[];
+
+    if (outcome.skipped) {
+      // Pre-arbitration already determined non-PASS; reviewer was not called.
+      decision = outcome.preDecision;
+      r2FailedAcceptance = outcome.r2FailedAcceptance;
+      auditResult = undefined; // SPEC 16.29: no audit when reviewer skipped.
+      gaps = []; // No reviewer, no gaps.
+    } else {
+      const { verdict } = outcome;
+
+      // SPEC 14.1: audit reviewer tools (both single-batch and --continue modes).
+      // Only when the reviewer ran (stream file exists).
+      const auditOutcome = auditReviewerTools(root, runId, [
+        ...config.agent.reviewer.allowed_tools,
+      ]);
+      if (auditOutcome !== undefined) {
+        auditResult = auditOutcome.outcome;
+        rec.record('audit.result', {
+          outcome: auditOutcome.outcome,
+          ...(auditOutcome.extra.length > 0 ? { extra: auditOutcome.extra } : {}),
+          ...(auditOutcome.missing.length > 0 ? { missing: auditOutcome.missing } : {}),
+        });
+      }
+
+      // SPEC 13.14: R2-measured failed acceptance extracted before arbitrate so we can
+      // record acceptance.failed regardless of the arbiter's rule.
+      r2FailedAcceptance = collected.verify
+        .filter((r) => !r.passed)
+        .map((r) => ({
+          cmd: r.cmd,
+          exit_code: r.exit_code,
+          expect: expectOf(r.cmd, verifyCommands(config.verify.commands, batch)),
+          // SPEC 16.23: build output_tail from the command's stdout and stderr.
+          output_tail: buildOutputTail(r.stdout, r.stderr, redact),
+        }));
+      decision = arbitrate({
+        claims: report.claims,
+        verdict: verdict.ok
+          ? { ok: true, value: { ...verdict.value, evidence: collected.evidence } }
+          : verdict,
+        approvedDeps: APPROVED_DEPENDENCIES,
+        testCommand: collected.testCommand ?? 'npm test',
+        // R2's own judgement of every command against its expect (verify.ts), full stdout included.
+        failedAcceptance: r2FailedAcceptance,
+      });
+
+      gaps = verdict.ok ? verdict.value.gaps : [];
     }
 
     // SPEC 13.18: recheck verdict commit CI after evidence collection.
@@ -2336,29 +2428,6 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     // SPEC 11.3: heartbeat transitions to arbiter phase.
     updateHeartbeat(root, { phase: 'arbiter', updated_at: ctx.now().toISOString() });
 
-    // The arbiter judges claims against R2's measurements; the reviewer contributes its verdict
-    // value and its own mismatches, and its evidence stays on record in verdict.md.
-    // SPEC 13.14: R2-measured failed acceptance extracted before arbitrate so we can
-    // record acceptance.failed regardless of the arbiter's rule.
-    const r2FailedAcceptance = collected.verify
-      .filter((r) => !r.passed)
-      .map((r) => ({
-        cmd: r.cmd,
-        exit_code: r.exit_code,
-        expect: expectOf(r.cmd, verifyCommands(config.verify.commands, batch)),
-        // SPEC 16.23: build output_tail from the command's stdout and stderr.
-        output_tail: buildOutputTail(r.stdout, r.stderr, redact),
-      }));
-    const decision = arbitrate({
-      claims: report.claims,
-      verdict: verdict.ok
-        ? { ok: true, value: { ...verdict.value, evidence: collected.evidence } }
-        : verdict,
-      approvedDeps: APPROVED_DEPENDENCIES,
-      testCommand: collected.testCommand ?? 'npm test',
-      // R2's own judgement of every command against its expect (verify.ts), full stdout included.
-      failedAcceptance: r2FailedAcceptance,
-    });
     for (const m of decision.mismatches) {
       rec.record('claim.mismatch', {
         rule: m.rule,
@@ -2406,6 +2475,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
           reason: decision.reason,
           cause: 'evidence_unavailable',
           detail,
+          // SPEC 16.29: assumed true when reviewer was not called.
+          ...(reviewerSkipped ? { assumed: true } : {}),
         });
       } else {
         rec.record('verdict.downgraded', {
@@ -2413,6 +2484,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
           to: decision.final,
           rule: decision.rule,
           reason: decision.reason,
+          // SPEC 16.29: assumed true when reviewer was not called.
+          ...(reviewerSkipped ? { assumed: true } : {}),
         });
       }
     } else if (decision.downgraded) {
@@ -2421,6 +2494,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
         to: decision.final,
         rule: decision.rule,
         reason: decision.reason,
+        // SPEC 16.29: assumed true when reviewer was not called.
+        ...(reviewerSkipped ? { assumed: true } : {}),
       });
     }
 
@@ -2435,7 +2510,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     });
     // R2 commits its envelopes only after the worker has exited (CONSTRAINTS 铁律 19).
     const envelopes = [relative(root, progressPath)];
-    if (existsSync(verdictPath(root, batchId)))
+    // SPEC 16.29: no verdict.md when reviewer was skipped.
+    if (!reviewerSkipped && existsSync(verdictPath(root, batchId)))
       envelopes.push(relative(root, verdictPath(root, batchId)));
     // SPEC 12.2: --continue mode updates the backlog status column in this commit.
     // FIX verdicts skip: the --continue loop retries and only writes 'blocked' on fix_max.
@@ -2478,7 +2554,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     return finish(decision.final, {
       decision,
       evidence: collected.evidence,
-      gaps: verdict.ok ? verdict.value.gaps : [],
+      gaps,
       ...(evidenceUnavailableCause !== undefined ? { evidenceUnavailableCause } : {}),
       ...(auditResult !== undefined ? { auditResult } : {}),
     });

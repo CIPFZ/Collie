@@ -254,7 +254,7 @@ describe('schema: Event round-trip', () => {
   });
 
   it('defines the v0.1 event types plus v0.2 and v0.3 types added so far', () => {
-    expect(EVENT_TYPES).toHaveLength(44);
+    expect(EVENT_TYPES).toHaveLength(45);
     expect(EVENT_TYPES).toContain('ci.wait_timeout');
     expect(EVENT_TYPES).toContain('acceptance.failed');
     // v0.46 (SPEC 16.14): R2 records its own commits by sha.

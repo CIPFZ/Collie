@@ -316,9 +316,7 @@ describe('queue: rule 9 twice on the same head_sha escalates', () => {
     const fetch = ciFailureFetch();
     const runner = new FakeRunner([
       workerWithPush(box, BATCH_ID, shaStore),
-      reviewerPass(BATCH_ID),
       workerSameHead(box, BATCH_ID, shaStore),
-      reviewerPass(BATCH_ID),
     ]);
     const code = await box.cli(['run', '--continue', '--max', '1'], runner, { fetch });
     expect(code).toBe(20);
@@ -354,11 +352,8 @@ describe('queue: rule 9 twice on the same head_sha escalates', () => {
     const fetch = ciFailureFetch();
     const runner = new FakeRunner([
       workerWithPush(box, BATCH_ID, shaStore),
-      reviewerPass(BATCH_ID),
       workerWithPush(box, BATCH_ID, shaStore),
-      reviewerPass(BATCH_ID),
       workerWithPush(box, BATCH_ID, shaStore),
-      reviewerPass(BATCH_ID),
     ]);
     const code = await box.cli(['run', '--continue', '--max', '1'], runner, { fetch });
     // Ends with fix_max (exit 20), not rule9_same_head.
@@ -390,7 +385,6 @@ describe('queue: rule 9 twice on the same head_sha escalates', () => {
     // Run 2 (fix retry): worker pushes, CI success → PASS → gate passes → queue continues.
     const runner = new FakeRunner([
       workerNoPush(box, BATCH_ID),
-      reviewerPass(BATCH_ID),
       workerPushForPass(box, BATCH_ID),
       reviewerPass(BATCH_ID),
     ]);
@@ -419,9 +413,7 @@ describe('queue: rule 9 twice on the same head_sha escalates', () => {
     const fetch = ciFailureFetch();
     const runner1 = new FakeRunner([
       workerWithPush(box, BATCH_ID, shaStoreA),
-      reviewerPass(BATCH_ID),
       workerSameHead(box, BATCH_ID, shaStoreA),
-      reviewerPass(BATCH_ID),
     ]);
     const code1 = await box.cli(['run', '--continue', '--max', '1'], runner1, { fetch });
     expect(code1).toBe(20); // rule9_same_head
@@ -452,9 +444,7 @@ describe('queue: rule 9 twice on the same head_sha escalates', () => {
     const shaStoreB: string[] = [];
     const runner2 = new FakeRunner([
       workerWithPush(box, BATCH_ID, shaStoreB),
-      reviewerPass(BATCH_ID),
       workerSameHead(box, BATCH_ID, shaStoreB),
-      reviewerPass(BATCH_ID),
     ]);
     const code2 = await box.cli(['run', '--continue', '--max', '1'], runner2, { fetch });
     expect(code2).toBe(20); // rule9_same_head

@@ -71,11 +71,16 @@ describe('scenario A: CI claimed green, CI actually ran on master', () => {
     expect(box.eventTypes()).not.toContain('claim.mismatch');
   });
 
-  it('ran the reviewer in a head_sha worktree that holds no report.md (SPEC 3.5)', async () => {
+  it('reviewer skipped because rule 7 detected in pre-arbitration (SPEC 16.29)', async () => {
     box.ciBranch = 'master';
     await box.run(runner());
-    expect(box.reviewerSawReport).toBe(false);
-    expect(box.reviewerCwd).not.toBe(box.root);
+    const events = box.events();
+    // Reviewer was not called (skipped by pre-arbitration).
+    expect(events.filter((e) => e.event === 'reviewer.started')).toHaveLength(0);
+    // reviewer.skipped event with rule 7.
+    const skipped = events.find((e) => (e.event as string) === 'reviewer.skipped');
+    expect(skipped).toBeDefined();
+    expect((skipped as unknown as { rule: number }).rule).toBe(7);
   });
 
   it('collie show reconstructs the decision and its evidence chain', async () => {
@@ -86,7 +91,8 @@ describe('scenario A: CI claimed green, CI actually ran on master', () => {
     const shown = box.output.join('');
     expect(shown).toContain('== task.md ==');
     expect(shown).toContain('"ci_passed": true'); // the claim, from report.md
-    expect(shown).toContain('"verdict": "PASS"'); // the fooled reviewer, from verdict.md
+    // SPEC 16.29: reviewer skipped, no verdict.md — check reviewer.skipped in journal.
+    expect(shown).toMatch(/reviewer\.skipped rule=7/);
     expect(shown).toMatch(
       /claim\.mismatch rule=7 field=ci_passed claimed=true actual=\{"ci_conclusion":"unknown","ci_branch_matched":false\}/,
     );

@@ -376,15 +376,13 @@ describe('scenario L group c: rule 9 consecutive → queue.paused rule9_twice', 
     // FIX retry: worker pushes → PASS. Journal has verdict.downgraded rule=9 from attempt 1.
     // After second batch PASS, rule9_twice fires because both batches had rule 9.
     const runner = new FakeRunner([
-      // v99-b01 attempt 1: no push → rule 9 → FIX
+      // v99-b01 attempt 1: no push → rule 9 → FIX (reviewer skipped, SPEC 16.29)
       queueWorkerScene(box, 'v99-b01', false),
-      reviewerClean(box, 'v99-b01'),
       // v99-b01 attempt 2 (FIX retry): push → PASS
       queueWorkerScene(box, 'v99-b01', true),
       reviewerClean(box, 'v99-b01'),
-      // v99-c01 attempt 1: no push → rule 9 → FIX
+      // v99-c01 attempt 1: no push → rule 9 → FIX (reviewer skipped, SPEC 16.29)
       queueWorkerScene(box, 'v99-c01', false),
-      reviewerClean(box, 'v99-c01'),
       // v99-c01 attempt 2 (FIX retry): push → PASS
       queueWorkerScene(box, 'v99-c01', true),
       reviewerClean(box, 'v99-c01'),
@@ -396,11 +394,9 @@ describe('scenario L group c: rule 9 consecutive → queue.paused rule9_twice', 
   it('records queue.paused with reasons containing "rule9_twice"', async () => {
     const runner = new FakeRunner([
       queueWorkerScene(box, 'v99-b01', false),
-      reviewerClean(box, 'v99-b01'),
       queueWorkerScene(box, 'v99-b01', true),
       reviewerClean(box, 'v99-b01'),
       queueWorkerScene(box, 'v99-c01', false),
-      reviewerClean(box, 'v99-c01'),
       queueWorkerScene(box, 'v99-c01', true),
       reviewerClean(box, 'v99-c01'),
     ]);
@@ -414,11 +410,9 @@ describe('scenario L group c: rule 9 consecutive → queue.paused rule9_twice', 
   it('both batches have verdict.downgraded rule=9 in the journal', async () => {
     const runner = new FakeRunner([
       queueWorkerScene(box, 'v99-b01', false),
-      reviewerClean(box, 'v99-b01'),
       queueWorkerScene(box, 'v99-b01', true),
       reviewerClean(box, 'v99-b01'),
       queueWorkerScene(box, 'v99-c01', false),
-      reviewerClean(box, 'v99-c01'),
       queueWorkerScene(box, 'v99-c01', true),
       reviewerClean(box, 'v99-c01'),
     ]);

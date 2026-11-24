@@ -140,11 +140,11 @@ describe('exit-codes: the journal of a full run (SPEC 3.6)', () => {
       'batch.task_written',
       'worker.started',
       'worker.finished',
+      'ci.resolved',
+      'evidence.collected',
       'reviewer.started',
       'reviewer.finished',
       'reviewer.verdict',
-      'ci.resolved',
-      'evidence.collected',
       'r2.commit',
       'verdict.pushed',
       'run.finished',
@@ -471,7 +471,6 @@ describe('exit-codes: reviewer event stream falls to reviewer.stream.ndjson (SPE
     const runDirs = readdirSync(runsDir).sort();
     const runDir = runDirs[0] ?? '';
     const streamContent = readFileSync(join(runsDir, runDir, REVIEWER_STREAM_FILE_NAME), 'utf8');
-    // The secret should be masked by the redact mechanism.
     expect(streamContent).not.toContain(secretToken);
     expect(streamContent).toContain('***');
   });

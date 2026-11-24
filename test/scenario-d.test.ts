@@ -68,7 +68,8 @@ describe('scenario D: honest worker, failing acceptance, reviewer PASS', () => {
     expect(await box.cli(['show', BATCH], undefined)).toBe(0);
     const shown = box.output.join('');
     expect(shown).toContain('"tests_failed": 3'); // the honest claim, from report.md
-    expect(shown).toContain('"verdict": "PASS"'); // the reviewer, from verdict.md
+    // SPEC 16.29: reviewer skipped (rule 8), no verdict.md — check reviewer.skipped in journal.
+    expect(shown).toMatch(/reviewer\.skipped rule=8/);
     expect(shown).toMatch(/acceptance\.failed cmd=sh run-tests\.sh exit_code=1 expect=exit_zero/);
     expect(shown).toMatch(/verdict\.downgraded from=PASS to=FIX rule=8/);
     expect(shown).toMatch(/run\.finished verdict=FIX exit_code=10/);

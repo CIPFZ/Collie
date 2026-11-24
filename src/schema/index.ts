@@ -335,6 +335,8 @@ export const EVENT_TYPES = [
   // v0.46 (SPEC 16.18): batch cleanup after final block/fix_max in queue mode.
   'batch.cleanup',
   'batch.cleanup_failed',
+  // v0.46 (SPEC 16.29): reviewer skipped because evidence alone determined the verdict.
+  'reviewer.skipped',
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);

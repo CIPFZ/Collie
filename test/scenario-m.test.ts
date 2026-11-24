@@ -283,17 +283,15 @@ describe('scenario M: CI failure → normal FIX, retried by queue', () => {
     box.write('docs/backlog.md', pendingBacklog);
     await box.commitAll('chore: set batch to pending for CI failure test');
 
-    // fix_max is 2 (from config). We need 3 worker+reviewer rounds (1 + 2 retries).
+    // fix_max is 2 (from config). We need 3 worker rounds (1 + 2 retries).
+    // SPEC 16.29: reviewer skipped when rule 9 fires (CI failure).
     const runner = new FakeRunner([
-      // Round 1: worker pushes, reviewer says PASS, CI says failure → rule 9 FIX (no cause)
+      // Round 1: worker pushes, CI says failure → rule 9 FIX (reviewer skipped)
       mWorkerScene(box, BATCH, true),
-      reviewerPass(box, BATCH),
       // Round 2: retry
       mWorkerScene(box, BATCH, true),
-      reviewerPass(box, BATCH),
       // Round 3: retry (exceeds fix_max=2)
       mWorkerScene(box, BATCH, true),
-      reviewerPass(box, BATCH),
     ]);
     const code = await box.cli(['run', '--continue'], runner, { fetch: ciFailureFetch() });
     // fix_max exceeded → BLOCK exit code 20.

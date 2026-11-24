@@ -191,44 +191,8 @@ function queueReviewerFixScene(
   };
 }
 
-// Reviewer that says PASS but worker didn't push → arbiter rule 9 downgrade.
-function unpushedReviewerPassScene(
-  box: Sandbox,
-  batchId: string,
-): {
-  expectRole: 'reviewer';
-  effect: (ctx: FakeSceneContext) => void;
-  result: { exitCode: number; finalText: string };
-} {
-  const body: Verdict = {
-    schema_version: 1,
-    batch_id: batchId,
-    verdict: 'PASS',
-    evidence: {
-      commits_actual: [],
-      verify_results: [{ cmd: TEST_CMD, exit_code: 0, summary: '1 passed, 0 failed' }],
-      remote_has_head: true,
-      ci_conclusion: 'success',
-      ci_run_url: '',
-      ci_branch_matched: true,
-      deps_diff: [],
-      spec_diff_lines: 0,
-    },
-    claim_mismatches: [],
-    gaps: [],
-    reason: 'all good',
-  };
-  return {
-    expectRole: 'reviewer',
-    effect: ({ cwd }: FakeSceneContext) => {
-      box.reviewerCwd = cwd;
-    },
-    result: {
-      exitCode: 0,
-      finalText: `# 裁决\n\n通过。\n\n${FENCE}json\n${JSON.stringify(body, null, 2)}\n${FENCE}\n`,
-    },
-  };
-}
+// SPEC 16.29 (v046-b43): unpushed reviewer scene removed — when the worker
+// doesn't push, rule 9 fires in pre-arbitration and the reviewer is skipped.
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -421,7 +385,6 @@ describe('queue journal correctness (SPEC 13.10, v04-b07)', () => {
 
     const runner = new FakeRunner([
       unpushedWorker(),
-      unpushedReviewerPassScene(box, 'v99-b01'),
       // Round 2: worker pushes this time.
       capturingWorker(),
       queueReviewerPassScene(box, 'v99-b01'),
@@ -782,12 +745,7 @@ describe('queue journal correctness (SPEC 13.10, v04-b07)', () => {
       );
     };
 
-    const runner = new FakeRunner([
-      pushingWorkerCaptureSha(),
-      unpushedReviewerPassScene(box, 'v99-b01'),
-      capturingPushingWorker(),
-      queueReviewerPassScene(box, 'v99-b01'),
-    ]);
+    const runner = new FakeRunner([pushingWorkerCaptureSha(), capturingPushingWorker()]);
     await box.cli(['run', '--continue', '--max', '1'], runner, { fetch: failureFetch });
 
     // Task should contain 降级原因 section with rule 9 and the CI info.
@@ -883,7 +841,6 @@ describe('queue journal correctness (SPEC 13.10, v04-b07)', () => {
 
     const runner = new FakeRunner([
       unpushedWorkerWithSha(),
-      unpushedReviewerPassScene(box, 'v99-b01'),
       capturingPushingWorker(),
       queueReviewerPassScene(box, 'v99-b01'),
     ]);
