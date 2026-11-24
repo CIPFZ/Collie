@@ -2524,4 +2524,24 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：1（wallclock）
+
+### v046-b43 · r-20261124091911 · FIX
+
+- 时间：2026-11-24T10:09:59.014Z
+- 裁定：规则 6，claimed test counts differ from "npm test" as run by the reviewer
+- 提交：`9381223` `90e25a6`
+- 验收命令：6/7 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 1，1598 passed, 1 failed, 1 test files failed
+  - `npm run test:mutation` → exit 0，mutation: caught 47 survived 0 invalid 0 timeout 0 stale 0
+  - `npm test -- test/acceptance/v046-b43` → exit 0，8 passed, 0 failed
+  - `grep -vE "^\s*(//|\*|/\*)" src/run.ts | grep -qF "reviewer.skipped" && grep -qF "reviewer.skipped" src/schema/index.ts` → exit 0，exit 0
+  - `grep -qF "records reviewer.skipped (v046-b43)" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：failure，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/45366177169
+- 受保护文件改动行数：0
+- 依赖变化：无
+- 声称与实测不符：tests
+- worker 退出码：0
 <!-- collie:runs:end -->
