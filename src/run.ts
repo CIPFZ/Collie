@@ -869,12 +869,13 @@ export async function batchHistory(
       }
 
       // SPEC 13.21 (v04-b16): collect claim.mismatch events for the FIX section.
+      // SPEC 16.30: non-string claimed/actual rendered as compact JSON (JSON.stringify).
       const claimMismatches = batchEvents
         .filter((e) => e.event === 'claim.mismatch')
         .map((e) => ({
           field: typeof e.field === 'string' ? e.field : '',
-          claimed: typeof e.claimed === 'string' ? e.claimed : '',
-          actual: typeof e.actual === 'string' ? e.actual : '',
+          claimed: typeof e.claimed === 'string' ? e.claimed : JSON.stringify(e.claimed),
+          actual: typeof e.actual === 'string' ? e.actual : JSON.stringify(e.actual),
         }));
 
       // SPEC 16.13 (v046-b11): when rule 9 fired, extract head_sha and run_url from last ci.resolved.

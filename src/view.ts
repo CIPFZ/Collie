@@ -886,8 +886,16 @@ export interface WhyAttempt {
     rule: number;
     reason: string;
     cause: string | null;
+    /** SPEC 16.30: true when reviewer was not called (verdict assumed PASS). */
+    assumed?: true;
   } | null;
   escalated: string | null;
+
+  /** SPEC 16.30: present only when the reviewer was skipped (journal has reviewer.skipped). */
+  reviewerSkipped?: {
+    rule: number;
+    reason: string;
+  };
 
   /** 8. Interrupts: run.orphaned / worker.signaled / worker.rescued / worker.resumed. */
   interrupts: { event: string; ts: string; detail: Record<string, unknown> }[];
@@ -1101,6 +1109,8 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
           rule: asNumber(downgradeEvent.rule) ?? 0,
           reason: asString(downgradeEvent.reason) ?? '—',
           cause: asString(downgradeEvent.cause),
+          // SPEC 16.30: assumed true when reviewer was not called.
+          ...(downgradeEvent.assumed === true ? { assumed: true as const } : {}),
         }
       : null;
 
@@ -1112,6 +1122,16 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
   const interrupts = events
     .filter((e) => WHY_INTERRUPT_TYPES.has(e.event))
     .map((e) => ({ event: e.event, ts: e.ts, detail: eventDetail(e) }));
+
+  // SPEC 16.30: reviewer.skipped → attempt gets reviewerSkipped.
+  const reviewerSkippedEvent = findEvent(events, 'reviewer.skipped');
+  const reviewerSkipped =
+    reviewerSkippedEvent !== undefined
+      ? {
+          rule: asNumber(reviewerSkippedEvent.rule) ?? 0,
+          reason: asString(reviewerSkippedEvent.reason) ?? '',
+        }
+      : undefined;
 
   // 9. Tool denied.
   const toolDenied = events
@@ -1230,6 +1250,10 @@ function projectWhyAttempt(events: readonly Event[], attempt: number, runId: str
   };
   if (tester !== undefined) {
     result.tester = tester;
+  }
+  // SPEC 16.30: reviewerSkipped only present when reviewer was skipped.
+  if (reviewerSkipped !== undefined) {
+    result.reviewerSkipped = reviewerSkipped;
   }
   return result;
 }
@@ -1435,6 +1459,9 @@ export function formatWhy(proj: WhyProjection): string {
         `duration=${formatDuration(a.reviewer.durationMs)}`,
       ];
       lines.push(`reviewer: ${dash(a.reviewer.verdict)}${gapStr} ${revParts.join(' ')}`);
+    } else if (a.reviewerSkipped != null) {
+      // SPEC 16.30: reviewer was skipped by pre-arbitration.
+      lines.push(`reviewer: skipped (rule ${String(a.reviewerSkipped.rule)})`);
     } else {
       lines.push('reviewer: —');
     }
@@ -1470,8 +1497,10 @@ export function formatWhy(proj: WhyProjection): string {
     if (a.downgraded !== null) {
       const d = a.downgraded;
       const causePart = d.cause !== null ? ` cause=${d.cause}` : '';
+      // SPEC 16.30: when assumed, show "PASS (assumed)" instead of "PASS".
+      const fromDisplay = d.assumed === true ? `${d.from} (assumed)` : d.from;
       lines.push(
-        `verdict.downgraded: ${d.from} → ${d.to}, rule ${String(d.rule)}: ${d.reason}${causePart}`,
+        `verdict.downgraded: ${fromDisplay} → ${d.to}, rule ${String(d.rule)}: ${d.reason}${causePart}`,
       );
     }
     if (a.escalated !== null) {
