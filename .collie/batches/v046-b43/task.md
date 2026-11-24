@@ -1,12 +1,13 @@
 ---
 schema_version: 1
-run_id: r-20261124080901
+run_id: r-20261124091911
 batch_id: v046-b43
 base_sha: 920a9194beb3220c300d7f87671afb8bf22e41f1
-created_at: 2026-11-24T08:19:02.796Z
-attempt: 1
-interrupted_at: null
+created_at: 2026-11-24T09:19:11.926Z
+attempt: 2
+interrupted_at: r-20261124080901 wallclock run.finished@2026-11-24T09:19:11.088Z
 issued_by: collie
+rescue_sha: 9381223ae46097841ee7007db71edbb05773817e
 ---
 
 # 批次 v046-b43：先取证再审核：取证没过就不拉起 reviewer（需求审查第 1 批，带情形）
@@ -76,3 +77,10 @@ issued_by: collie
 完成后写 `.collie/batches/v046-b43/report.md`：固定四段（做了什么 / 测试结果 / 偏离或疑问 / 下一步建议）
 + 尾部围栏 JSON 块，格式见 SPEC 3.4。
 写完后以 `report(collie): v046-b43` 为提交信息单独提交并推送该文件。
+
+## 上一轮中断
+
+中断信息：`r-20261124080901 wallclock run.finished@2026-11-24T09:19:11.088Z`
+救援提交：`9381223ae46097841ee7007db71edbb05773817e`
+
+请先核实 `9381223ae46097841ee7007db71edbb05773817e` 中的半成品是否完整，不要把它当作已完成。
