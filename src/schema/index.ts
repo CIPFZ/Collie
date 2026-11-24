@@ -435,22 +435,37 @@ export const VerifyEvidenceSchema = z.strictObject({
   summary: z.string(),
 });
 
+/** SPEC 16.30: evidence shape, shared between VerdictSchema (optional) and R2's own type. */
+export const EvidenceSchema = z.strictObject({
+  commits_actual: z.array(ShaSchema),
+  verify_results: z.array(VerifyEvidenceSchema),
+  remote_has_head: z.boolean(),
+  ci_conclusion: CiConclusionSchema,
+  /** May be empty when no run was found. */
+  ci_run_url: z.string(),
+  /** null: R4 could not obtain the evidence (SPEC 3.5). */
+  ci_branch_matched: z.boolean().nullable(),
+  deps_diff: z.array(z.string()),
+  spec_diff_lines: z.number().int().nonnegative(),
+});
+
 /** Trailing JSON block of verdict.md (SPEC 3.5). Written by R4, read by R2. */
 export const VerdictSchema = z.strictObject({
   schema_version: z.literal(SCHEMA_VERSION),
   batch_id: BatchIdSchema,
   verdict: VerdictValueSchema,
-  evidence: z.strictObject({
-    commits_actual: z.array(ShaSchema),
-    verify_results: z.array(VerifyEvidenceSchema),
-    remote_has_head: z.boolean(),
-    ci_conclusion: CiConclusionSchema,
-    /** May be empty when no run was found. */
-    ci_run_url: z.string(),
-    /** null: R4 could not obtain the evidence (SPEC 3.5). */
-    ci_branch_matched: z.boolean().nullable(),
-    deps_diff: z.array(z.string()),
-    spec_diff_lines: z.number().int().nonnegative(),
+  // SPEC 16.30: evidence is optional — reviewer may omit it; R2 uses its own measurement.
+  // The default ensures the parsed Verdict type always has evidence (arbiter destructures it),
+  // while the schema accepts verdicts without the key (like claim_mismatches).
+  evidence: EvidenceSchema.optional().default({
+    commits_actual: [],
+    verify_results: [],
+    remote_has_head: false,
+    ci_conclusion: 'unknown',
+    ci_run_url: '',
+    ci_branch_matched: null,
+    deps_diff: [],
+    spec_diff_lines: 0,
   }),
   // SPEC 3.5 does not specify item shapes; v045-b13: made optional (defaults to []).
   claim_mismatches: z.array(JsonValueSchema).optional().default([]),

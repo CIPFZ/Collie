@@ -10,6 +10,7 @@ import { EnvelopeError, lastJsonBlock } from '../schema/envelope.js';
 import {
   AcceptanceSchema,
   BatchIdSchema,
+  EvidenceSchema,
   ShaSchema,
   VerdictSchema,
   type Acceptance,
@@ -37,6 +38,8 @@ export const ReviewerInputSchema = z.strictObject({
   /** In parseBacklog form: the commands to run verbatim (SPEC 3.2). */
   acceptance: z.array(AcceptanceSchema).nonempty(),
   spec_paths: z.array(z.string().min(1)).nonempty(),
+  /** SPEC 16.30: R2's evidence, optional; when present the prompt includes an evidence section. */
+  evidence: EvidenceSchema.optional(),
 });
 export type ReviewerInput = z.infer<typeof ReviewerInputSchema>;
 
@@ -85,6 +88,24 @@ export function verdictPath(root: string, batchId: string): string {
   return join(root, BATCHES_RELATIVE_DIR, BatchIdSchema.parse(batchId), VERDICT_FILE_NAME);
 }
 
+/** SPEC 16.30: builds the "R2 的取证结果" section when evidence is provided. */
+function buildEvidenceSection(evidence: NonNullable<ReviewerInput['evidence']>): string {
+  const lines: string[] = [
+    '## R2 的取证结果',
+    '',
+    '以下是调度程序在 `head_sha` 上实测的结果：',
+    '',
+  ];
+  for (const r of evidence.verify_results) {
+    lines.push(`- \`${r.cmd}\` → exit ${String(r.exit_code)}：${r.summary}`);
+  }
+  lines.push(`- 已推送：${evidence.remote_has_head ? '是' : '否'}`);
+  lines.push(`- CI：${evidence.ci_conclusion}`);
+  lines.push(`- 受保护文件改动行数：${String(evidence.spec_diff_lines)}`);
+  lines.push(`- 依赖变化：${String(evidence.deps_diff.length)} 项`);
+  return lines.join('\n');
+}
+
 /** Builds the reviewer prompt from the SPEC 4.2 allow-list only. */
 export function buildReviewerPrompt(input: ReviewerInput): string {
   const data = validInput(input);
@@ -120,6 +141,8 @@ export function buildReviewerPrompt(input: ReviewerInput): string {
           `${String(i + 1)}. ${a.desc}（期望：${expectText(a.expect)}）\n\n${fenced(a.cmd)}\n`,
       ),
     ].join('\n'),
+    // SPEC 16.30: evidence section, only when R2's evidence is provided.
+    ...(data.evidence !== undefined ? [buildEvidenceSection(data.evidence)] : []),
     ['## 需要自行阅读的 SPEC 章节', '', ...data.spec_paths.map((p) => `- \`${p}\``)].join('\n'),
     [
       '## 输出',

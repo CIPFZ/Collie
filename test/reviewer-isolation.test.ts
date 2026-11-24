@@ -56,7 +56,7 @@ afterEach(() => {
 describe('reviewer-isolation: compile time', () => {
   it('accepts exactly the SPEC 4.2 allow-list of input fields', () => {
     expectTypeOf<keyof ReviewerInput>().toEqualTypeOf<
-      'batch_id' | 'base_sha' | 'head_sha' | 'items' | 'acceptance' | 'spec_paths'
+      'batch_id' | 'base_sha' | 'head_sha' | 'items' | 'acceptance' | 'spec_paths' | 'evidence'
     >();
   });
 

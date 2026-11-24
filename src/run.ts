@@ -2269,6 +2269,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
             items: batch.items,
             acceptance: batch.acceptance,
             spec_paths: ['SPEC.md', 'CONSTRAINTS.md'],
+            // SPEC 16.30: hand R2's evidence to the reviewer.
+            evidence: collected.evidence,
           },
           tree,
           {

@@ -12,16 +12,18 @@ import {
 } from './ci.js';
 import { diffNameOnly, diffStat, log, remoteContains, revParse, showFile } from './git.js';
 import {
+  EvidenceSchema,
   PackageJsonSchema,
   PackageLockSchema,
   type Acceptance,
   type CiConclusion,
   type CollieConfig,
-  type Verdict,
 } from './schema/index.js';
+import type { z } from 'zod';
 import { runAcceptance, type VerifyResult } from './verify.js';
 
-export type Evidence = Verdict['evidence'];
+/** R2's own evidence — always has all fields (SPEC 16.30). */
+export type Evidence = z.infer<typeof EvidenceSchema>;
 
 /**
  * Files the worker must not change (CONSTRAINTS 铁律 1, AGENT-worker.md 2).
