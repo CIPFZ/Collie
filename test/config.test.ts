@@ -133,6 +133,7 @@ describe('config: template config (SPEC 3.1 values)', () => {
       redcheck_secs: 600,
       worktree_secs: 1800,
       api_retry_wait_secs: 300,
+      smoke_max_secs: 60,
     });
   });
 

@@ -54,6 +54,14 @@ export const DEFAULT_WORKTREE_SECS = 1800;
 // eslint-disable-next-line no-restricted-syntax -- SPEC 16.18: api retry wait default, named constant
 export const DEFAULT_API_RETRY_WAIT_SECS = 300;
 
+/**
+ * SPEC 16.28: default smoke_max_secs — preflight --smoke runner check rejects
+ * when a single model call takes longer than this many seconds.
+ * Used when the field is absent from collie.toml.
+ */
+// eslint-disable-next-line no-restricted-syntax -- SPEC 16.28: smoke max seconds default, named constant
+export const DEFAULT_SMOKE_MAX_SECS = 60;
+
 /** JSON value, the only payload an NDJSON event line can round-trip losslessly (SPEC 3.6). */
 export type JsonValue =
   string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -164,6 +172,8 @@ export const LimitsSchema = z.strictObject({
     .nonnegative()
     .optional()
     .default(DEFAULT_API_RETRY_WAIT_SECS),
+  /** SPEC 16.28: preflight --smoke runner max seconds; optional, defaults to 60. */
+  smoke_max_secs: z.number().int().positive().optional().default(DEFAULT_SMOKE_MAX_SECS),
 });
 export type Limits = z.infer<typeof LimitsSchema>;
 

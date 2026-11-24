@@ -144,13 +144,15 @@ const SMOKE_MAX_TURNS = 1; // SPEC 14.1: same as collie smoke
 const SMOKE_PROMPT = 'Reply with the single word ok.';
 
 /**
- * SPEC 14.1 / 14.33 --smoke runner check: fire a trivial prompt with no tools.
- * exitCode !== 0 → ok: false; detail always ends with secs=<elapsed>.
+ * SPEC 14.1 / 14.33 / 16.28 --smoke runner check: fire a trivial prompt with no tools.
+ * exitCode !== 0 → ok: false; exitCode === 0 but secs > smokeMaxSecs → ok: false;
+ * detail always ends with secs=<elapsed>.
  */
 async function checkRunner(
   runner: AgentRunner,
   root: string,
   now: () => number,
+  smokeMaxSecs: number,
 ): Promise<PreflightCheck> {
   const name = 'runner';
   const t0 = now();
@@ -164,11 +166,21 @@ async function checkRunner(
       maxTurns: SMOKE_MAX_TURNS,
     });
     const secs = Math.round((now() - t0) / MS_PER_SEC);
-    const ok = result.exitCode === 0;
-    const parts = [`exitCode=${String(result.exitCode)}`];
-    if (result.stopReason !== undefined) parts.push(`stopReason=${result.stopReason}`);
-    parts.push(`secs=${String(secs)}`);
-    return { name, ok, detail: parts.join(' ') };
+    if (result.exitCode !== 0) {
+      const parts = [`exitCode=${String(result.exitCode)}`];
+      if (result.stopReason !== undefined) parts.push(`stopReason=${result.stopReason}`);
+      parts.push(`secs=${String(secs)}`);
+      return { name, ok: false, detail: parts.join(' ') };
+    }
+    // exitCode === 0: check against smoke_max_secs (SPEC 16.28).
+    if (secs > smokeMaxSecs) {
+      return {
+        name,
+        ok: false,
+        detail: `exitCode=0 secs=${String(secs)} exceeds smoke_max_secs=${String(smokeMaxSecs)}`,
+      };
+    }
+    return { name, ok: true, detail: `exitCode=0 secs=${String(secs)}` };
   } catch (error) {
     return { name, ok: false, detail: error instanceof Error ? error.message : String(error) };
   }
@@ -225,7 +237,9 @@ export async function runPreflight(opts: PreflightOpts): Promise<PreflightResult
 
   // Smoke checks (SPEC 14.1 --smoke).
   if (opts.smoke !== undefined) {
-    checks.push(await checkRunner(opts.smoke.runner, opts.root, nowFn));
+    checks.push(
+      await checkRunner(opts.smoke.runner, opts.root, nowFn, opts.config.limits.smoke_max_secs),
+    );
     checks.push(await checkCiQuery(opts.config, opts.root, opts.smoke.fetch));
   }
 

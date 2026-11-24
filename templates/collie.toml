@@ -47,6 +47,7 @@ redcheck_secs = 600
 worktree_secs = 1800
 # SPEC 16.18；模型接口出错后自动重跑前等待秒数（非负整数，可选，缺省 300）
 api_retry_wait_secs = 300
+# smoke_max_secs = 60   # 可选；preflight --smoke 调一次模型超过这么多秒就算不过（SPEC 16.28）
 
 [verify]
 # SPEC 3.1；reviewer 必跑的全局命令，批次级命令在 task 中追加
