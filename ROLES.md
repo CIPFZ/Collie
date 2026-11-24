@@ -3,7 +3,7 @@
 > 本文件是 Collie 的角色契约。**角色即权限**：边界靠工具白名单与路径权限物理隔离，不靠提示词约束。
 > 唯一可修改者：R1 方案设计 Agent（须用户批准）。
 
-更新时间：2026-10-16
+更新时间：2026-11-24（加 R6 测试 Agent；R4 一节等需求审查的批次落地后再改，SPEC 16.29）
 
 ---
 
@@ -11,7 +11,7 @@
 
 1. **单一事实源，单一修改者。** `SPEC.md` 与 `CONSTRAINTS.md` 全局只有一份、永远最新，
    只有 R1 能改且须用户批准。其他角色只读。所有人都能改等于所有人都不认。
-2. **代码只有一个写者。** R3 worker 独占代码写权限，其他角色一律不碰代码。
+2. **代码只有一个写者。** R3 worker 独占实现代码的写权限；验收测试由 R6 测试 Agent 写，worker 不能改。其他角色一律不碰代码。
 3. **角色即权限。** 每个角色有自己的 AGENT 手册、可读范围、可写范围、输出契约。
 4. **优先级一次排定，批次随之固定。** 方案确定阶段排定优先级后批次队列即固定，不做滚动拆解。
 
@@ -49,8 +49,9 @@
 身份：唯一的代码写者，每轮全新上下文。
 
 可读：`SPEC.md`、`CONSTRAINTS.md`、`AGENT-worker.md`、本批次 `task.md`、全部代码、`docs/progress.md`。
-可写：代码、测试、代码内注释。
-禁写：`SPEC.md`、`CONSTRAINTS.md`、ADR、`docs/backlog.md`、`docs/progress.md`、任何 `.collie/` 文件。
+可写：实现代码、普通测试、代码内注释。
+禁写：`SPEC.md`、`CONSTRAINTS.md`、ADR、`docs/backlog.md`、`docs/progress.md`、任何 `.collie/` 文件、`test/acceptance/` 下的验收测试（完整清单见 `AGENT-worker.md` 第 2 节）。
+认为某条验收测试写错了：不改它，在汇报里声明，由 R2 上报给 R1 裁定。
 
 为什么 worker 不能写 progress：worker 每轮全新上下文，它写的是「声称」而非事实。
 若它把半成品写成已完成，下一轮 worker 会把它当事实读入，错误被固化。
@@ -98,24 +99,36 @@
 
 发现 SPEC 需改时只能提出，由 R1 起草 ADR、用户批准。
 
+### R6 测试 Agent（v046-b21 起）
+
+身份：验收测试的写者。只在带「情形」的批次里被拉起，在 worker 之前运行，每次全新上下文。
+
+可读：`SPEC.md`、`CONSTRAINTS.md`、`AGENT-tester.md`、本批次的条目、情形与接口、全部现有代码。它在 worker 之前运行，拿不到 worker 的任何产出。
+可写：`test/acceptance/<批次>/` 下的 `new.test.ts`、`keep.test.ts`、`MAP.md`。它在 R2 给的临时工作目录里写，R2 过了红检查之后随 task 信封提交。
+禁写：一切其他；git 的写操作被拦。动了主工作区，R2 上报。
+
+R2 对它的产出做红检查：`new.test.ts` 里每条用例在还没有实现时必须执行了并且失败，`keep.test.ts` 里每条必须通过。不过就退回重写（上限 `tester_max`），再不过上报。
+它写错了测试怎么办：worker 在汇报里声明，R2 不拉审核、上报给 R1 裁定（SPEC 16.23）。
+
 ## 3. 权限矩阵
 
-| 路径 | R1 设计 | R2 调度 | R3 worker | R4 审核 | R5 体检 |
-|---|---|---|---|---|---|
-| `SPEC.md` | 写 | 读 | 读 | 读 | 读 |
-| `CONSTRAINTS.md` | 写 | 读 | 读 | 读 | 读 |
-| `AGENT-*.md` | 写 | 读 | 读自己的 | 读自己的 | 读自己的 |
-| `ROADMAP.md` / `ROLES.md` | 写 | 读 | 读 | 读 | 读 |
-| `docs/backlog.md` | 写 | 读 | 读 | 读 | 读 |
-| `docs/decisions/ADR-*.md` | 写 | 读 | 读 | 读 | 读 |
-| `docs/progress.md` | — | 写 | 读 | 读 | 读 |
-| `docs/reports/` | 读 | 写 | — | — | 写 audit |
-| `.collie/collie.toml` | 写 | 读 | 读 | 读 | 读 |
-| `.collie/batches/*/task.md` | — | 写 | 读 | 读 | — |
-| `.collie/batches/*/report.md` | 读 | 读 | 写 | **不读** | — |
-| `.collie/batches/*/verdict.md` | 读 | 读 | 读 | 写 | 读 |
-| `.collie/runs/` | — | 写 | — | — | 读 |
-| 代码与测试 | 读 | 读 | **写** | 读 | 读 |
+| 路径 | R1 设计 | R2 调度 | R3 worker | R4 审核 | R5 体检 | R6 测试 |
+|---|---|---|---|---|---|---|
+| `SPEC.md` | 写 | 读 | 读 | 读 | 读 | 读 |
+| `CONSTRAINTS.md` | 写 | 读 | 读 | 读 | 读 | 读 |
+| `AGENT-*.md` | 写 | 读 | 读自己的 | 读自己的 | 读自己的 | 读自己的 |
+| `ROADMAP.md` / `ROLES.md` | 写 | 读 | 读 | 读 | 读 | 读 |
+| `docs/backlog.md`、`docs/backlog-archive.md` | 写 | 读 | 读 | 读 | 读 | 读 |
+| `docs/decisions/ADR-*.md` | 写 | 读 | 读 | 读 | 读 | 读 |
+| `docs/progress.md` | — | 写 | 读 | 读 | 读 | 读 |
+| `docs/reports/` | 读 | 写 | — | — | 写 audit | — |
+| `.collie/collie.toml` | 写 | 读 | 读 | 读 | 读 | 读 |
+| `.collie/batches/*/task.md` | — | 写 | 读 | 读 | — | — |
+| `.collie/batches/*/report.md` | 读 | 读 | 写 | **不读** | — | — |
+| `.collie/batches/*/verdict.md` | 读 | 读 | 读 | 写 | 读 | — |
+| `.collie/runs/` | — | 写 | — | — | 读 | — |
+| 验收测试 `test/acceptance/` | 读 | 随信封提交；批次最终被拦时拿掉 | 读，不能改 | 读 | 读 | **写** |
+| 实现代码与普通测试 | 读 | 读 | **写** | 读 | 读 | 读 |
 
 ## 4. 八个环节
 

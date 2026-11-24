@@ -37,12 +37,13 @@
 > R1 签发自查（v046-b35、b36 后，SPEC 14.38）：一批是为了某个真实的命令或数据做的，情形里至少有一条用它的真实形状（b35 为变异检查做，情形里的脚本却都只往一个输出流打印）；
 > R1 签发自查（v046-b37 后，SPEC 14.39）：被拦的批次代码已经在主分支上时，补测试的批次不带情形（情形会全是 [保持]，测试 agent 那一步要至少一条 [新]）。
 > R1 签发自查（v046-b40 后，SPEC 14.41）：情形只写了「被拒绝的」时，补一条「被接受的」；[新] 情形里不夹「输出是合法 JSON」这类现在就成立的话；
+> R1 签发自查（v046-b43 签发时）：[新] 情形里先想清楚现有代码在这个脚本下会怎样失败；「退出码是几」「被调用了几次」这类在出错的路上也可能碰巧成立的期望，放进 [保持] 或换一种现在一定不成立的写法。
 > 要测试 agent 往沙箱配置里加一个键时，模板里不能有同名的真键（实现之后会重复）；写进规格的自查办法，先确认用到的命令出错时会报错。
 > 条目里要 worker 一定做到的事写成「必须」，并在验收里放一条能判定的命令，不写「能……就……」。
 > 情形要用到现有类型上还没有的字段时，在「接口」里写明；「接口」里点出可以照着搭的现有测试文件。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；v046-b30、b31、b32 已通过（SPEC 14.36）；v046-b33、b34 已通过（SPEC 14.37）；v046-b35、b36 已通过（SPEC 14.38）；v046-b37 是 `blocked`（代码采纳，补测试的是 v046-b39，SPEC 14.39）；v046-b39、b38 已通过（SPEC 14.40）；v046-b40 已通过，最早的 63 个批次已归档到 `docs/backlog-archive.md`（SPEC 14.41）；队列从 v046-b41 起，固定版本 `ae932f8`；本项目配置的全局命令里有变异检查，每次取证都跑
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；v046-b30、b31、b32 已通过（SPEC 14.36）；v046-b33、b34 已通过（SPEC 14.37）；v046-b35、b36 已通过（SPEC 14.38）；v046-b37 是 `blocked`（代码采纳，补测试的是 v046-b39，SPEC 14.39）；v046-b39、b38 已通过（SPEC 14.40）；v046-b40 已通过，最早的 63 个批次已归档到 `docs/backlog-archive.md`（SPEC 14.41）；v046-b41、b42 已通过（SPEC 14.42）；队列从 v046-b43 起，固定版本 `cca1f3b`，第三十二次队列由 `collie follow` 跑；本项目配置的全局命令里有变异检查，每次取证都跑
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -94,6 +95,7 @@
 | 104 | v046-b40 | 批次清单归档：已了结的批次挪进归档文件，解析时两处都读（带情形） | v046-b38 | passed |
 | 105 | v046-b41 | status、why、report 不再吞掉批次清单的错误（带情形） | v046-b40 | passed |
 | 106 | v046-b42 | preflight --smoke 的用时上限：调一次模型超过 60 秒算不过（带情形） | v046-b27 | passed |
+| 107 | v046-b43 | 先取证再审核：取证没过就不拉起 reviewer（需求审查第 1 批，带情形） | v046-b38 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -2036,3 +2038,62 @@ v046-b37 改了 `src/run.ts` 里的 `buildOutputTail` 与 `renderFixSection`：�
 - 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；测试里真的等待；新增依赖
+
+## v046-b43 先取证再审核：取证没过就不拉起 reviewer（需求审查第 1 批，带情形）
+
+优先级：107　依赖：v046-b38
+
+分工改造第 5 步「需求审查」的第 1 批（SPEC 16.24，所有者 2026-11-24 同意）。现在的顺序是 worker → reviewer → R2 取证：取证没过（验收命令失败、CI 红、动了受保护文件）的那些运行，reviewer 也照样跑了一遍，结论反正会被仲裁改掉。
+这一批把取证挪到 reviewer 之前，取证没过就不拉起 reviewer。仲裁规则本身不改。按新流程走：下面的「情形」先由测试 agent 写成验收测试，放在 `test/acceptance/v046-b43/`；你只写实现，不能改那个目录。
+
+情形：
+- S1 [新] 沙箱的全局验收命令里多一条 `sh fail.sh`（什么都不打印、以 1 退出）；假 worker 如实提交并推送；假运行器的脚本里有 worker、reviewer（判 PASS）两个场景；单批次跑一次：假运行器只被调用了 1 次，角色是 worker；journal 里有 `reviewer.skipped` 事件，它的 `rule` 是 8；journal 里没有 `reviewer.started`
+- S2 [新] S1 那一次运行：`verdict.downgraded` 事件的 `assumed` 是 true
+- S3 [新] 沙箱没有 `fail.sh`；假 worker 的代码提交另外改了 `SPEC.md`；脚本里有 worker、reviewer（判 PASS）两个场景；单批次跑一次：假运行器只被调用了 1 次；`reviewer.skipped` 事件的 `rule` 是 2
+- S4 [新] 沙箱没有 `fail.sh`，假 worker 如实，假 reviewer 判 PASS，单批次跑一次：journal 里 `evidence.collected` 排在 `reviewer.started` 之前
+- K1 [保持] S1 那一次运行：退出码 10；`verdict.downgraded` 的 `from` 是 `PASS`、`to` 是 `FIX`、`rule` 是 8；有 `cmd` 为 `sh fail.sh` 的 `acceptance.failed` 事件；`run.finished` 的 `verdict` 是 `FIX`
+- K2 [保持] S3 那一次运行：退出码 20；`evidence.collected` 的 `spec_diff_lines` 大于 0；`run.finished` 的 `verdict` 是 `BLOCK`、`rule` 是 2
+- K3 [保持] S4 那一次运行：退出码 0；假运行器被调用的先后是 worker、reviewer；journal 里没有 `reviewer.skipped`，也没有 `verdict.downgraded`
+- K4 [保持] 沙箱没有 `fail.sh`，假 worker 如实，假 reviewer 判 FIX，单批次跑一次：退出码 10；`run.finished` 的 `rule` 是 10
+
+接口：
+- 沙箱与场景用 `test/support/sandbox.ts` 导出的 `Sandbox`（`run(runner)` 是单批次；`events()`、`eventTypes()`、`read`、`write`、`commitAll`）、`workerScene`、`fooledReviewerScene(box, 'PASS' | 'FIX')`、`honestClaims`。
+  如实的假 worker：`workerScene(box, { passing: 47, failing: 0, push: true, claims: honestClaims(47) })`；让它在代码提交里另外改 `SPEC.md`：计划里加 `editSpec: true`
+- 往全局验收命令里加一条的办法，照 `test/acceptance/v046-b35/new.test.ts` 里的 `addNoisyScript`（那里的脚本叫 `noisy.sh`）
+- 假运行器是 `src/runner/fake.ts` 的 `FakeRunner`；它被调用了几次、各是什么角色，读它的 `calls`（每项有 `role`）。脚本里没用到的场景不算错
+- 本批次起多一种事件 `reviewer.skipped`（字段 `rule`：数字，`reason`：字符串）；`verdict.downgraded` 在没有拉起 reviewer 的运行里多带 `assumed: true`
+
+条目：
+1. 读 SPEC 16.29「第 1 批（v046-b43）的做法」一段（方案在 16.24）。`src/run.ts`：读到有效的汇报、核过提交之后先取证，再假定 reviewer 判了 PASS、拿 R2 自己的证据调用现有的 `arbitrate`。
+   结果不是 PASS：不拉起 reviewer，记 `reviewer.skipped`（`rule`、`reason`），其余事件、裁定、退出码、progress 与「reviewer 判了 PASS 而被仲裁改判」时相同，`verdict.downgraded` 多带 `assumed: true`；不写 `verdict.md`，不做 audit。
+   结果是 PASS：拉起 reviewer，拿它真实的结论再仲裁一次，与现在相同。`src/schema/index.ts` 的事件类型加 `reviewer.skipped`。`src/arbiter.ts` 不许改。
+2. 旧测试。取证没过的那些运行里 reviewer 不再被拉起，一些旧用例要跟着动。**只许做下面三类改动**，每一处都在「偏离或疑问」里列出文件、用例名、改了什么：
+   (a) 一个假运行器的脚本跨了几次运行、中间排着不会再被调用的 reviewer 场景：把那些场景拿掉；
+   (b) 断言这类运行里「reviewer 被调用过」或「有 `reviewer.started` / `reviewer.finished` / `reviewer.verdict` 事件」的：改成断言没有，并断言有 `reviewer.skipped`；
+   (c) 钉死事件先后的：`test/exit-codes.test.ts` 的 `records the v0.1 event sequence in order` 里 `ci.resolved`、`evidence.collected` 挪到 `reviewer.started` 之前；`test/schema.test.ts` 的事件类型个数 44 改成 45。
+   **别的断言一条都不许动**：这些用例里的退出码、规则号、`verdict.downgraded`、`acceptance.failed`、`claim.mismatch`、队列停下的原因，都必须原样通过。哪一条不动就过不了，停下，在「偏离或疑问」里写明。
+   `test/rule9-same-head.test.ts`、`test/scenario-l.test.ts`、`test/queue-limit.test.ts` 在做完 (a) 之后必须照常通过：它们守着「没有 reviewer 的规则 9 降级照样被队列认得」与返工次数的计数。
+3. `scripts/mutation.ts`：只在 `npm run test:mutation` 报 `stale` 时，把那一项的原文同步成新的代码，不删项。`test/invariants.test.ts` 加一条，用例名 `src/run.ts records reviewer.skipped (v046-b43)`。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/run.ts`、`src/schema/index.ts`、`test/invariants.test.ts`，以及条目 2 那三类改动涉及的 `test/` 下的普通测试文件（不含 `test/acceptance/`）；`scripts/mutation.ts` 仅限条目 3 说的情形。
+`test/acceptance/` 下的文件你不能改：你认为某条验收测试写错了，停下，照 `AGENT-worker.md` 第 5 节在汇报里写明并列进 `disputed_tests`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过（含各批次的验收测试） | `npm test` | exit 0 |
+| 本批次的验收测试通过 | `npm test -- test/acceptance/v046-b43` | exit 0 |
+| R2 认得新事件（不看注释行） | `grep -vE "^\s*(//\|\*\|/\*)" src/run.ts \| grep -qF "reviewer.skipped" && grep -qF "reviewer.skipped" src/schema/index.ts` | exit 0 |
+| 不变量同步 | `grep -qF "records reviewer.skipped (v046-b43)" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `test/acceptance/`、`AGENT-*.md`、`CONSTRAINTS.md`、`ROLES.md`、`.collie/collie.toml`、`.github/`、`eslint.config.js`、`vitest.config.ts`）
+- 改动 `src/arbiter.ts`、`src/gate.ts`、`src/evidence.ts`、`src/roles/`、`src/runner/`、`src/view.ts`、`src/follow.ts`；改任何一条规则的判定、`fix_max` 的计数、队列自动重跑的条件、收尾、上报路径
+- reviewer 被拉起之后的任何行为（它拿到什么、R2 怎么读它的结论）：那是下一批的事
+- 为了让测试过而删除或跳过任何测试；改写条目 2 三类之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
