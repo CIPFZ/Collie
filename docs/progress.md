@@ -2580,4 +2580,21 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b45 · r-20261124132831 · PASS
+
+- 时间：2026-11-24T14:02:45.283Z
+- 裁定：规则 10，CI 以 R2 取证为准。全部验收命令通过，条目要求与额外禁止逐条核对均满足，6 条情形的验收测试全部通过且对照情形描述覆盖正确，无已有测试改动，无受保护路径改动，无依赖变化。
+- 提交：`4e1cf80`
+- 验收命令：5/5 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1616 passed, 0 failed
+  - `npm run test:mutation` → exit 0，mutation: caught 47 survived 0 invalid 0 timeout 0 stale 0
+  - `npm test -- test/acceptance/v046-b45` → exit 0，6 passed, 0 failed
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/45407042763
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
