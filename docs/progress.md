@@ -2476,4 +2476,22 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b41 · r-20261124060256 · PASS
+
+- 时间：2026-11-24T06:32:28.984Z
+- 裁定：规则 10，All 5 acceptance commands pass. Worker changes are strictly scoped to src/cli.ts (shared tryLoadBacklog function used by status/why/report) and scripts/mutation.ts (comment number 11→14). No protected paths modified by worker, no dependency changes, no existing assertions altered. All 8 scenarios (S1-S4 new, K1-K4 keep) verified via acceptance tests. CI status unknown — deferred to R2.
+- 提交：`052d680`
+- 验收命令：6/6 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1581 passed, 0 failed
+  - `npm run test:mutation` → exit 0，mutation: caught 47 survived 0 invalid 0 timeout 0 stale 0
+  - `npm test -- test/acceptance/v046-b41` → exit 0，8 passed, 0 failed
+  - `grep -qF "Protected paths (14)" scripts/mutation.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/45339522069
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
