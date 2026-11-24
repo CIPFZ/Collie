@@ -739,6 +739,54 @@ async function syncWithRemote(
 }
 
 // ---------------------------------------------------------------------------
+// Sync cycle helper (SPEC 14.12 / 14.15 / 16.30)
+// ---------------------------------------------------------------------------
+
+/** Run one sync-with-remote cycle: push, track failures, deliver pending notification. */
+async function doSyncCycle(
+  root: string,
+  stateJson: FollowJson,
+  sendNotify: NotifySender,
+): Promise<void> {
+  const notifiedSet = new Set(stateJson.notified);
+  const syncResult = await syncWithRemote(root, sendNotify, notifiedSet);
+  if (syncResult.newNotified.length > 0) {
+    stateJson.notified = [...stateJson.notified, ...syncResult.newNotified];
+    saveFollowState(root, stateJson);
+  }
+
+  // SPEC 14.15 item 1: track consecutive sync failures
+  if (syncResult.syncFailed) {
+    stateJson.syncFailures = (stateJson.syncFailures ?? 0) + 1;
+    if (
+      stateJson.syncFailures >= SYNC_FAILURE_THRESHOLD &&
+      !new Set(stateJson.notified).has('pull')
+    ) {
+      await sendNotify('[Collie] git pull 连续失败');
+      stateJson.notified = [...stateJson.notified, 'pull'];
+    }
+    saveFollowState(root, stateJson);
+  } else {
+    // Sync succeeded: clear syncFailures and remove pull from notified
+    if ((stateJson.syncFailures ?? 0) > 0 || stateJson.notified.includes('pull')) {
+      stateJson.syncFailures = 0;
+      stateJson.notified = stateJson.notified.filter((k) => k !== 'pull');
+      saveFollowState(root, stateJson);
+    }
+  }
+
+  // SPEC 14.12 item 2: send pending queue-end notification when local is no longer ahead
+  if (stateJson.pendingReport !== undefined && !syncResult.localAhead) {
+    const pr = stateJson.pendingReport;
+    await sendNotify(
+      `[Collie] 队列 ${pr.qRunId} 结束：${pr.reason}，退出码 ${String(pr.exitCode)}。到对话里说「看」`,
+    );
+    stateJson.pendingReport = undefined;
+    saveFollowState(root, stateJson);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main loop (SPEC 14.4 / 14.9)
 // ---------------------------------------------------------------------------
 
@@ -776,6 +824,11 @@ export async function follow(opts: FollowOpts): Promise<number> {
   for (;;) {
     // Check timeout
     if (timeoutMs !== undefined && nowFn() - startTime >= timeoutMs) {
+      // SPEC 16.30: sync before timeout exit (not dry-run)
+      if (!dryRun) {
+        const timeoutState = loadFollowState(root);
+        await doSyncCycle(root, timeoutState, sendNotify);
+      }
       out('follow: timeout reached\n');
       return 0;
     }
@@ -785,42 +838,7 @@ export async function follow(opts: FollowOpts): Promise<number> {
 
     // SPEC 14.12 item 1: sync with remote before reading next.md (except dry-run)
     if (!dryRun) {
-      const notifiedSet = new Set(stateJson.notified);
-      const syncResult = await syncWithRemote(root, sendNotify, notifiedSet);
-      if (syncResult.newNotified.length > 0) {
-        stateJson.notified = [...stateJson.notified, ...syncResult.newNotified];
-        saveFollowState(root, stateJson);
-      }
-
-      // SPEC 14.15 item 1: track consecutive sync failures
-      if (syncResult.syncFailed) {
-        stateJson.syncFailures = (stateJson.syncFailures ?? 0) + 1;
-        if (
-          stateJson.syncFailures >= SYNC_FAILURE_THRESHOLD &&
-          !new Set(stateJson.notified).has('pull')
-        ) {
-          await sendNotify('[Collie] git pull 连续失败');
-          stateJson.notified = [...stateJson.notified, 'pull'];
-        }
-        saveFollowState(root, stateJson);
-      } else {
-        // Sync succeeded: clear syncFailures and remove pull from notified
-        if ((stateJson.syncFailures ?? 0) > 0 || stateJson.notified.includes('pull')) {
-          stateJson.syncFailures = 0;
-          stateJson.notified = stateJson.notified.filter((k) => k !== 'pull');
-          saveFollowState(root, stateJson);
-        }
-      }
-
-      // SPEC 14.12 item 2: send pending queue-end notification when local is no longer ahead
-      if (stateJson.pendingReport !== undefined && !syncResult.localAhead) {
-        const pr = stateJson.pendingReport;
-        await sendNotify(
-          `[Collie] 队列 ${pr.qRunId} 结束：${pr.reason}，退出码 ${String(pr.exitCode)}。到对话里说「看」`,
-        );
-        stateJson.pendingReport = undefined;
-        saveFollowState(root, stateJson);
-      }
+      await doSyncCycle(root, stateJson, sendNotify);
     }
 
     // Read next.md
@@ -845,6 +863,9 @@ export async function follow(opts: FollowOpts): Promise<number> {
       out(`action: ${action.action}${formatActionDetail(action)}\n`);
       return 0;
     }
+
+    // SPEC 16.30: print action each round
+    out(`follow: action=${action.action}\n`);
 
     // Execute action
     switch (action.action) {
