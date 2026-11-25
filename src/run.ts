@@ -166,6 +166,8 @@ export interface RunOutcome {
   evidence?: Evidence;
   /** Reviewer gaps from the verdict, available when the verdict parsed. */
   gaps?: readonly string[];
+  /** SPEC 16.31 (v046-b48): reviewer test_gaps from the verdict. */
+  testGaps?: readonly string[];
   /** SPEC 13.9: set when rule 9 fired due to an environment failure, not worker fault. */
   evidenceUnavailableCause?: string;
   /** SPEC 13.14: worker_stop_reason from run.finished, used by queue interrupt retry. */
@@ -2313,6 +2315,10 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       const truncatedGaps = verdict.ok
         ? verdict.value.gaps.slice(0, MAX_GAPS).map((g) => truncate(g, MAX_GAP_CHARS))
         : [];
+      // SPEC 16.31 (v046-b48): truncate test_gaps the same way as gaps.
+      const truncatedTestGaps = verdict.ok
+        ? (verdict.value.test_gaps ?? []).slice(0, MAX_GAPS).map((g) => truncate(g, MAX_GAP_CHARS))
+        : [];
       rec.record(
         'reviewer.verdict',
         verdict.ok
@@ -2320,6 +2326,8 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
               verdict: verdict.value.verdict,
               // SPEC 13.10: gaps is always present when verdict is parseable.
               gaps: truncatedGaps,
+              // SPEC 16.31 (v046-b48): test_gaps only when non-empty; omit when empty.
+              ...(truncatedTestGaps.length > 0 ? { test_gaps: truncatedTestGaps } : {}),
             }
           : { error: verdict.error },
       );
@@ -2338,6 +2346,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
     }[];
     let auditResult: 'match' | 'mismatch' | 'no_init' | undefined;
     let gaps: string[];
+    let testGaps: string[];
 
     if (outcome.skipped) {
       // Pre-arbitration already determined non-PASS; reviewer was not called.
@@ -2345,6 +2354,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       r2FailedAcceptance = outcome.r2FailedAcceptance;
       auditResult = undefined; // SPEC 16.29: no audit when reviewer skipped.
       gaps = []; // No reviewer, no gaps.
+      testGaps = []; // No reviewer, no test_gaps.
     } else {
       const { verdict } = outcome;
 
@@ -2385,6 +2395,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       });
 
       gaps = verdict.ok ? verdict.value.gaps : [];
+      testGaps = verdict.ok ? (verdict.value.test_gaps ?? []) : [];
     }
 
     // SPEC 13.18: recheck verdict commit CI after evidence collection.
@@ -2558,6 +2569,7 @@ export async function runBatch(ctx: RunContext): Promise<RunOutcome> {
       decision,
       evidence: collected.evidence,
       gaps,
+      testGaps,
       ...(evidenceUnavailableCause !== undefined ? { evidenceUnavailableCause } : {}),
       ...(auditResult !== undefined ? { auditResult } : {}),
     });
@@ -3292,6 +3304,7 @@ export async function runQueue(ctx: QueueContext): Promise<QueueOutcome> {
         depsDiffCount: outcome.evidence?.deps_diff.length ?? 0,
         specDiffLines: outcome.evidence?.spec_diff_lines ?? 0,
         gapsCount: outcome.gaps?.length ?? 0,
+        testGapsCount: outcome.testGaps?.length ?? 0,
       };
       const gate = gateDecision(gateInput);
 

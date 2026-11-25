@@ -12,6 +12,7 @@ function passingInput(): GateInput {
     depsDiffCount: 0,
     specDiffLines: 0,
     gapsCount: 0,
+    testGapsCount: 0,
   };
 }
 
@@ -68,6 +69,12 @@ describe('gateDecision (SPEC 12.3)', () => {
     const result = gateDecision({ ...passingInput(), gapsCount: 1 });
     expect(result.pass).toBe(false);
     expect(result.reasons).toContain('gaps');
+  });
+
+  it('fails with "test_gaps" when reviewer test gaps exist (v046-b48)', () => {
+    const result = gateDecision({ ...passingInput(), testGapsCount: 1 });
+    expect(result.pass).toBe(false);
+    expect(result.reasons).toContain('test_gaps');
   });
 
   it('collects multiple reasons when multiple conditions fail', () => {

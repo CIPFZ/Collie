@@ -777,4 +777,9 @@ describe('structural invariants (SPEC 3.2)', () => {
     const content = readFileSync(join(ROOT, 'src/run.ts'), 'utf8');
     expect(content).toContain('reviewer.skipped');
   });
+
+  it('src/gate.ts has the test_gaps condition (v046-b48)', () => {
+    const content = readFileSync(join(ROOT, 'src/gate.ts'), 'utf8');
+    expect(content).toContain("reasons.push('test_gaps')");
+  });
 });

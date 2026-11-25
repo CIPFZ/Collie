@@ -1,5 +1,5 @@
-// SPEC 12.3: gate decision — pure function that decides "continue or stop" after
-// a batch PASSes in --continue mode. The six conditions are self-contained:
+// SPEC 12.3 / 16.31: gate decision — pure function that decides "continue or stop" after
+// a batch PASSes in --continue mode. The seven conditions are self-contained:
 // zero external imports, no journal dependency, no side effects.
 
 /**
@@ -7,7 +7,7 @@
  * evidence, journal events, and verdict. The caller collects them; this function
  * only interprets them.
  *
- * SPEC 12.3 lists six conditions; the input carries exactly the data needed.
+ * SPEC 12.3 / 16.31 lists seven conditions; the input carries exactly the data needed.
  * (v04-b01: the duplicate "protected" condition was removed — spec_diff_lines
  * already covers all protected-path changes via evidence.ts PROTECTED_PATHS.)
  */
@@ -26,17 +26,19 @@ export interface GateInput {
   specDiffLines: number;
   /** Count of reviewer gaps (verdict.gaps.length). */
   gapsCount: number;
+  /** SPEC 16.31 (v046-b48): count of reviewer test_gaps (verdict.test_gaps.length). */
+  testGapsCount?: number;
 }
 
 export interface GateResult {
-  /** True when all six conditions are satisfied and the queue may continue. */
+  /** True when all seven conditions are satisfied and the queue may continue. */
   pass: boolean;
   /** Reason codes for each unsatisfied condition (SPEC 12.3 field names). */
   reasons: string[];
 }
 
 /**
- * SPEC 12.3: evaluates the six "auto-release" conditions after a PASS.
+ * SPEC 12.3 / 16.31: evaluates the seven "auto-release" conditions after a PASS.
  *
  * Conditions (all must hold for pass=true):
  *   1. No verdict.downgraded in this batch          -> 'downgraded'
@@ -45,6 +47,7 @@ export interface GateResult {
  *   4. deps_diff empty                              -> 'deps_diff'
  *   5. spec_diff_lines === 0                        -> 'spec_diff'
  *   6. reviewer gaps empty                          -> 'gaps'
+ *   7. reviewer test_gaps empty                     -> 'test_gaps'
  */
 export function gateDecision(input: GateInput): GateResult {
   const reasons: string[] = [];
@@ -66,6 +69,9 @@ export function gateDecision(input: GateInput): GateResult {
 
   // 6. reviewer gaps empty
   if (input.gapsCount > 0) reasons.push('gaps');
+
+  // 7. reviewer test_gaps empty (SPEC 16.31, v046-b48)
+  if ((input.testGapsCount ?? 0) > 0) reasons.push('test_gaps');
 
   return { pass: reasons.length === 0, reasons };
 }

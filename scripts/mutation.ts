@@ -55,7 +55,7 @@ export function testFilesFor(file: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Mutation list — 47 items (SPEC 15.1, v045-b13: rule 4 removed; v046-b07: test/acceptance; v046-b31: CI/lint/test config; v046-b40: backlog-archive)
+// Mutation list — 48 items (SPEC 15.1, v045-b13: rule 4 removed; v046-b07: test/acceptance; v046-b31: CI/lint/test config; v046-b40: backlog-archive; v046-b48: gate-test-gaps)
 // ---------------------------------------------------------------------------
 
 export const MUTATIONS: MutationItem[] = [
@@ -268,6 +268,12 @@ export const MUTATIONS: MutationItem[] = [
     file: 'src/gate.ts',
     original: "if (input.gapsCount > 0) reasons.push('gaps');",
     replacement: '// deleted: gaps check',
+  },
+  {
+    name: 'gate-test-gaps',
+    file: 'src/gate.ts',
+    original: "if ((input.testGapsCount ?? 0) > 0) reasons.push('test_gaps');",
+    replacement: '// deleted: test_gaps check',
   },
   {
     name: 'gate-pass-always',

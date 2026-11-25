@@ -470,6 +470,8 @@ export const VerdictSchema = z.strictObject({
   // SPEC 3.5 does not specify item shapes; v045-b13: made optional (defaults to []).
   claim_mismatches: z.array(JsonValueSchema).optional().default([]),
   gaps: z.array(z.string()),
+  /** SPEC 16.31 (v046-b48): test gaps from reviewer; absent or empty = no test gap. */
+  test_gaps: z.array(z.string()).optional(),
   /** Non-empty means PASS with conditions (SPEC 3.5). */
   conditions: z.array(z.string()).optional(),
   reason: z.string(),
