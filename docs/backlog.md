@@ -101,7 +101,7 @@
 | 108 | v046-b44 | follow 超时之前先同步，每圈打印一行（带情形） | v046-b43 | passed |
 | 109 | v046-b45 | why 认得被跳过的 reviewer；重跑任务书的「声称不符」不再渲染成空（带情形） | v046-b43 | passed |
 | 110 | v046-b46 | 把 R2 的取证结果交给 reviewer，它输出里的证据一块改成可选（需求审查第 2a 批，带情形） | v046-b43 | passed |
-| 111 | v046-b47 | reviewer 的提示词：拿到取证结果时不再要求重跑验收命令（带情形） | v046-b46 | pending |
+| 111 | v046-b47 | reviewer 的提示词：拿到取证结果时不再要求重跑验收命令（带情形） | v046-b46 | passed |
 | 112 | v046-b48 | reviewer 的结论多一栏 test_gaps：通过但有测试缺口时队列停下（需求审查第 2b 批，带情形） | v046-b46 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
