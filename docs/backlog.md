@@ -39,12 +39,13 @@
 > R1 签发自查（v046-b40 后，SPEC 14.41）：情形只写了「被拒绝的」时，补一条「被接受的」；[新] 情形里不夹「输出是合法 JSON」这类现在就成立的话；
 > R1 签发自查（v046-b43 签发时）：[新] 情形里先想清楚现有代码在这个脚本下会怎样失败；「退出码是几」「被调用了几次」这类在出错的路上也可能碰巧成立的期望，放进 [保持] 或换一种现在一定不成立的写法。
 > R1 签发自查（v046-b43 后，SPEC 14.43）：预计要动 5 个以上旧测试文件的批次单独成批，条目里不再带别的事（b43 的 worker 第 1 次用满了 60 分钟墙钟）；每批只做一件事。
+> R1 签发自查（v046-b46 后，SPEC 14.44、16.31）：计划里写「某批通过后 R1 改某个角色的手册」之前，先读代码里拼给那个角色的提示词；手册与提示词说法相反时要一起换（手册一改就生效，提示词跟固定版本走）。
 > 要测试 agent 往沙箱配置里加一个键时，模板里不能有同名的真键（实现之后会重复）；写进规格的自查办法，先确认用到的命令出错时会报错。
 > 条目里要 worker 一定做到的事写成「必须」，并在验收里放一条能判定的命令，不写「能……就……」。
 > 情形要用到现有类型上还没有的字段时，在「接口」里写明；「接口」里点出可以照着搭的现有测试文件。
 
 更新时间：2026-11-17
-当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；v046-b30、b31、b32 已通过（SPEC 14.36）；v046-b33、b34 已通过（SPEC 14.37）；v046-b35、b36 已通过（SPEC 14.38）；v046-b37 是 `blocked`（代码采纳，补测试的是 v046-b39，SPEC 14.39）；v046-b39、b38 已通过（SPEC 14.40）；v046-b40 已通过，最早的 63 个批次已归档到 `docs/backlog-archive.md`（SPEC 14.41）；v046-b41、b42 已通过（SPEC 14.42）；v046-b43 已通过（SPEC 14.43）；队列从 v046-b44 起，固定版本 `5742906`，队列由 `collie follow` 跑；本项目配置的全局命令里有变异检查，每次取证都跑
+当前版本：v0.4 已于 2026-11-16 记为收口（SPEC 13.24）；在做 SPEC 第 14 章「收掉操作员」与第 15 章，v045-b01 到 b10 已通过，v045-b11 是 `blocked`（代码已在 main 上，被拦的原因是 R2 的缺陷，见 SPEC 14.16）；所有者 2026-11-17 已裁定（SPEC 14.17）；v045-b12 到 b18 与 v046-b01 到 b16 已通过（SPEC 14.19~14.28）；v046-b08 是 `blocked`（代码已在 main 上，随 v046-b09 取证，见 SPEC 14.26）；v046-b17 是 `blocked`（两次因模型接口中断，改签为 v046-b20，见 SPEC 14.30）；v046-b18 到 b22、b24、b25、b27 已通过（SPEC 14.31~14.34；v046-b21 是第一个带情形的批次，v046-b25 是单批次重跑通过、状态格由 R1 改）；v046-b23 是 `blocked`（改签为 v046-b26）；v046-b26、b28、b29 已通过（SPEC 14.35）；v046-b30、b31、b32 已通过（SPEC 14.36）；v046-b33、b34 已通过（SPEC 14.37）；v046-b35、b36 已通过（SPEC 14.38）；v046-b37 是 `blocked`（代码采纳，补测试的是 v046-b39，SPEC 14.39）；v046-b39、b38 已通过（SPEC 14.40）；v046-b40 已通过，最早的 63 个批次已归档到 `docs/backlog-archive.md`（SPEC 14.41）；v046-b41、b42 已通过（SPEC 14.42）；v046-b43 已通过（SPEC 14.43）；v046-b44、b45、b46 已通过（SPEC 14.44）；队列从 v046-b47 起，固定版本 `fcfc76f`，队列由 `collie follow` 跑；本项目配置的全局命令里有变异检查，每次取证都跑
 配套：[SPEC.md](./SPEC.md) 第 7 章里程碑、第 8 章验收场景
 
 ---
@@ -100,6 +101,8 @@
 | 108 | v046-b44 | follow 超时之前先同步，每圈打印一行（带情形） | v046-b43 | passed |
 | 109 | v046-b45 | why 认得被跳过的 reviewer；重跑任务书的「声称不符」不再渲染成空（带情形） | v046-b43 | passed |
 | 110 | v046-b46 | 把 R2 的取证结果交给 reviewer，它输出里的证据一块改成可选（需求审查第 2a 批，带情形） | v046-b43 | passed |
+| 111 | v046-b47 | reviewer 的提示词：拿到取证结果时不再要求重跑验收命令（带情形） | v046-b46 | pending |
+| 112 | v046-b48 | reviewer 的结论多一栏 test_gaps：通过但有测试缺口时队列停下（需求审查第 2b 批，带情形） | v046-b46 | pending |
 
 状态取值限 `pending` / `running` / `passed` / `blocked`（SPEC 3.2 枚举）。
 本文件是批次的事实源，`task.md` 是其派生物；二者不一致时以本文件为准并重新签发 task。
@@ -2238,6 +2241,101 @@ v046-b43 之后，取证没过的运行不再拉起 reviewer。`why` 对这样�
 - 改动任何受保护路径（含 `AGENT-reviewer.md`：手册由 R1 之后改）；改动 `src/arbiter.ts`、`src/gate.ts`、`src/view.ts`、`src/runner/`、`src/roles/worker.ts`、`src/roles/tester.ts`
 - 把 worker 的汇报、`claims` 或它们的任何一部分放进 reviewer 的输入或提示词；让 R2 读 reviewer 结论里的 `evidence`
 - 改任何一条规则的判定、门禁的条件、事件与它们的字段；改提示词里别的小节
+- 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b47 reviewer 的提示词：拿到取证结果时不再要求重跑验收命令（带情形）
+
+优先级：111　依赖：v046-b46
+
+v046-b46 之后 reviewer 的提示词里有了「R2 的取证结果」一节，可「验收命令」一节仍写着「逐条原样实跑」，它照样把 R2 已经跑过的命令再跑一遍（SPEC 14.44）。
+这一批只改提示词里的两处说明文字。手册由 R1 之后改。按新流程走：下面的「情形」先由测试 agent 写成验收测试，放在 `test/acceptance/v046-b47/`；你只写实现，不能改那个目录。
+
+情形：
+- S1 [新] `buildReviewerPrompt` 的输入带 `evidence`（各字段填合法的值）：返回的提示词里没有「逐条原样实跑」，有一行恰好是 `以下命令 R2 已经实跑过，结果在下面「R2 的取证结果」一节，不用重跑。`
+- S2 [新] 同样的输入：提示词里有「JSON 块里不要写」
+- S3 [新] 沙箱默认配置，假 worker 如实，假 reviewer 判 PASS，单批次跑一次：假运行器第 2 次被调用（角色是 reviewer）时拿到的提示词里没有「逐条原样实跑」
+- K1 [保持] `buildReviewerPrompt` 的输入不带 `evidence`：提示词里有「逐条原样实跑」，没有「R2 已经实跑过」，没有「JSON 块里不要写」
+- K2 [保持] 输入带 `evidence`，`acceptance` 里有一条 `cmd` 为 `npm test -- test/x.test.ts` 的命令：提示词里有这条命令的原文，有一行恰好是 `## 验收命令`，有一行恰好是 `## R2 的取证结果`
+- K3 [保持] S3 那一次运行：退出码 0；假运行器被调用的先后是 worker、reviewer
+
+接口：
+- `src/roles/reviewer.ts` 已有的导出 `buildReviewerPrompt(input)` 与类型 `ReviewerInput`（`batch_id`、`base_sha`、`head_sha`、`items`、`acceptance`、`spec_paths`，以及可选的 `evidence`）；各项怎么填合法的值，照 `test/acceptance/v046-b46/new.test.ts`
+- 沙箱用 `test/support/sandbox.ts` 导出的 `Sandbox`、`workerScene`、`fooledReviewerScene`、`honestClaims`；假运行器 `FakeRunner` 的 `calls` 每项有 `role` 与 `prompt`
+
+条目：
+1. 读 SPEC 16.31 的「提示词（v046-b47）」一段。`src/roles/reviewer.ts` 的 `buildReviewerPrompt`：输入带 `evidence` 时，「验收命令」一节标题下面那两行说明换成 SPEC 16.31 代码块里的两行，「输出」一节末尾多一行 ``JSON 块里不要写 `evidence`：证据以 R2 的取证结果为准。``
+   命令清单与别的小节不变。输入不带 `evidence` 时，提示词与现在逐字节相同。
+2. 不改别的文件。R1 查过：没有现有测试（含各批次的验收测试）断言「逐条原样实跑」这几个字；`test/acceptance/v046-b46/` 断言的是「R2 的取证结果」一节，不受影响。已有断言一条都不改。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/roles/reviewer.ts`。`test/acceptance/` 下的文件你不能改：你认为某条验收测试写错了，停下，照 `AGENT-worker.md` 第 5 节在汇报里写明并列进 `disputed_tests`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过（含各批次的验收测试） | `npm test` | exit 0 |
+| 本批次的验收测试通过 | `npm test -- test/acceptance/v046-b47` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `AGENT-reviewer.md`）；改动 `src/roles/reviewer.ts` 之外的 `src/` 文件
+- 把 worker 的汇报、`claims` 或它们的任何一部分放进提示词；改提示词里别的小节或命令清单的写法
+- 为了让测试过而删除或跳过任何测试；改写任何已有断言
+- 为了让验收命令通过而改注释或字面（铁律 26）
+- 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
+
+## v046-b48 reviewer 的结论多一栏 test_gaps：通过但有测试缺口时队列停下（需求审查第 2b 批，带情形）
+
+优先级：112　依赖：v046-b46
+
+分工改造第 5 步「需求审查」的第 2b 批（SPEC 16.24 第 ④ 点，所有者 2026-11-24 同意）。reviewer 现在把「验收测试守不住」这类发现写在结论的 `reason` 文字里，R2 读不到，队列照常往下走。
+这一批给结论加一栏 `test_gaps`：结论是 PASS 而这一栏非空时，批次照常通过，队列停下等 R1。仲裁不改。按新流程走：下面的「情形」先由测试 agent 写成验收测试，放在 `test/acceptance/v046-b48/`；你只写实现，不能改那个目录。
+
+情形：
+- S1 [新] `VerdictSchema` 解析一份其余都合法、另带 `test_gaps` 的结论，`test_gaps` 是只有一条 `S2 的用例只断言了不报错` 的数组：解析成功，结果里这一条原样在
+- S2 [新] `gateDecision` 的输入其余各项都是能放行的值、`testGapsCount` 是 1：`pass` 是 false，`reasons` 恰好是只含 `test_gaps` 的数组
+- S3 [新] 沙箱里把批次的状态改成 pending 并提交；假 worker 如实；假 reviewer 的结论 `verdict` 是 `PASS`、`gaps` 是空数组、`test_gaps` 有一条 `S2 的用例只断言了不报错`；队列模式跑一次（`run --continue`）：退出码 30；`docs/backlog.md` 里这个批次的状态是 `passed`；队列 journal 里有 `queue.paused` 事件，它的 `reasons` 含 `test_gaps`
+- S4 [新] S3 那一次运行：批次那次运行的 journal 里 `reviewer.verdict` 事件的 `test_gaps` 是只含那一条的数组
+- K1 [保持] `VerdictSchema` 解析一份不带 `test_gaps` 的合法结论：解析成功
+- K2 [保持] `gateDecision` 的输入各项都是能放行的值、`testGapsCount` 是 0：`pass` 是 true，`reasons` 是空数组
+- K3 [保持] 同 S3，但假 reviewer 的结论不带 `test_gaps`：退出码 0；队列 journal 里没有 `queue.paused`；`reviewer.verdict` 事件没有 `test_gaps` 这个键
+- K4 [保持] 同 S3，但假 reviewer 的结论不带 `test_gaps`、`gaps` 有一条 `少了一个边界`：退出码 30；`queue.paused` 的 `reasons` 含 `gaps`，不含 `test_gaps`
+
+接口：
+- `src/schema/index.ts` 已有的导出 `VerdictSchema`（用 `safeParse`；现在是严格对象，带不认得的键会被拒绝）；一份合法的结论怎么写，照 `test/support/sandbox.ts` 的 `fooledReviewerScene`。要让假 reviewer 回一份带 `test_gaps` 或带 `gaps` 的结论，在测试文件里自己写一个场景
+- `src/gate.ts` 已有的导出 `gateDecision(input)` 与类型 `GateInput`（`downgraded`、`claimMismatches`、`ciConclusion`、`ciBranchMatched`、`depsDiffCount`、`specDiffLines`、`gapsCount`）；能放行的值照 `test/gate.test.ts` 的 `passingInput()`。本批次起多一项 `testGapsCount`，实现之前类型上还没有它
+- 队列模式的搭法（把沙箱 backlog 里批次的状态改成 pending 并提交、`box.cli(['run', '--continue'], runner)`、读队列 journal）照 `test/acceptance/v046-b40/new.test.ts` 的 S4 与 `test/scenario-l.test.ts` 的 group a（那里就是「PASS 带 gaps，队列停下，退出码 30」）
+- `reviewer.verdict` 事件本批次起在 `test_gaps` 非空时多带这个键；读事件用 `Sandbox` 的 `events()`
+
+条目：
+1. 读 SPEC 16.31 的「`test_gaps`（v046-b48）」一段（方案在 16.24 第 ④ 点）。`src/schema/index.ts`：`VerdictSchema` 加可选的 `test_gaps`（字符串数组，不写就是空数组，写法照 `claim_mismatches`）。
+   `src/run.ts`：`reviewer.verdict` 事件在 `test_gaps` 非空时带上它（条数与每条长度的上限同 `gaps`），为空时不带这个键；把条数传给放行判定。
+2. `src/gate.ts`：`GateInput` 加 `testGapsCount`，大于 0 时原因是 `test_gaps`，排在 `gaps` 之后。`scripts/mutation.ts` 的清单**必须**加一项 `gate-test-gaps`（写法照 `gate-gaps`），共 48 项，清单上方注释里的项数相应改。
+   `test/invariants.test.ts` 加一条，用例名 `src/gate.ts has the test_gaps condition (v046-b48)`。
+3. 点名允许改写的旧用例，在「偏离或疑问」里列出：`test/gate.test.ts` 的 `passingInput()` 夹具加一行 `testGapsCount: 0`；这个文件里可以再加一条新用例守这一项，已有的断言不改。
+   不许变的：`test_gaps` 不参与仲裁，不进重跑的 task；单批次模式不受影响；`gaps` 的行为不变。R1 查过：现有的假 reviewer 的结论都不带 `test_gaps`，加一个可选字段不影响它们；`test/scenario-l.test.ts` 的 group a 断言的是 `reasons` 含 `gaps`，不受影响。
+   别的现有用例因为本批次的新行为而失败时：只许做新行为直接要求的最小改动（往序列里加事件、个数加一这一类），不许删断言、不许把断言改松，在「偏离或疑问」里逐条列出原断言与现断言；拿不准是不是新行为直接要求的，才停下不改，写明是哪一条。
+
+本批次只改 `src/schema/index.ts`、`src/run.ts`、`src/gate.ts`、`scripts/mutation.ts`、`test/gate.test.ts`、`test/invariants.test.ts`。`test/acceptance/` 下的文件你不能改：你认为某条验收测试写错了，停下，照 `AGENT-worker.md` 第 5 节在汇报里写明并列进 `disputed_tests`。
+
+验收标准：
+
+| 说明 | 命令 | 期望 |
+|---|---|---|
+| 代码规范零错误 | `npm run lint` | exit 0 |
+| 类型检查零错误 | `npm run typecheck` | exit 0 |
+| 全部测试通过（含各批次的验收测试） | `npm test` | exit 0 |
+| 本批次的验收测试通过 | `npm test -- test/acceptance/v046-b48` | exit 0 |
+| 变异清单里有新的一项 | `grep -qF "gate-test-gaps" scripts/mutation.ts` | exit 0 |
+| 不变量同步 | `grep -qF "has the test_gaps condition (v046-b48)" test/invariants.test.ts` | exit 0 |
+
+额外禁止：
+- 改动任何受保护路径（含 `AGENT-reviewer.md`）；改动 `src/arbiter.ts`、`src/roles/`、`src/view.ts`、`src/follow.ts`、`src/runner/`
+- 让 `test_gaps` 影响仲裁的结论、返工次数的计数或重跑的 task；改放行判定里已有的六项
 - 为了让测试过而删除或跳过任何测试；改写条目 3 点名之外的任何已有断言
 - 为了让验收命令通过而改注释或字面（铁律 26）
 - 测试里拉起真实的 runner 或真实网络请求；用到机器的 git 全局配置；新增依赖
