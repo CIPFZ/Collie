@@ -133,8 +133,15 @@ export function buildReviewerPrompt(input: ReviewerInput): string {
     [
       '## 验收命令',
       '',
-      '以下命令已是 `parseBacklog` 解析后的形式（SPEC 3.2 唯一执行形式），逐条原样实跑，',
-      '记录真实退出码与输出；不要从任何 `.md` 源码复制命令。',
+      ...(data.evidence !== undefined
+        ? [
+            '以下命令 R2 已经实跑过，结果在下面「R2 的取证结果」一节，不用重跑。',
+            '要看某条命令的完整输出、或者做别的核对时可以再跑：命令取这里的形式，不要从任何 `.md` 源码复制。',
+          ]
+        : [
+            '以下命令已是 `parseBacklog` 解析后的形式（SPEC 3.2 唯一执行形式），逐条原样实跑，',
+            '记录真实退出码与输出；不要从任何 `.md` 源码复制命令。',
+          ]),
       '',
       ...data.acceptance.map(
         (a, i) =>
@@ -149,6 +156,9 @@ export function buildReviewerPrompt(input: ReviewerInput): string {
       '',
       '你没有写文件的工具。把完整裁决（推理正文 + 尾部 ```json 块，字段见 SPEC 3.5）',
       `作为最终回复输出，由 R2 落盘到 \`.collie/batches/${data.batch_id}/${VERDICT_FILE_NAME}\`。`,
+      ...(data.evidence !== undefined
+        ? ['JSON 块里不要写 `evidence`：证据以 R2 的取证结果为准。']
+        : []),
     ].join('\n'),
   ];
   return `${sections.join('\n\n')}\n`;
