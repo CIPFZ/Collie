@@ -2631,4 +2631,23 @@ v01-b01，提交 `134ea31` `3f4992d` `e5c7d3f` `e99fde3`（HEAD `e99fde3`）：
 - 受保护文件改动行数：0
 - 依赖变化：无
 - worker 退出码：0
+
+### v046-b48 · r-20261125045724 · PASS
+
+- 时间：2026-11-25T05:42:08.763Z
+- 裁定：规则 10，All 6 acceptance commands pass. Implementation correctly adds test_gaps to VerdictSchema (optional string array), reviewer.verdict event (only when non-empty), and gateDecision (condition 7 after gaps). Mutation list updated to 48 items. Invariant test added. No protected or forbidden files modified. No dependency changes. test_gaps does not participate in arbitration, rework count, or retried task. Minor note: schema uses .optional() without .default([]) unlike claim_mismatches, but all consumers use ?? [] so behavior is equivalent. CI 以 R2 取证为准。
+- 提交：`59aee0d`
+- 验收命令：7/7 通过
+  - `npm run lint` → exit 0，All matched files use Prettier code style!
+  - `npm run typecheck` → exit 0，> tsc -p tsconfig.json
+  - `npm test` → exit 0，1649 passed, 0 failed
+  - `npm run test:mutation` → exit 0，mutation: caught 48 survived 0 invalid 0 timeout 0 stale 0
+  - `npm test -- test/acceptance/v046-b48` → exit 0，13 passed, 0 failed
+  - `grep -qF "gate-test-gaps" scripts/mutation.ts` → exit 0，exit 0
+  - `grep -qF "has the test_gaps condition (v046-b48)" test/invariants.test.ts` → exit 0，exit 0
+- 已推送：是
+- CI：success，监听分支一致，https://github.com/CIPFZ/Collie/actions/runs/45552871212
+- 受保护文件改动行数：0
+- 依赖变化：无
+- worker 退出码：0
 <!-- collie:runs:end -->
